@@ -51,7 +51,7 @@ function App(){
  const [tradeDetailsOpen,setTradeDetailsOpen]=useState(false),[focusTrade,setFocusTrade]=useState<Trade|null>(null);
  const availableAssets=marketAvailability.map(market=>market.asset),assetOptions=availableAssets.length?availableAssets:fallbackAssets,selectedMarket=marketAvailability.find(market=>market.asset===asset),executionTimeframe=(()=>{try{return parseStrategyConfig(code).executionTimeframe}catch{return selectedMarket?.timeframes[0]||'m1'}})(),availableDates=selectedMarket?.datesByTimeframe?.[executionTimeframe]||selectedMarket?.dates||[];
  const activeProfile=(()=>{try{return cloudClient?.getProfile()??null}catch{return null}})(),profileLabel=activeProfile?.displayName||activeProfile?.email||'Profile';
- const chatScrollRef=useRef<HTMLDivElement>(null),chatInputRef=useRef<HTMLTextAreaElement>(null),chartRef=useRef<HTMLDivElement>(null),chartApiRef=useRef<any>(null),editorRef=useRef<any>(null),abortRef=useRef<AbortController|null>(null),inputSignatureRef=useRef(''),restoreResultRef=useRef(''),botLoadRef=useRef(''),hydratedWorkspaceRef=useRef(''),logsRef=useRef<string[]>([]);
+ const chatScrollRef=useRef<HTMLDivElement>(null),chatInputRef=useRef<HTMLTextAreaElement>(null),chartRef=useRef<HTMLDivElement>(null),chartApiRef=useRef<any>(null),editorRef=useRef<any>(null),abortRef=useRef<AbortController|null>(null),inputSignatureRef=useRef(''),restoreResultRef=useRef(''),botLoadRef=useRef(''),hydratedWorkspaceRef=useRef(''),startupRestoreRef=useRef(''),logsRef=useRef<string[]>([]);
  inputSignatureRef.current=JSON.stringify([code,asset,from,to]);
  const userBotRequest=async<T,>(path:string,method:'GET'|'PUT'|'POST'|'PATCH'|'DELETE',body?:unknown):Promise<T>=>{if(!cloudClient)throw new Error('Sign in to use cloud robot storage.');const token=await cloudClient.getIdToken();let response:Response;try{response=await fetch(path,{method,headers:{Authorization:`Bearer ${token}`,...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})})}catch{throw new Error('Cloud robot storage is unreachable. Retry when the connection is available.')}return readApiJson<T>(response,'Robot storage')};
  const hydrateAccountDraft=(uid:string,preserveCurrent=false)=>{if(preserveCurrent)return;const draft=readDraft(`trading-vibes:draft:${uid}`);setCreated(Boolean(draft.created));setDraftId(draft.id||makeBotId());setName(draft.name||'');setAsset(draft.asset||'XAUUSD');setPrompt(draft.prompt||'');setCode(draft.code??starterCode);setView(draft.view||'code');setChat(draft.chat||[]);setResult(null);setSelectedTrade(null);setChatHydrated(true);setCodeHydrated(Boolean(draft.code?.trim()));setCreateError(draft.created&&!draft.code?.trim()?'Strategy generation did not finish. Retry to write this robot’s script.':'')};
@@ -159,7 +159,7 @@ ${appContext}`;
  }
  const openDemo=(bot:DemoBot)=>{botLoadRef.current=bot.id;hydratedWorkspaceRef.current=bot.id;setDraftId(bot.id);setName(bot.name);setAsset(bot.asset);setPrompt(bot.prompt);setCode(bot.code);setCodeHydrated(true);setCreated(true);setChatHydrated(true);setScreen('workspace');setResult(null);setChat([{role:'assistant',content:`${bot.description} This example is ready to customize and backtest.`}]);setSelectedTrade(null);setView('chart');setTab('chart');void backtest({code:bot.code,asset:bot.asset,name:bot.name})};
  const openCloudBot=async(bot:CloudBot)=>{
-  botLoadRef.current=bot.id;hydratedWorkspaceRef.current='';setDraftId(bot.id);setName(bot.name);setAsset(bot.asset);setPrompt(bot.prompt);setCode(bot.code||starterCode);setCodeHydrated(false);setCreated(true);setScreen('workspace');setResult(null);setLastBacktestCode('');setSelectedTrade(null);setVersions([]);setChatHydrated(false);setChat([{role:'assistant',content:`Loading your saved ${bot.asset} robot…`}]);setView('chart');setTab('chart');
+  startupRestoreRef.current=`${activeProfile?.uid}:${bot.id}`;botLoadRef.current=bot.id;hydratedWorkspaceRef.current='';setDraftId(bot.id);setName(bot.name);setAsset(bot.asset);setPrompt(bot.prompt);setCode(bot.code||starterCode);setCodeHydrated(false);setCreated(true);setScreen('workspace');setResult(null);setLastBacktestCode('');setSelectedTrade(null);setVersions([]);setChatHydrated(false);setChat([{role:'assistant',content:`Loading your saved ${bot.asset} robot…`}]);setView('chart');setTab('chart');
   if(!cloudClient){setChatHydrated(true);setCodeHydrated(true);return}
   const [savedCode,savedChat,savedRun]=await Promise.allSettled([
    bot.storageKey?userBotRequest<{code:string}>(`/api/user-bots/${encodeURIComponent(bot.id)}/current`,'GET'):Promise.resolve({code:bot.code||starterCode}),
@@ -178,6 +178,13 @@ ${appContext}`;
   }
   hydratedWorkspaceRef.current=bot.id;setChatHydrated(true);setCodeHydrated(savedCode.status==='fulfilled'||!bot.storageKey);
  };
+ useEffect(()=>{
+  if(!authReady||!cloudClient||screen!=='workspace'||!created||hydratedWorkspaceRef.current===draftId)return;
+  const key=`${cloudClient.getProfile()?.uid}:${draftId}`;
+  if(startupRestoreRef.current===key)return;
+  const savedBot=cloudBots.find(bot=>bot.id===draftId);
+  if(savedBot)void openCloudBot(savedBot);
+ },[authReady,cloudClient,screen,created,draftId,cloudBots]);
  const retryFirebase=()=>{setCloudClient(null);setCloudRetry(value=>value+1)};
  const renameRobot=async(bot:CloudBot,nextName:string,localOnly:boolean)=>{
   if(!cloudClient)throw new Error('Sign in to rename your robot.');
