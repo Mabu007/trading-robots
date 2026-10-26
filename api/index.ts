@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 export const config = { maxDuration: 60 };
-const loadApp = () => import('../server/index').then(module => module.default);
+const loadApp = () => import('../server/index.ts').then(module => module.default);
 
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
   // The rewrite carries the original API path in a query parameter. Restore it

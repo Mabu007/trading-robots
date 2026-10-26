@@ -1,4 +1,7 @@
 {
+  "functions": {
+    "api/index.ts": { "includeFiles": "server/**", "maxDuration": 60 }
+  },
   "rewrites": [
     { "source": "/api/:apiPath*", "destination": "/api/index?apiPath=:apiPath*" },
     { "source": "/(.*)", "destination": "/index.html" }

@@ -1,8 +1,8 @@
 import 'dotenv/config';
 import express from 'express';
 import { createPublicKey, randomUUID, verify as verifySignature } from 'node:crypto';
-import { deleteR2Object, getR2Config, listR2Objects, readR2Object, writeR2Object } from './r2';
-import { candleObjectKey, countObservedGaps, intervalMs, isAsset, isTimeframe, mapConcurrent, normalizeCandles, parseCandleCsv, utcDateKey, type MarketAsset, type MarketCandle, type MarketTimeframe } from './market-data';
+import { deleteR2Object, getR2Config, listR2Objects, readR2Object, writeR2Object } from './r2.ts';
+import { candleObjectKey, countObservedGaps, intervalMs, isAsset, isTimeframe, mapConcurrent, normalizeCandles, parseCandleCsv, utcDateKey, type MarketAsset, type MarketCandle, type MarketTimeframe } from './market-data.ts';
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
