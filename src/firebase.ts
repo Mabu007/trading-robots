@@ -15,6 +15,7 @@ export type CloudClient = {
   listBots: () => Promise<CloudBot[]>;
   getIdToken: () => Promise<string>;
   saveBot: (bot: CloudBot, storageKey: string) => Promise<void>;
+  deleteBot: (botId: string) => Promise<void>;
   loadChats: (botId: string) => Promise<any[]>;
   saveChats: (botId: string, chat: any[]) => Promise<void>;
   listVersions: (botId: string) => Promise<BotVersion[]>;
@@ -90,6 +91,20 @@ export function connectFirebase(): Promise<CloudClient | null> {
           code: storeSdk.deleteField(),
         };
         await storeSdk.setDoc(reference, payload, { merge: true });
+      },
+      async deleteBot(botId: string) {
+        const uid = await currentUserId();
+        const reference = storeSdk.doc(db, 'users', uid, 'bots', botId);
+        const versions = await storeSdk.getDocs(storeSdk.collection(reference, 'versions'));
+        for (let i = 0; i < versions.docs.length; i += 400) {
+          const chunk = storeSdk.writeBatch(db);
+          versions.docs.slice(i, i + 400).forEach((version: any) => chunk.delete(version.ref));
+          await chunk.commit();
+        }
+        const batch = storeSdk.writeBatch(db);
+        batch.delete(storeSdk.doc(reference, 'chats', 'current'));
+        batch.delete(reference);
+        await batch.commit();
       },
       async loadChats(botId: string) {
         const reference = storeSdk.doc(db, 'users', await currentUserId(), 'bots', botId, 'chats', 'current');

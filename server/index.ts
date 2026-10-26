@@ -266,6 +266,23 @@ app.get('/api/user-bots/:botId/current', async (req, res) => {
   }
 });
 
+app.delete('/api/user-bots/:botId', async (req, res) => {
+  const uid = await firebaseUidOrReply(req, res); if (!uid) return;
+  const { botId } = req.params;
+  if (!validBotId(botId)) return res.status(400).json({ error: 'Robot ID is invalid.' });
+  if (!getR2Config()) return res.status(503).json({ error: 'Robot storage is not configured.' });
+  try {
+    const prefix = `${userBotRoot(uid, botId)}/`;
+    const keys = await listR2Objects(prefix, 1001);
+    if (keys.length > 1000) return res.status(409).json({ error: 'This robot has too many stored versions to delete safely. Contact support.' });
+    for (let i = 0; i < keys.length; i += 10) await Promise.all(keys.slice(i, i + 10).map(deleteR2Object));
+    return res.json({ deleted: true });
+  } catch (error) {
+    console.error('Robot deletion failed', { botId, error });
+    return res.status(502).json({ error: 'Could not delete all robot files. Retry the deletion.' });
+  }
+});
+
 app.put('/api/user-bots/:botId/backtest', async (req, res) => {
   const uid = await firebaseUidOrReply(req, res); if (!uid) return;
   const { botId } = req.params;
@@ -591,6 +608,8 @@ app.post('/api/ai', async (req, res) => {
   }
   const selectedAsset = req.body?.asset;
   if (selectedAsset !== undefined && !isAsset(selectedAsset)) return res.status(400).json({ error: 'Choose a supported instrument for AI context.' });
+  const requestedTokens = Number(req.body?.maxTokens);
+  const maxTokens = Number.isInteger(requestedTokens) ? Math.max(200, Math.min(6000, requestedTokens)) : 1600;
 
   const now = Date.now();
   const clientId = uid;
@@ -616,7 +635,7 @@ app.post('/api/ai', async (req, res) => {
   res.on('close', () => { if (!res.writableEnded) { clientAbort.abort(); void upstreamReader?.cancel().catch(() => undefined); } });
   try {
     let marketContext = '';
-    if (selectedAsset === 'XAUUSD') {
+    if (selectedAsset === 'XAUUSD' && req.body?.includeMarketContext === true) {
       let contextTimer: ReturnType<typeof setTimeout> | undefined;
       marketContext = await Promise.race([
         xauusdAiContext(),
@@ -624,11 +643,11 @@ app.post('/api/ai', async (req, res) => {
       ]);
       if (contextTimer) clearTimeout(contextTimer);
     }
-    const enrichedMessages = selectedAsset === 'XAUUSD'
+    const enrichedMessages = selectedAsset === 'XAUUSD' && req.body?.includeMarketContext === true
       ? [{ role: 'system', content: `Use the following available historical price data when writing XAUUSD code. Treat it as historical reference; code must still operate on runtime ctx candles, never hard-code a guessed live price.\n\n${marketContext}` }, ...messages]
       : messages;
     const requestModel = (targetModel: string) => requestOpenRouter(
-      JSON.stringify({ model: targetModel, messages: enrichedMessages, temperature: 0.2, max_tokens: 6000, stream: true }),
+      JSON.stringify({ model: targetModel, messages: enrichedMessages, temperature: 0.2, max_tokens: maxTokens, stream: true }),
       apiKey,
       AbortSignal.any([clientAbort.signal, AbortSignal.timeout(45_000)]),
     );

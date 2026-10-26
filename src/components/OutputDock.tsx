@@ -14,6 +14,7 @@ type Props = {
   logs: string[];
   result: Result | null;
   selectedTrade: Trade | null;
+  showTradeModal?: boolean;
   busy: string;
   active: OutputTab;
   collapsed: boolean;
@@ -111,7 +112,7 @@ function TradesPanel({ props }: { props: Props }) {
         </div>;
       }) : <div className="output-empty"><ListChecks size={18}/><strong>No trades in this period</strong><span>Try a different date range or strategy.</span></div>}
     </div>
-    {selected && <div className="trade-modal-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) props.onClearSelectedTrade(); }}>
+    {selected && props.showTradeModal && <div className="trade-modal-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) props.onClearSelectedTrade(); }}>
       <section className="trade-modal" role="dialog" aria-modal="true" aria-labelledby="trade-modal-title">
         <header className="trade-modal-head"><div><span className="output-eyebrow">TRADE AUDIT</span><h2 id="trade-modal-title">{createTradeId(props.asset, props.result?.timeframe, selected)}</h2></div><button type="button" className="shadcn-icon-button" aria-label="Close trade details" onClick={props.onClearSelectedTrade}><X size={16}/></button></header>
         <div className="trade-audit-pills"><span className={selected.side === 'LONG' ? 'long' : 'short'}>{selected.side}</span><span>{selected.reason.toUpperCase()}</span><b className={selected.pnl >= 0 ? 'green' : 'red'}>{selected.pnl >= 0 ? '+' : ''}{selected.pnl.toFixed(2)}R</b></div>
@@ -160,11 +161,11 @@ export function OutputDock(props: Props) {
     return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
   }, [dragging]);
   useEffect(() => {
-    if (!props.selectedTrade) return;
+    if (!props.selectedTrade || !props.showTradeModal) return;
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') props.onClearSelectedTrade(); };
     window.addEventListener('keydown', closeOnEscape);
     return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [props.selectedTrade, props.onClearSelectedTrade]);
+  }, [props.selectedTrade, props.showTradeModal, props.onClearSelectedTrade]);
   const tabs: { id: OutputTab; label: string; count?: number; icon: typeof TerminalIcon }[] = [
     { id: 'terminal', label: 'Terminal', count: props.logs.length, icon: TerminalIcon },
     { id: 'results', label: 'Results', count: props.result ? 1 : 0, icon: Activity },

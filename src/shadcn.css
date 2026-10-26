@@ -572,3 +572,28 @@
  .profile-button span { display:none; }
  .create-brand .profile-button { margin-left:auto; }
 }
+
+/* Robot library actions and accessible confirmation. */
+.robot-card-open{display:flex;flex:1;flex-direction:column;align-items:flex-start;gap:10px;width:100%;padding:0;border:0;background:transparent;text-align:left}
+.robot-card-open:hover .robot-name{color:#f4d891}
+.robot-card-actions{display:flex;gap:5px;margin-left:auto}
+.robot-card-actions button{display:grid;place-items:center;width:30px;height:30px;border:1px solid #8f997044;border-radius:8px;background:#1b271c;color:#d4dfd0}
+.robot-card-actions button:hover,.robot-card-actions button:focus-visible{border-color:#d5b56c;color:#f6d384}
+.robot-card-actions button:last-child:hover{border-color:#e57777;color:#f39a9a}
+.robot-action-modal{width:min(420px,100%)}
+.robot-action-modal h2{margin:0 0 12px;font-size:19px;color:#f5ecd8}
+.robot-action-modal p{line-height:1.55;color:#b8c7b9}
+.robot-action-modal label{display:grid;gap:8px;color:#b8c7b9}
+.robot-action-modal input{width:100%;padding:10px;border:1px solid #8c9a7855;border-radius:8px;background:#101b15;color:#fff}
+.robot-action-buttons{display:flex;justify-content:flex-end;gap:9px;margin-top:20px}
+.robot-action-error{color:#f5a5a5!important}
+/* Keep the Strategy / Chart switch and code actions visible. */
+.workspace-head{display:flex!important;align-items:center;justify-content:space-between;gap:8px;min-height:48px}
+.workspace-tabs{min-width:0}.workspace-tabs button{white-space:nowrap}
+.message-content p{margin:0 0 8px}.message-content p:last-child{margin-bottom:0}
+.message-content h4{margin:12px 0 6px;color:#f3dfab;font-size:11px;letter-spacing:.02em}
+.message-content .chat-bullet{display:flex;gap:8px;margin:4px 0;line-height:1.55}
+.message-content .chat-bullet>span:first-child{color:#d6ba78}
+.message-content strong{color:#f3edce}.message-content code{background:#0a1510;padding:1px 4px;border-radius:4px;color:#c6e9c8}
+.message-content hr{border:0;border-top:1px solid #49604666;margin:10px 0}
+@media(max-width:640px){.mobile-top-tabs{display:none}.workspace-head{height:auto;min-height:45px;padding:5px 7px;flex-wrap:wrap}.workspace-tabs button{font-size:9px;padding:6px}.workspace-controls{margin-left:auto}.save-version-action span{display:none}.cloud-save-state{display:none}.robot-card-actions button{width:36px;height:36px}}
