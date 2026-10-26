@@ -1,9 +1,9 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import app from '../server/index';
 
 export const config = { maxDuration: 60 };
+const loadApp = () => import('../server/index').then(module => module.default);
 
-export default function handler(req: IncomingMessage, res: ServerResponse) {
+export default async function handler(req: IncomingMessage, res: ServerResponse) {
   // The rewrite carries the original API path in a query parameter. Restore it
   // before Express matches the same routes used by the local server.
   const url = new URL(req.url || '/', 'http://localhost');
@@ -15,5 +15,12 @@ export default function handler(req: IncomingMessage, res: ServerResponse) {
   }
   url.searchParams.delete('apiPath');
   req.url = `/api/${route}${url.search}`;
-  app(req, res);
+  try {
+    const app = await loadApp();
+    app(req, res);
+  } catch (error) {
+    console.error('API module failed to initialize', error);
+    res.writeHead(503, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'API module failed to initialize.', reason: error instanceof Error ? error.message : 'Unknown error' }));
+  }
 }
