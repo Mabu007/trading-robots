@@ -455,6 +455,11 @@ async function xauusdAiContext(): Promise<string> {
 
 app.post('/api/market-data/import', async (req, res) => {
   try {
+    // Imports overwrite shared historical prices. Only explicitly approved accounts may write them.
+    const allowed = (process.env.MARKET_DATA_IMPORT_UIDS || '').split(',').map(uid => uid.trim()).filter(Boolean);
+    if (!allowed.length) return res.status(503).json({ error: 'Market data imports are disabled. Configure MARKET_DATA_IMPORT_UIDS on the API server.' });
+    const uid = await firebaseUidOrReply(req, res); if (!uid) return;
+    if (!allowed.includes(uid)) return res.status(403).json({ error: 'This account cannot import shared market data.' });
     const { asset, timeframe, csv } = req.body ?? {};
     if (!isAsset(asset)) return res.status(400).json({ error: 'Choose a supported instrument before importing.' });
     if (!isTimeframe(timeframe)) return res.status(400).json({ error: 'Choose a supported timeframe before importing.' });
@@ -575,6 +580,7 @@ async function requestOpenRouter(body: string, apiKey: string, signal: AbortSign
 }
 
 app.post('/api/ai', async (req, res) => {
+  const uid = await firebaseUidOrReply(req, res); if (!uid) return;
   const apiKey = process.env.OPENROUTER_API_KEY?.trim();
   if (!apiKey) return res.status(503).json({ error: 'Set OPENROUTER_API_KEY in .env to enable AI generation.' });
   const messages = req.body?.messages;
@@ -587,7 +593,7 @@ app.post('/api/ai', async (req, res) => {
   if (selectedAsset !== undefined && !isAsset(selectedAsset)) return res.status(400).json({ error: 'Choose a supported instrument for AI context.' });
 
   const now = Date.now();
-  const clientId = req.ip || 'local';
+  const clientId = uid;
   const hit = aiHits.get(clientId);
   const current = !hit || now - hit.started >= 60_000 ? { started: now, count: 0 } : hit;
   if (current.count >= 12) return res.status(429).json({ error: 'AI request limit reached. Wait a minute and try again.' });
@@ -700,6 +706,4 @@ app.use((error: any, _req: express.Request, res: express.Response, _next: expres
   return res.status(500).json({ error: 'The API encountered an unexpected error. Check the server logs and retry.' });
 });
 
-const port = Number(process.env.API_PORT || 8787);
-if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error('API_PORT must be an integer between 1 and 65535.');
-app.listen(port, '127.0.0.1', () => console.log(`TradeFoundry API listening on 127.0.0.1:${port}`));
+export default app;
