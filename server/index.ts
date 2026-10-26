@@ -16,7 +16,7 @@ async function verifyFirebaseUser(authorization: string | undefined): Promise<st
   const projectId = process.env.FIREBASE_PROJECT_ID?.trim() || process.env.VITE_FIREBASE_PROJECT_ID?.trim();
   if (!projectId) throw new Error('Firebase project ID is not configured on the API server.');
   const token = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
-  if (!token) throw new Error('Sign in to save robot versions.');
+  if (!token) throw new Error('Sign in to use this feature.');
   const parts = token.split('.');
   if (parts.length !== 3) throw new Error('Firebase sign-in token is invalid.');
   const header = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8')) as { alg?: string; kid?: string };

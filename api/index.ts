@@ -21,6 +21,6 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
   } catch (error) {
     console.error('API module failed to initialize', error);
     res.writeHead(503, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'API module failed to initialize.', reason: error instanceof Error ? error.message : 'Unknown error' }));
+    res.end(JSON.stringify({ error: 'API module failed to initialize. Check the function logs.' }));
   }
 }
