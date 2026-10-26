@@ -1,0 +1,51 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId}/bots/{botId} {
+      function ownsBot() {
+        return request.auth != null && request.auth.uid == userId;
+      }
+      function validBot() {
+        return request.resource.data.keys().hasOnly(['name', 'asset', 'prompt', 'storage', 'code', 'lastBacktest', 'updatedAt'])
+          && request.resource.data.name is string
+          && request.resource.data.name.size() <= 64
+          && request.resource.data.asset in ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD']
+          && request.resource.data.prompt is string
+          && request.resource.data.prompt.size() <= 12000
+          && (!('code' in request.resource.data) || (request.resource.data.code is string && request.resource.data.code.size() <= 180000))
+          && (!('storage' in request.resource.data) || (request.resource.data.storage is map && request.resource.data.storage.keys().hasOnly(['provider', 'key']) && request.resource.data.storage.provider == 'r2' && request.resource.data.storage.key is string));
+      }
+      allow read, delete: if ownsBot();
+      allow create, update: if ownsBot() && validBot();
+
+      match /chats/{chatId} {
+        allow read: if ownsBot();
+        allow create, update: if ownsBot()
+          && request.resource.data.keys().hasOnly(['messages', 'updatedAt'])
+          && request.resource.data.messages is list
+          && request.resource.data.messages.size() <= 60;
+        allow delete: if ownsBot();
+      }
+
+      match /versions/{versionId} {
+        allow read: if ownsBot();
+        allow create: if ownsBot()
+          && request.resource.data.keys().hasOnly(['id', 'name', 'storageKey', 'createdAt', 'updatedAt'])
+          && request.resource.data.id == versionId
+          && request.resource.data.name is string
+          && request.resource.data.storageKey is string
+          && request.resource.data.createdAt is string;
+        allow update: if ownsBot()
+          && request.resource.data.keys().hasOnly(['id', 'name', 'storageKey', 'createdAt', 'updatedAt'])
+          && request.resource.data.id == resource.data.id
+          && request.resource.data.id == versionId
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 64
+          && request.resource.data.storageKey == resource.data.storageKey
+          && request.resource.data.createdAt == resource.data.createdAt;
+        allow delete: if ownsBot();
+      }
+    }
+  }
+}
