@@ -140,8 +140,9 @@ export function connectFirebase(): Promise<CloudClient | null> {
       async signInWithGoogle() {
         const provider = new authSdk.GoogleAuthProvider();
         provider.setCustomParameters({ prompt: 'select_account' });
-        if (auth.currentUser?.isAnonymous) await authSdk.linkWithRedirect(auth.currentUser, provider);
-        else await authSdk.signInWithRedirect(auth, provider);
+        // Popup completes on this origin, avoiding redirect storage restrictions on hosted domains.
+        if (auth.currentUser?.isAnonymous) await authSdk.linkWithPopup(auth.currentUser, provider);
+        else await authSdk.signInWithPopup(auth, provider);
       },
       async sendPasswordReset(email: string) {
         await authSdk.sendPasswordResetEmail(auth, email);
@@ -165,7 +166,7 @@ export function readableFirebaseError(error: unknown): string {
   const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : '';
   if(error instanceof Error&&/Account services are not configured|Your sign-in is no longer active/.test(error.message))return error.message;
   if (code.includes('auth/api-key-not-valid') || code.includes('auth/configuration-not-found')) return 'Account services are temporarily unavailable. Please try again later.';
-  if (code.includes('auth/unauthorized-domain')) return 'This website is not enabled for account access. Please contact support.';
+  if (code.includes('auth/unauthorized-domain')) return `Google sign-in needs ${window.location.hostname} added to Firebase Authentication → Settings → Authorized domains.`;
   if (code.includes('auth/too-many-requests')) return 'Too many sign-in attempts. Wait a few minutes, then try again.';
   if (code.includes('auth/user-disabled')) return 'This account is currently unavailable. Please contact support.';
   if (code.includes('auth/network-request-failed')) return 'Could not reach account services. Check your connection and try again.';

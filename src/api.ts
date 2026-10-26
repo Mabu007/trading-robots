@@ -48,12 +48,13 @@ export async function postApiStream(
   service: string,
   onText: (chunk: string, fullText: string) => void,
   signal?: AbortSignal,
+  idToken?: string,
 ): Promise<string> {
   let response: Response;
   try {
     response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream, application/json' },
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream, application/json', ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}) },
       body: JSON.stringify(payload),
       signal,
     });

@@ -11,7 +11,7 @@ describe('strategy contract',()=>{
  it('sorts candles and removes duplicate timestamps and invalid OHLC',()=>{const rows=validateCandles([c(2,2,3,1,2),c(1,1,2,0,1),c(2,7,8,6,7),c(3,4,2,1,3)]);expect(rows.map(x=>x.time)).toEqual([1,2])});
  it('reveals a higher-timeframe candle only once its close is no later than the execution close',()=>{expect(isBarComplete(3600,'h1',5400,'m15')).toBe(false);expect(isBarComplete(3600,'h1',6300,'m15')).toBe(true)});
  it('keeps serialized completion checks self-contained inside the strategy iframe',()=>{const sandboxCheck=new Function(`return (${isBarComplete.toString()})`)() as typeof isBarComplete;expect(sandboxCheck(3600,'h1',6300,'m15')).toBe(true)});
- it('validates both shipped demo strategies and their execution timeframes',()=>{expect(demoBots).toHaveLength(2);expect(parseStrategyConfig(demoBots[0].code).executionTimeframe).toBe('m15');expect(parseStrategyConfig(demoBots[1].code).executionTimeframe).toBe('m15')});
+ it('validates both shipped demo strategies and their execution timeframes',()=>{expect(demoBots).toHaveLength(2);expect(parseStrategyConfig(demoBots[0].code).executionTimeframe).toBe('m15');expect(parseStrategyConfig(demoBots[1].code).executionTimeframe).toBe('m1')});
 });
 describe('deterministic R simulation',()=>{
  it('executes a signal at the next candle open',()=>{const out=simulate([c(1,100,101,99,100),c(2,105,106,104,105),c(3,106,107,105,106)],[{action:'BUY',stopLoss:98,takeProfit:110},{action:'WAIT'}]);expect(out.trades[0].entry).toBe(105);expect(out.trades[0].entryTime).toBe(2)});
