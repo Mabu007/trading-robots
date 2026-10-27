@@ -64,10 +64,28 @@ export class BotEconomy {
     id(botId);const raw=await this.storage.read(`${this.storage.root(uid,botId)}/current.json`),v=raw?JSON.parse(raw):null;
     if(!v||v.userId!==uid||v.botId!==botId||typeof v.code!=='string')throw Error('Save this strategy in your workspace first.');return v;
   }
+  async setBotCover(who:Identity,botId:string,data:unknown){
+    id(botId);if(botId.length>100)throw Error('Invalid robot ID.');
+    if(typeof data!=='string'||!validCover(data))throw Error('Choose a valid JPG, PNG or WebP under 500 KB.');
+    const bot=await this.store.get(`users/${who.uid}/bots/${botId}`);
+    if(!bot)throw Error('Save this robot to your account before changing its cover.');
+    const raw=await this.storage.read(`${this.storage.root(who.uid,botId)}/publication.json`);
+    const listingId=raw?JSON.parse(raw).id:null;
+    if(listingId&&(typeof listingId!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(listingId)))throw Error('Invalid publication pointer.');
+    const url=await this.image(data),coverPath=`botCovers/${recordId(who.uid)}_${botId}`,listingPath=listingId?`marketplaceBots/${listingId}`:null;
+    // Older shared pages keep their snapshot in R2. Update it as well as the
+    // marketplace record so both public views show the same cover.
+    if(listingId){const key=`shared-bots/v1/${listingId}.json`,snapshot=await this.storage.read(key);if(snapshot){const shared=JSON.parse(snapshot);if(shared.ownerUid!==who.uid||shared.botId!==botId)throw Error('Publication ownership mismatch.');await this.storage.write(key,JSON.stringify({...shared,coverImage:data}));}}
+    await this.atomic(listingPath?[coverPath,listingPath]:[coverPath],([_old,listing])=>{
+      if(listing&&(listing.creatorId!==who.uid||listing.privateBotId!==botId))throw Error('Publication ownership mismatch.');
+      return {[coverPath]:{uid:who.uid,botId,coverImage:url},...(listingPath&&listing?{[listingPath]:{...listing,coverImage:url,updatedAt:Date.now()}}:{})};
+    });
+    return {coverImage:url};
+  }
   async publishProject(who:Identity,botId:string){
     id(botId);
     if(botId.length>100)throw Error('Invalid robot ID.');
-    const [saved,bot,profile]=await Promise.all([this.current(who.uid,botId),this.store.get(`users/${who.uid}/bots/${botId}`),this.profile(who)]);
+    const [saved,bot,profile,cover]=await Promise.all([this.current(who.uid,botId),this.store.get(`users/${who.uid}/bots/${botId}`),this.profile(who),this.store.get(`botCovers/${recordId(who.uid)}_${botId}`)]);
     if(!bot)throw Error('Save this robot to your account before making it public.');
     if(!saved.code.trim())throw Error('Save a strategy before making this robot public.');
     await this.checkLicense(who.uid,botId,saved.code);
@@ -87,7 +105,7 @@ export class BotEconomy {
       // did not intend when making a profile-only listing public.
       if(current&&!current.published&&(current.managedAccess||current.packageId))throw Error('Use sharing or releases to republish this existing bot and its access settings.');
       if(current?.published&&(current.managedAccess||current.packageId))return {};
-      return {[path]:{...current,id:listingId,privateBotId:botId,creatorId:who.uid,name,description,asset,timeframe,creator:profile.displayName,username:profile.username,access:current?.access||'free',priceMinor:current?.priceMinor||0,currency:'ZAR',managedAccess:Boolean(current?.managedAccess),published:true,publicCreatorId:who.uid,createdAt:current?.createdAt||now,updatedAt:now}};
+      return {[path]:{...current,id:listingId,privateBotId:botId,creatorId:who.uid,name,description,asset,timeframe,coverImage:cover?.coverImage||current?.coverImage||'',creator:profile.displayName,username:profile.username,access:current?.access||'free',priceMinor:current?.priceMinor||0,currency:'ZAR',managedAccess:Boolean(current?.managedAccess),published:true,publicCreatorId:who.uid,createdAt:current?.createdAt||now,updatedAt:now}};
     });
     return {id:listingId,username:profile.username};
   }
@@ -125,8 +143,9 @@ export class BotEconomy {
     if(!Number.isSafeInteger(priceMinor)||priceMinor<0||priceMinor>100000000)throw Error('Invalid ZAR price.');
     const listingId=id(input.listingId),listing=await this.trading.owned(who.uid,listingId);if(listing.privateBotId!==botId)throw Error('Listing/project mismatch.');
     const category=text(input.category||'Experimental',40),cover=input.coverImage||'';if(!validCover(cover))throw Error('Invalid bot cover.');
-    const p={id:key,botId:listingId,privateBotId:botId,creatorId:who.uid,creator:profile.displayName,username:profile.username,name:text(input.name||listing.name,64,true),description:text(input.description||listing.description||'',2000),coverImage:await this.image(cover),asset:listing.asset,category,versionIds:ids,versions:versions.map(versionView),license,licenseRevision:LICENSE_REVISION,licenseTerms:LICENSES[license].terms,priceMinor,currency:'ZAR',futureUpdates:false,published:true,provenance:versions[0]?.provenance||null,createdAt:Date.now()};
-    await this.atomic([`botPackages/${key}`,`marketplaceBots/${listingId}`],([existing,latest])=>{if(existing||!latest||latest.creatorId!==who.uid)throw Error('Package ownership changed.');return {[`botPackages/${key}`]:p,[`marketplaceBots/${listingId}`]:{...latest,coverImage:p.coverImage,category,access:priceMinor?'paid':'free',priceMinor,currency:'ZAR',creator:profile.displayName,username:profile.username,packageId:key,published:true,publicCreatorId:who.uid,updatedAt:Date.now()}};});
+    const coverPath=`botCovers/${recordId(who.uid)}_${botId}`,existingCover=await this.store.get(coverPath),coverImage=cover?await this.image(cover):existingCover?.coverImage||listing.coverImage||'';
+    const p={id:key,botId:listingId,privateBotId:botId,creatorId:who.uid,creator:profile.displayName,username:profile.username,name:text(input.name||listing.name,64,true),description:text(input.description||listing.description||'',2000),coverImage,asset:listing.asset,category,versionIds:ids,versions:versions.map(versionView),license,licenseRevision:LICENSE_REVISION,licenseTerms:LICENSES[license].terms,priceMinor,currency:'ZAR',futureUpdates:false,published:true,provenance:versions[0]?.provenance||null,createdAt:Date.now()};
+    await this.atomic([`botPackages/${key}`,`marketplaceBots/${listingId}`,coverPath],([existing,latest])=>{if(existing||!latest||latest.creatorId!==who.uid)throw Error('Package ownership changed.');return {[`botPackages/${key}`]:p,[`marketplaceBots/${listingId}`]:{...latest,coverImage:p.coverImage,category,access:priceMinor?'paid':'free',priceMinor,currency:'ZAR',creator:profile.displayName,username:profile.username,packageId:key,published:true,publicCreatorId:who.uid,updatedAt:Date.now()},[coverPath]:{uid:who.uid,botId,coverImage:p.coverImage}};});
     await this.activity(who.uid,'bot.published',listingId,p.name);return p;
   }
   async packagePublic(packageId:string){const p=await this.store.get(`botPackages/${id(packageId)}`);if(!p?.published)throw Error('Package unavailable.');const b=await this.store.get(`marketplaceBots/${p.botId}`);if(!b?.published)throw Error('Bot unavailable.');return publicPackage(p);}
@@ -199,7 +218,7 @@ export class BotEconomy {
     const listing=listings.items.find(b=>b.privateBotId===privateBotId);
     if(listing?.published)await this.checkLicense(uid,privateBotId,code);
   }
-  async legacyPublish(bot:RecordData){const fork=await this.store.get(`botForks/${recordId(bot.ownerUid)}_${bot.botId}`);if(fork?.provenance?.license==='commercial')throw Error('Publish Commercial Remix copies through a licensed source package in Releases.');await this.checkLicense(bot.ownerUid,bot.botId,bot.code);await this.trading.publish(bot);const profile=await this.profile({uid:bot.ownerUid,name:bot.creator});const saved=await this.store.get(`marketplaceBots/${bot.id}`);await this.store.put(`marketplaceBots/${bot.id}`,{...saved,coverImage:bot.coverImage,managedAccess:true,publicCreatorId:bot.ownerUid,username:profile.username});}
+  async legacyPublish(bot:RecordData){const fork=await this.store.get(`botForks/${recordId(bot.ownerUid)}_${bot.botId}`);if(fork?.provenance?.license==='commercial')throw Error('Publish Commercial Remix copies through a licensed source package in Releases.');await this.checkLicense(bot.ownerUid,bot.botId,bot.code);const coverImage=await this.image(bot.coverImage||'');await this.trading.publish(bot);const profile=await this.profile({uid:bot.ownerUid,name:bot.creator});const saved=await this.store.get(`marketplaceBots/${bot.id}`);await this.store.put(`marketplaceBots/${bot.id}`,{...saved,coverImage,managedAccess:true,publicCreatorId:bot.ownerUid,username:profile.username});await this.store.put(`botCovers/${recordId(bot.ownerUid)}_${bot.botId}`,{uid:bot.ownerUid,botId:bot.botId,coverImage});}
   async legacyCopy(uid:string,bot:RecordData){
     await this.trading.acquire(uid,bot.id);
     const privateId=`shared-${bot.id}`,path=`botForks/${recordId(uid)}_${privateId}`;
@@ -225,6 +244,8 @@ export function economyRoutes(app:Express,economy:BotEconomy,authenticate:(req:R
   route('get','/bots',false,async(_,req)=>{const page=await economy.page('marketplaceBots','published',true,after(req));return {...page,items:page.items.map(publicBot)};});
   route('get','/bots/:id',false,async(_,req)=>{const b=await economy.store.get(`marketplaceBots/${req.params.id}`);if(!b?.published)throw Error('Bot unavailable.');const [packages,acquisitions,remixes]=await Promise.all([economy.page('botPackages','botId',b.id,after(req)),economy.count('botAcquisitions','botId',b.id),economy.count('botForks','botId',b.id)]);return {bot:publicBot(b),packages:{...packages,items:packages.items.filter(p=>p.published).map(publicPackage)},acquisitions,remixes};});
   route('post','/projects/:botId/publish',true,(who,req)=>economy.publishProject(who,String(req.params.botId)));
+  route('put','/projects/:botId/cover',true,(who,req)=>economy.setBotCover(who,String(req.params.botId),req.body?.coverImage));
+  route('get','/covers',true,(who,req)=>economy.page('botCovers','uid',who.uid,after(req),100));
   route('post','/projects/:botId/versions',true,(who,req)=>economy.version(who.uid,String(req.params.botId),req.body));
   route('get','/projects/:botId/versions',true,(who,req)=>economy.page('sourceVersions','projectKey',`${recordId(who.uid)}_${req.params.botId}`,after(req)));
   route('post','/projects/:botId/packages',true,(who,req)=>economy.package(who,String(req.params.botId),req.body));
