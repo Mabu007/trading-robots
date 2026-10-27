@@ -46,3 +46,14 @@ The browser runner uses a fresh iframe with an opaque origin, a restrictive CSP 
 ## Checks
 
 `npm test` runs deterministic strategy/engine tests. `npm run build` type-checks the app and creates the Vite production bundle.
+
+
+## Shared robot pages
+
+Use **Share robot** in the workspace or a robot card. Add a cover and public description, then choose **Create free link**. The stable `/bot/<id>` URL is available without signing in. Publishing stores a snapshot of the current strategy; **Update page** publishes the latest snapshot. **Unpublish** revokes the public page and new copies. Deleting the original also removes its publication.
+
+**Backtest** asks visitors to sign in and opens a private, editable copy in their workspace. Each account reuses its copy; opening the link again preserves that account's edits. Existing free copies remain with their recipients after unpublishing. Public metadata excludes source code, owner IDs, private chat, and backtest history. Code is supplied only to an authenticated recipient's copy. Paid publishing is rejected by the API until payments are implemented.
+
+**Start** is disabled until live execution is implemented. **Connect broker** starts cTrader OAuth when the three `CTRADER_*` server environment variables are configured. Register `https://trading-robots.vercel.app/api/brokers/ctrader/callback` in the approved cTrader Open API application. Use the matching local callback URL for development. The current scope is `accounts` (read only). Tokens stay in private R2 storage; the callback checks a ten-minute, browser-bound OAuth state and fails closed if the provider does not return it. Verify the complete provider redirect and account approval flow with the registered application before enabling it for users. No trading orders or background processes are started by connecting.
+
+Official cTrader setup: https://help.ctrader.com/open-api/api-application/ and https://help.ctrader.com/open-api/account-authentication/.

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675" fill="none">
+  <defs><linearGradient id="bg" x2="1200" y2="675" gradientUnits="userSpaceOnUse"><stop stop-color="#253a2a"/><stop offset="1" stop-color="#09140e"/></linearGradient><linearGradient id="line" x2="1120" gradientUnits="userSpaceOnUse"><stop stop-color="#e9cf88"/><stop offset="1" stop-color="#7dd9ad"/></linearGradient><radialGradient id="glow"><stop stop-color="#c8ba6d" stop-opacity=".18"/><stop offset="1" stop-color="#c8ba6d" stop-opacity="0"/></radialGradient></defs>
+  <path fill="url(#bg)" d="M0 0h1200v675H0z"/><ellipse cx="750" cy="260" rx="560" ry="360" fill="url(#glow)"/>
+  <g stroke="#94be9b" stroke-opacity=".08"><path d="M0 135h1200M0 270h1200M0 405h1200M0 540h1200M150 0v675M300 0v675M450 0v675M600 0v675M750 0v675M900 0v675M1050 0v675"/></g>
+  <path d="m0 510 85-40 70 24 85-115 85 42 85-94 85 29 85-120 85 35 85-88 85 18 85-92 90 26 100-70" stroke="url(#line)" stroke-width="4"/>
+  <g transform="translate(502 212)"><rect width="196" height="196" rx="48" fill="#152a1e" stroke="#ccb77a" stroke-opacity=".5"/><rect x="43" y="60" width="110" height="87" rx="23" stroke="#e6d296" stroke-width="5"/><path d="M98 37v23M26 92v24M170 92v24M75 129h46" stroke="#e6d296" stroke-width="5" stroke-linecap="round"/><circle cx="75" cy="96" r="6" fill="#8cddb0"/><circle cx="121" cy="96" r="6" fill="#8cddb0"/></g>
+  <text x="60" y="615" fill="#c2d1c2" font-family="sans-serif" font-size="18" letter-spacing="5">TRADING VIBES</text>
+</svg>

@@ -3,6 +3,8 @@ import express from 'express';
 import { createPublicKey, randomUUID, verify as verifySignature } from 'node:crypto';
 import { deleteR2Object, getR2Config, listR2Objects, readR2Object, writeR2Object } from './r2.ts';
 import { candleObjectKey, countObservedGaps, intervalMs, isAsset, isTimeframe, mapConcurrent, normalizeCandles, parseCandleCsv, utcDateKey, type MarketAsset, type MarketCandle, type MarketTimeframe } from './market-data.ts';
+import { sharedBotRoutes } from './shared-bots.ts';
+import { ctraderRoutes } from './ctrader.ts';
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
@@ -233,6 +235,9 @@ async function firebaseUidOrReply(req: express.Request, res: express.Response): 
   }
 }
 
+const publications = sharedBotRoutes(app, { read: readR2Object, write: writeR2Object, remove: deleteR2Object, uid: firebaseUidOrReply, root: userBotRoot });
+ctraderRoutes(app, { read: readR2Object, write: writeR2Object, uid: firebaseUidOrReply });
+
 app.put('/api/user-bots/:botId/current', async (req, res) => {
   const uid = await firebaseUidOrReply(req, res); if (!uid) return;
   const { botId } = req.params;
@@ -275,6 +280,7 @@ app.delete('/api/user-bots/:botId', async (req, res) => {
     const prefix = `${userBotRoot(uid, botId)}/`;
     const keys = await listR2Objects(prefix, 1001);
     if (keys.length > 1000) return res.status(409).json({ error: 'This robot has too many stored versions to delete safely. Contact support.' });
+    await publications.removePublication(uid, botId);
     for (let i = 0; i < keys.length; i += 10) await Promise.all(keys.slice(i, i + 10).map(deleteR2Object));
     return res.json({ deleted: true });
   } catch (error) {
