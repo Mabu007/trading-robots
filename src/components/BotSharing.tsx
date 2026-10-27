@@ -10,8 +10,12 @@ export function sharedIdFromPath(path: string) {
   return match?.[1] ?? null;
 }
 async function privateRequest<T>(client: CloudClient, path: string, method = 'GET', body?: unknown): Promise<T> {
-  const token = await client.getIdToken();
-  const response = await fetch(path, { method, headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+  const request = async (forceRefresh: boolean) => {
+    const token = await client.getIdToken(forceRefresh);
+    return fetch(path, { method, headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+  };
+  let response = await request(false);
+  if (response.status === 401) response = await request(true);
   return readApiJson<T>(response, 'Robot sharing');
 }
 export async function resizeCover(file: File): Promise<string> {
@@ -116,7 +120,7 @@ export function ShareBotDialog({ bot, client, prepare, creator, onClose }: { bot
   </div>;
 }
 
-export function SharedBotPage({ shareId, busy, error, onBacktest, onConnect, onStart }: { shareId: string; busy: boolean; error: string; onBacktest: () => void; onConnect: () => void;onStart:()=>void;children?:React.ReactNode }) {
+export function SharedBotPage({ shareId, busy, error, onBacktest, onConnect, onStart, client, onSettings, onSignIn }: { shareId: string; busy: boolean; error: string; onBacktest: () => void; onConnect: () => void;onStart:()=>void;client?:CloudClient|null;onSettings?:()=>void;onSignIn?:()=>void;children?:React.ReactNode }) {
   const [bot, setBot] = useState<PublicBot | null>(null), [loadError, setLoadError] = useState(''), [loading, setLoading] = useState(true);
   useEffect(() => {
     let active = true; const controller = new AbortController();
@@ -127,7 +131,7 @@ export function SharedBotPage({ shareId, busy, error, onBacktest, onConnect, onS
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; controller.abort(); document.title = 'Trading Vibes — strategy studio'; };
   }, [shareId]);
-  return <main className="public-bot-shell"><header className="public-bot-brand"><a href="/"><img src="/logo.png" alt=""/> Trading Vibes</a><span>ROBOT BY ITS CREATOR</span></header>
+  return <main className="public-bot-shell"><header className="public-bot-brand"><a href="/"><img src="/logo.png" alt=""/> Trading Vibes</a><span>ROBOT BY ITS CREATOR</span><button className="ghost" onClick={client?onSettings:onSignIn} aria-label={client?"Open profile settings":"Sign in"}>{client?"Profile":"Sign in"}</button></header>
     {loading ? <div className="public-bot-state" role="status"><span className="spinner"/> Loading robot…</div> : !bot ? <div className="public-bot-state"><h1>Robot unavailable</h1><p role="alert">{loadError}</p><a href="/">Go to Trading Vibes</a></div> : <article className="public-bot-card">
       <div className="public-bot-cover"><img src={bot.coverImage || '/robot-cover.svg'} alt={`${bot.name} cover`}/><span>{bot.asset} · {bot.timeframe?.toUpperCase()||'Strategy'} <i/> {bot.access==='free'?'FREE BOT':new Intl.NumberFormat(undefined,{style:'currency',currency:bot.currency||'ZAR'}).format((bot.priceMinor||0)/100)}</span></div>
       <div className="public-bot-copy"><h1>{bot.name}</h1><small>By {bot.creator||'Bot creator'}</small><p>{bot.description}</p></div>

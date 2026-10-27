@@ -23,7 +23,10 @@ type StoredMarketDay = { schemaVersion: 1; asset: MarketAsset; timeframe: Market
 type FirebaseClaims = { email?:string; email_verified?:boolean; name?:string; sub?: string; user_id?: string; aud?: string; iss?: string; exp?: number; iat?: number };
 let secureTokenJwks: { keys: any[]; expiresAt: number } | undefined;
 async function verifyFirebaseUser(authorization: string | undefined): Promise<{uid:string;email?:string;emailVerified:boolean;name?:string}> {
-  const projectId = process.env.FIREBASE_PROJECT_ID?.trim() || process.env.VITE_FIREBASE_PROJECT_ID?.trim();
+  const serverProject = process.env.FIREBASE_PROJECT_ID?.trim();
+  const webProject = process.env.VITE_FIREBASE_PROJECT_ID?.trim();
+  if (serverProject && webProject && serverProject !== webProject) throw new Error('Firebase project configuration mismatch: server and web project IDs must match.');
+  const projectId = webProject || serverProject;
   if (!projectId) throw new Error('Firebase project ID is not configured on the API server.');
   const token = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
   if (!token) throw new Error('Sign in to use this feature.');
@@ -237,7 +240,7 @@ async function firebaseUidOrReply(req: express.Request, res: express.Response): 
   try { const identity=await verifyFirebaseUser(req.header('authorization'));(req as any).verifiedIdentity=identity;res.locals.identity=identity;return identity.uid; }
   catch (error) {
     const message = error instanceof Error ? error.message : 'Could not verify Firebase sign-in.';
-    const unavailable = /not configured|Could not verify Firebase|verification is unavailable/i.test(message);
+    const unavailable = /not configured|configuration mismatch|Could not verify Firebase|verification is unavailable/i.test(message);
     res.status(unavailable ? 503 : 401).json({ error: message });
     return null;
   }
