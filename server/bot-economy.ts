@@ -64,6 +64,33 @@ export class BotEconomy {
     id(botId);const raw=await this.storage.read(`${this.storage.root(uid,botId)}/current.json`),v=raw?JSON.parse(raw):null;
     if(!v||v.userId!==uid||v.botId!==botId||typeof v.code!=='string')throw Error('Save this strategy in your workspace first.');return v;
   }
+  async publishProject(who:Identity,botId:string){
+    id(botId);
+    if(botId.length>100)throw Error('Invalid robot ID.');
+    const [saved,bot,profile]=await Promise.all([this.current(who.uid,botId),this.store.get(`users/${who.uid}/bots/${botId}`),this.profile(who)]);
+    if(!bot)throw Error('Save this robot to your account before making it public.');
+    if(!saved.code.trim())throw Error('Save a strategy before making this robot public.');
+    await this.checkLicense(who.uid,botId,saved.code);
+    const name=text(bot.name,64,true),description=text(typeof bot.prompt==='string'?bot.prompt.slice(0,2000):'',2000),asset=bot.asset;
+    if(!['XAUUSD','EURUSD','GBPUSD','USDJPY'].includes(asset))throw Error('This robot has an unsupported asset.');
+    let timeframe:string|undefined;try{timeframe=parseStrategyConfig(saved.code).executionTimeframe}catch{/* A profile listing does not execute source. */}
+    const pointerKey=`${this.storage.root(who.uid,botId)}/publication.json`,raw=await this.storage.read(pointerKey);
+    // A stable UUID keeps retries idempotent and shares the existing publication link.
+    const digest=hash(`${who.uid}\0${botId}`),generated=`${digest.slice(0,8)}-${digest.slice(8,12)}-4${digest.slice(13,16)}-a${digest.slice(17,20)}-${digest.slice(20,32)}`;
+    const listingId=raw?JSON.parse(raw).id:generated;
+    if(typeof listingId!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(listingId))throw Error('Invalid publication pointer.');
+    if(!raw)await this.storage.write(pointerKey,JSON.stringify({id:listingId}));
+    const path=`marketplaceBots/${listingId}`,now=Date.now();
+    await this.atomic([path],([current])=>{
+      if(current&&(current.creatorId!==who.uid||current.privateBotId!==botId))throw Error('Publication ownership mismatch.');
+      // Restoring a legacy link or a source package could grant access the creator
+      // did not intend when making a profile-only listing public.
+      if(current&&!current.published&&(current.managedAccess||current.packageId))throw Error('Use sharing or releases to republish this existing bot and its access settings.');
+      if(current?.published&&(current.managedAccess||current.packageId))return {};
+      return {[path]:{...current,id:listingId,privateBotId:botId,creatorId:who.uid,name,description,asset,timeframe,creator:profile.displayName,username:profile.username,access:current?.access||'free',priceMinor:current?.priceMinor||0,currency:'ZAR',managedAccess:Boolean(current?.managedAccess),published:true,publicCreatorId:who.uid,createdAt:current?.createdAt||now,updatedAt:now}};
+    });
+    return {id:listingId,username:profile.username};
+  }
   async version(uid:string,botId:string,input:RecordData={}){
     const current=await this.current(uid,botId);let code=current.code;
     if(input.legacyVersionId){const raw=await this.storage.read(`${this.storage.root(uid,botId)}/versions/${id(input.legacyVersionId)}.json`);const old=raw?JSON.parse(raw):null;if(!old||old.userId!==uid||old.botId!==botId)throw Error('Saved version unavailable.');code=old.code;}
@@ -197,6 +224,7 @@ export function economyRoutes(app:Express,economy:BotEconomy,authenticate:(req:R
   route('get','/creators/:username/follow',true,async(who,req)=>{const p=await economy.creator(String(req.params.username));return {following:Boolean((await economy.store.get(`creatorFollows/${recordId(who.uid)}_${recordId(p.uid)}`))?.active)};});
   route('get','/bots',false,async(_,req)=>{const page=await economy.page('marketplaceBots','published',true,after(req));return {...page,items:page.items.map(publicBot)};});
   route('get','/bots/:id',false,async(_,req)=>{const b=await economy.store.get(`marketplaceBots/${req.params.id}`);if(!b?.published)throw Error('Bot unavailable.');const [packages,acquisitions,remixes]=await Promise.all([economy.page('botPackages','botId',b.id,after(req)),economy.count('botAcquisitions','botId',b.id),economy.count('botForks','botId',b.id)]);return {bot:publicBot(b),packages:{...packages,items:packages.items.filter(p=>p.published).map(publicPackage)},acquisitions,remixes};});
+  route('post','/projects/:botId/publish',true,(who,req)=>economy.publishProject(who,String(req.params.botId)));
   route('post','/projects/:botId/versions',true,(who,req)=>economy.version(who.uid,String(req.params.botId),req.body));
   route('get','/projects/:botId/versions',true,(who,req)=>economy.page('sourceVersions','projectKey',`${recordId(who.uid)}_${req.params.botId}`,after(req)));
   route('post','/projects/:botId/packages',true,(who,req)=>economy.package(who,String(req.params.botId),req.body));

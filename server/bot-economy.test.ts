@@ -54,5 +54,31 @@ describe('HTTP authorization and public metadata',()=>{
  it('requires sign-in for source, publishing, acquisitions, profiles and member operations',async()=>{for(const path of ['/me','/members','/acquisitions','/versions/secret/source','/invitations'])expect((await request(path)).status).toBe(401);expect((await request('/projects/original/packages',undefined,'POST',{})).status).toBe(401)});
  it('public discovery does not leak source, private IDs, emails or storage pointers',async()=>{const p=await release();const listing=await request('/bots');expect(listing.status).toBe(200);expect(listing.data.items[0].name).toBe('Gold strategy');const encoded=JSON.stringify(listing.data);expect(encoded).not.toContain('privateBotId');expect(encoded).not.toContain('codeKey');expect(encoded).not.toContain('sourceVersions');const detail=await request('/bots/listing');expect(detail.data.packages.items[0].id).toBe(p.id);expect(JSON.stringify(detail.data)).not.toContain('codeKey');expect(JSON.stringify(detail.data)).not.toContain('privateBotId')});
  it('denies cross-user source access and paginates actual records',async()=>{const p=await release(),a=await economy.acquire(alice,p.id);expect((await request(`/versions/${a.versionIds[0]}/source?acquisition=${a.id}`,'bob')).status).toBe(400);for(let n=0;n<32;n++)await store.put(`botActivity/event_${String(n).padStart(2,'0')}`,{uid:'alice',createdAt:n,type:'test'});const first=await request('/activity','alice');expect(first.data.items).toHaveLength(30);const second=await request(`/activity?after=${first.data.next}`,'alice');expect(second.data.items).toHaveLength(2);expect(second.data.next).toBeNull()});
+ it('publishes a saved bot once to discovery and the creator profile without exposing its source',async()=>{
+  await save('creator','clickbot');await store.put('users/creator/bots/clickbot',{name:'Click bot',asset:'XAUUSD',prompt:'A public description'});
+  expect((await request('/projects/clickbot/publish',undefined,'POST',{})).status).toBe(401);
+  expect((await request('/projects/clickbot/publish','alice','POST',{})).status).toBe(400);
+  const first=await request('/projects/clickbot/publish','creator','POST',{});expect(first.status).toBe(200);
+  const second=await request('/projects/clickbot/publish','creator','POST',{});expect(second.data.id).toBe(first.data.id);
+  const discovery=await request('/bots'),profile=await request(`/creators/${first.data.username}/bots`),detail=await request(`/bots/${first.data.id}`);
+  expect(discovery.data.items.filter((bot:any)=>bot.id===first.data.id)).toHaveLength(1);expect(profile.data.items.some((bot:any)=>bot.id===first.data.id)).toBe(true);
+  expect(detail.data.bot).toMatchObject({name:'Click bot',managedAccess:false});expect(detail.data.packages.items).toHaveLength(0);
+  for(const data of [discovery.data,profile.data,detail.data]){const body=JSON.stringify(data);expect(body).not.toContain(starterCode);expect(body).not.toContain('privateBotId');expect(body).not.toContain('storageKey');}
+  expect((await request(`/bots/${first.data.id}/unpublish`,'creator','POST',{})).status).toBe(200);
+  expect((await request('/bots')).data.items.some((bot:any)=>bot.id===first.data.id)).toBe(false);
+  expect((await request(`/creators/${first.data.username}/bots`)).data.items.some((bot:any)=>bot.id===first.data.id)).toBe(false);
+  expect((await request('/projects/clickbot/publish','creator','POST',{})).data.id).toBe(first.data.id);
+ });
+ it('does not silently republish existing source or managed access',async()=>{
+  await save('creator','accessbot');await store.put('users/creator/bots/accessbot',{name:'Access bot',asset:'XAUUSD',prompt:'Description'});
+  const first=await request('/projects/accessbot/publish','creator','POST',{}),path=`marketplaceBots/${first.data.id}`,old=await store.get(path);
+  await store.put(path,{...old,packageId:'old-package',published:false,publicCreatorId:''});
+  const response=await request('/projects/accessbot/publish','creator','POST',{});
+  expect(response.status).toBe(400);expect(response.data.error).toContain('sharing or releases');expect((await store.get(path))?.published).toBe(false);
+ });
+ it('does not let a personal-use copy become publicly listed',async()=>{
+  const p=await release(),a=await economy.acquire(alice,p.id),copy=await economy.remix(alice,a.id,a.versionIds[0]);
+  const response=await request(`/projects/${copy.id}/publish`,'alice','POST',{});expect(response.status).toBe(400);expect(response.data.error).toContain('Personal Use');
+ });
  it('unpublishes source-only listings and removes them from profile counts and discovery',async()=>{const p=await release();const response=await request('/bots/listing/unpublish','creator','POST',{});expect(response.status).toBe(200);await expect(economy.packagePublic(p.id)).rejects.toThrow('unavailable');expect((await request('/bots')).data.items).toHaveLength(0);expect((await economy.summary(creator)).counts.published).toBe(0)});
 });
