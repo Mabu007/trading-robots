@@ -1,3 +1,4 @@
+import {firebasePrivateKey} from './firebase-key.ts';
 import { createSign } from 'node:crypto';
 export type RecordData = Record<string, any>;
 export interface RecordStore { get(path:string):Promise<RecordData|null>; put(path:string,data:RecordData):Promise<void>; create(path:string,data:RecordData):Promise<boolean>; query(collection:string,field?:string,value?:string):Promise<RecordData[]>; page?(collection:string,field?:string,value?:string|boolean,after?:string,limit?:number):Promise<{items:RecordData[];next:string|null}>; count?(collection:string,field?:string,value?:string):Promise<number>; transaction?(paths:string[],update:(records:(RecordData|null)[])=>Record<string,RecordData>):Promise<void>; }
@@ -15,7 +16,7 @@ export class FirestoreStore implements RecordStore {
     if(!FirestoreStore.configured())throw Error('Server-side Firebase credentials are not configured.');
     const now=Math.floor(Date.now()/1000),encode=(v:unknown)=>Buffer.from(JSON.stringify(v)).toString('base64url');
     const input=`${encode({alg:'RS256',typ:'JWT'})}.${encode({iss:process.env.FIREBASE_CLIENT_EMAIL,scope:'https://www.googleapis.com/auth/datastore',aud:'https://oauth2.googleapis.com/token',iat:now,exp:now+3600})}`;
-    const signature=createSign('RSA-SHA256').update(input).sign(process.env.FIREBASE_PRIVATE_KEY!.replace(/\\n/g,'\n'),'base64url');
+    const signature=createSign('RSA-SHA256').update(input).sign(firebasePrivateKey(process.env.FIREBASE_PRIVATE_KEY!),'base64url');
     const r=await fetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'urn:ietf:params:oauth:grant-type:jwt-bearer',assertion:`${input}.${signature}`}),signal:AbortSignal.timeout(10000)});
     const d=await r.json() as any;if(!r.ok||!d.access_token)throw Error('Firebase service authentication failed.');this.token=d.access_token;this.expires=Date.now()+Number(d.expires_in)*1000;return this.token;
   }
