@@ -464,12 +464,6 @@
 .auth-error { border-color:#a75d5366; background:#682b241c; color:#e7afa2; }
 .auth-success { border-color:#59916a66; background:#2455311c; color:#abd7b1; }
 .auth-legacy-note { margin:0 0 12px; padding:9px 10px; border-left:2px solid #d4bf75; background:#d4bf750b; color:#d2c99f; font-size:9px; line-height:1.6; }
-.google-auth { width:100%; min-height:39px; display:flex; align-items:center; justify-content:center; gap:10px; border:1px solid #485044; border-radius:3px; background:#f1f1ec; color:#24261f; font:700 10px Manrope,sans-serif; transition:background .15s; }
-.google-auth:hover:not(:disabled) { background:#fff; }
-.google-auth:disabled { opacity:.5; cursor:not-allowed; }
-.google-g { display:grid; width:18px; height:18px; place-items:center; border-radius:50%; background:#fff; color:#4285f4; font:800 13px Arial,sans-serif; }
-.auth-divider { display:flex; align-items:center; gap:11px; margin:17px 0; color:#71776e; font:7px 'DM Mono',monospace; letter-spacing:.13em; }
-.auth-divider span { height:1px; flex:1; background:#ffffff17; }
 .auth-form { display:grid; gap:12px; }
 .auth-form label { display:grid; gap:6px; color:#a2a79c; font:600 8px 'DM Mono',monospace; letter-spacing:.1em; }
 .auth-form input { width:100%; min-height:39px; padding:0 11px; border:1px solid #3b423a; border-radius:3px; outline:0; background:#080b09; color:#e9ece4; font:11px Manrope,sans-serif; letter-spacing:normal; }
