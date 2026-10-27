@@ -10,3 +10,35 @@
 @media(max-width:600px){.economy-brand{height:auto;min-height:68px;flex-direction:row;align-items:center;justify-content:space-between;gap:8px}.economy-brand nav{gap:12px}.economy-brand nav>a:nth-child(3){display:none}.economy-brand nav a{font-size:10px}.economy-account-menu{right:0;width:210px}.economy-nav{margin-top:8px}.economy-profile{margin-top:16px}}
 
 .economy-publish-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px;border:1px solid #ffffff16;border-radius:10px;background:#111a15}.economy-publish-row strong{flex:1;min-width:120px;overflow-wrap:anywhere}.economy-publish-row>span{font-size:11px;color:#a9bdad}.economy-publish-row button{white-space:nowrap}.economy-project-tools>p{color:#a3afa5;line-height:1.6;font-size:12px}
+
+/* Mobile prioritizes creating and finding bots while keeping creator tools below. */
+.mobile-home-hero{display:none}
+@media(max-width:640px){
+ .economy-home{display:flex;flex-direction:column;min-width:0}
+ .economy-home>.economy-brand{order:0}
+ .economy-home>.mobile-home-hero{order:1;display:block;padding:26px 0 20px}
+ .mobile-home-hero small{color:#d5c16a;font-size:9px;font-weight:700;letter-spacing:1.5px}
+ .mobile-home-hero h1{font-size:28px;line-height:1.12;letter-spacing:-.7px;margin:9px 0 6px}
+ .mobile-home-hero p{font-size:12px;line-height:1.5;color:#a3b1a6;margin:0}
+ .mobile-home-actions{display:flex;gap:9px;margin-top:18px}
+ .mobile-home-actions .primary,.economy-shell .mobile-explore-link{min-height:44px;flex:1;display:flex;align-items:center;justify-content:center;gap:8px;border-radius:8px;font-size:12px;font-weight:700}
+ .economy-shell .mobile-explore-link{border:1px solid #ffffff28;background:#151d18;color:#e7ece8}
+ .mobile-explore-arrow{transform:rotate(180deg)}
+ .economy-home>.economy-library{order:2}
+ .economy-home>.economy-profile,.economy-home>.economy-profile-loading{order:3}
+ .economy-home>.economy-edit:not(.economy-release){order:4}
+ .economy-home>.economy-nav{order:5}
+ .economy-home>.economy-project-tools{order:6}
+ .economy-home>.economy-release{order:7}
+ .economy-home>.economy-section-heading{display:none}
+ .economy-library .library-search{margin-bottom:14px;gap:8px}
+ .economy-library .library-search input{flex:1 1 60%;min-height:32px;font-size:14px}
+ .economy-library .library-search select{flex:0 1 auto;min-height:40px}
+ .economy-library .robot-grid{gap:14px}
+ .economy-library .robot-card-open{min-height:50px}
+ .economy-library .robot-card-actions button{min-width:40px;min-height:40px}
+ .economy-nav{overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
+ .economy-discovery-heading{padding-top:28px}
+ .economy-discovery-heading h1{margin:10px 0;font-size:32px}
+ .economy-search input,.economy-search select{min-height:40px}
+}
