@@ -71,7 +71,7 @@ No secret belongs in a `VITE_` variable. Vercel inventory was inspected without 
 | `CTRADER_CLIENT_SECRET` or `CTRADER_SECRET_KEY` | Vercel + gateway | Existing Vercel `CTRADER_SECRET_KEY` accepted; value never displayed |
 | `CTRADER_REDIRECT_URI` | Vercel | Missing. Register the exact application callback, normally `https://trading-robots.vercel.app/api/brokers/ctrader/callback`, with cTrader |
 | `BROKER_TOKEN_ENCRYPTION_KEY` | Vercel + gateway | Missing; independent base64-encoded 32-byte AES key, same on both services |
-| `BROKER_TOKEN_PREVIOUS_KEY` | Vercel + gateway | Optional previous AES key during rewrapping; retain until all stored credentials rotate |
+| `BROKER_TOKEN_PREVIOUS_KEY` | Vercel + gateway | Optional previous AES key during rewrapping; retain until all stored credentials rotate through the single gateway. Status reads never rewrite credentials |
 | `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` | Vercel | Missing server service-account credentials; least-privilege Firestore IAM |
 | `FIREBASE_PROJECT_ID` or existing `VITE_FIREBASE_PROJECT_ID` | Vercel | Existing public project configuration retained |
 | Existing `R2_*` storage configuration | Vercel + gateway | Vercel variables already present; reuse the existing private application bucket |
@@ -89,7 +89,7 @@ The cTrader credentials currently have production scope only. Previews intention
 
 ## Source and web deployment
 
-Published on `marketplace-demo-runtime` in [draft PR #2](https://github.com/Mabu007/trading-robots/pull/2). Vercel preview deployment is being verified; production main remains unchanged. Backend packaging explicitly includes the shared strategy/types modules and server classes use Node 24 strip-compatible syntax; the native API import has a regression test.
+Published on `marketplace-demo-runtime` in [draft PR #2](https://github.com/Mabu007/trading-robots/pull/2). [Vercel preview](https://trading-robots-kn1xxuhlg-mabu007s-projects.vercel.app) is READY and verified: `/` and `/api/market-data/availability` return 200, invalid public bot links return 404, customer access without authentication returns 401, and the tested deployment has no runtime error logs. Production main remains unchanged. Backend packaging explicitly includes the shared strategy/types modules and server classes use Node 24 strip-compatible syntax; the native API import has a regression test.
 
 GitHub Actions created the workflow but its hosted job failed before any runner steps started; no job log was available through GitHub. Local checks above passed. CI is not claimed as passing, and the runner/account cause remains unverified.
 
