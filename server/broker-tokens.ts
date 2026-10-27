@@ -5,7 +5,8 @@ export const brokerTokenKey=(uid:string)=>`broker-connections/${Buffer.from(uid)
 function encryptionKey(encoded=process.env.BROKER_TOKEN_ENCRYPTION_KEY){const key=Buffer.from(encoded||'','base64');if(key.length!==32)throw Error('BROKER_TOKEN_ENCRYPTION_KEY must be a base64-encoded 32-byte key.');return key;}
 export class BrokerTokenStore {
   private refreshing=new Map<string,Promise<BrokerTokens>>();
-  constructor(private storage:Storage,private request:typeof fetch=fetch){}
+  private storage:Storage;private request:typeof fetch;
+  constructor(storage:Storage,request:typeof fetch=fetch){this.storage=storage;this.request=request;}
   static configured(){try{encryptionKey();return true}catch{return false}}
   private async persist(uid:string,tokens:BrokerTokens){const iv=randomBytes(12),cipher=createCipheriv('aes-256-gcm',encryptionKey(),iv);const encrypted=Buffer.concat([cipher.update(JSON.stringify(tokens)),cipher.final()]);await this.storage.write(brokerTokenKey(uid),JSON.stringify({version:2,iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64'),ciphertext:encrypted.toString('base64')}));}
   async save(uid:string,tokens:BrokerTokens){const pending=this.refreshing.get(uid);if(pending)await pending.catch(()=>{});await this.persist(uid,tokens);}

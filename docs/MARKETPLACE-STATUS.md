@@ -53,7 +53,7 @@ Stopping/unpublishing disables future signals and/or following; it does not clos
 | 17. Customer/creator isolation | Ownership and customer filtering tests passed; Firestore rules prepared but not deployed/emulator-verified |
 | 18. Scheduler restart | Actual local process restart recovered stopped DO state, evaluation count and no pending alarm |
 | 19. Update isolation | Running-update refusal, immutable code digest and generation-specific queue checks implemented/tested locally |
-| 20. Build/regressions | `npm test`: 74 passing tests; `npm run build` and `npm run check:runtime` passed |
+| 20. Build/regressions | `npm test`: 75 passing tests; `npm run build`, native Node 24 API import, and `npm run check:runtime` passed |
 
 Additional actual browser checks: 390px bot page retains exactly three primary buttons, no horizontal overflow; risk dialog requires explicit demo consent and preserves entered risk; an infinite strategy terminates after eight seconds while the UI continues ticking. Browser fixtures did not acquire real bots or place orders.
 
@@ -86,6 +86,12 @@ No secret belongs in a `VITE_` variable. Vercel inventory was inspected without 
 | cTrader authorized hedged demo accounts | Provider testing | Required for real integration tests; none authorized in this implementation session |
 
 The cTrader credentials currently have production scope only. Previews intentionally do not inherit them. Do not copy production secrets into a preview merely to make a readiness indicator green.
+
+## Source and web deployment
+
+Published on `marketplace-demo-runtime` in [draft PR #2](https://github.com/Mabu007/trading-robots/pull/2). Vercel preview deployment is being verified; production main remains unchanged. Backend packaging explicitly includes the shared strategy/types modules and server classes use Node 24 strip-compatible syntax; the native API import has a regression test.
+
+GitHub Actions created the workflow but its hosted job failed before any runner steps started; no job log was available through GitHub. Local checks above passed. CI is not claimed as passing, and the runner/account cause remains unverified.
 
 ## Cloudflare resources and deployment
 

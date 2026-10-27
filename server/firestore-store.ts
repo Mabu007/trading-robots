@@ -7,7 +7,8 @@ function unpack(v:any):any {if('nullValue'in v)return null;if('integerValue'in v
 const decode=(v:RecordData)=>Object.fromEntries(Object.entries(v).map(([k,v])=>[k,unpack(v)]));
 export class FirestoreStore implements RecordStore {
   private token='';private expires=0;
-  constructor(private project=process.env.FIREBASE_PROJECT_ID||process.env.VITE_FIREBASE_PROJECT_ID||''){}
+  private project:string;
+  constructor(project=process.env.FIREBASE_PROJECT_ID||process.env.VITE_FIREBASE_PROJECT_ID||''){this.project=project;}
   static configured(){return Boolean(process.env.FIREBASE_CLIENT_EMAIL&&process.env.FIREBASE_PRIVATE_KEY&&(process.env.FIREBASE_PROJECT_ID||process.env.VITE_FIREBASE_PROJECT_ID));}
   private async accessToken(){
     if(this.token&&this.expires>Date.now()+60000)return this.token;

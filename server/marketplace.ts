@@ -4,7 +4,8 @@ import { DEFAULT_RISK,riskLimits,verifiedRevenue,type Payment } from '../shared/
 import { FirestoreStore,recordId,type RecordStore,type RecordData } from './firestore-store.ts';
 export const accessId=(botId:string,uid:string)=>`${botId}_${recordId(uid)}`;
 export class Marketplace {
-  constructor(readonly store:RecordStore,private runtime:(path:string,body?:unknown)=>Promise<any>){}
+  readonly store:RecordStore;private runtime:(path:string,body?:unknown)=>Promise<any>;
+  constructor(store:RecordStore,runtime:(path:string,body?:unknown)=>Promise<any>){this.store=store;this.runtime=runtime;}
   async publish(publication:any){
     const current=await this.store.get(`marketplaceBots/${publication.id}`);
     if(current&&current.creatorId!==publication.ownerUid)throw Error('Creator ownership mismatch');
