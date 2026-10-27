@@ -1,6 +1,7 @@
 import type { Candle, Result } from './types';
 import { parseStrategyConfig, validateCandles } from './strategy';
 import { simulate } from './engine';
+import { STRATEGY_RUNTIME_SOURCE } from './strategy-runtime';
 
 export function isBarComplete(barTime: number, barTf: string, executionTime: number, executionTf: string) {
   // Keep this function self-contained: runInSandbox serializes it into a
@@ -14,62 +15,25 @@ export function isBarComplete(barTime: number, barTf: string, executionTime: num
   return Boolean(barDuration && executionDuration && barTime * 1000 + barDuration <= executionTime * 1000 + executionDuration);
 }
 
-const frame = `<!doctype html>
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; connect-src 'none'; img-src 'none'; style-src 'none'; form-action 'none'; base-uri 'none'">
+const workerProgram=STRATEGY_RUNTIME_SOURCE.replace('export async function','async function')+String.raw`
+onmessage = async event => {
+ try {
+  const {code,config,datasets}=event.data;
+  const js=code.replace(/export\s+const\s+config\s*=/,'const config =').replace(/export\s+function\s+onCandle\s*\(/,'function onCandle(');
+  const decisions=await evaluate((Date,Math,performance)=>Function('Date','Math','performance','"use strict";'+js+';return {config,onCandle};')(Date,Math,performance),code,datasets,config);
+  postMessage({type:'done',decisions});
+ }catch(error){postMessage({type:'error',message:String(error&&error.message||error)});}
+};`;
+// The opaque frame denies origin access and network. Its dedicated Worker keeps
+// the UI responsive and is terminated when the frame is removed on timeout.
+const frame=`<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; worker-src blob:; connect-src 'none'; img-src 'none'; form-action 'none'; base-uri 'none'">
 <script>
-const isBarComplete = ${isBarComplete.toString()};
-onmessage = event => {
-  if (event.data.type !== 'run') return;
-  try {
-    const { code, candles, config, datasets } = event.data;
-    const durations = { m1: 60000, m5: 300000, m15: 900000, m30: 1800000, h1: 3600000, h4: 14400000, d1: 86400000 };
-    let clock = candles[0].time * 1000;
-    const NativeDate = Date;
-    class SimulatedDate extends NativeDate {
-      constructor(...args) { super(...(args.length ? args : [clock])); }
-      static now() { return clock; }
-    }
-    let seed = 2166136261;
-    for (const char of code + ':' + candles[0].time) seed = Math.imul(seed ^ char.charCodeAt(0), 16777619) >>> 0;
-    const strategyMath = Object.create(Math);
-    strategyMath.random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
-    const simulatedPerformance = Object.freeze({ now: () => clock });
-    globalThis.Date = SimulatedDate;
-    globalThis.Math = strategyMath;
-    try { Object.defineProperty(globalThis, 'performance', { value: simulatedPerformance, configurable: true }); } catch {}
-
-    const js = code
-      .replace(/export\\s+const\\s+config\\s*=/, 'const config =')
-      .replace(/export\\s+function\\s+onCandle\\s*\\(/, 'function onCandle(');
-    const strategy = Function('Date', 'Math', 'performance', '"use strict";' + js + ';return { config, onCandle };')(SimulatedDate, strategyMath, simulatedPerformance);
-    if (typeof strategy.onCandle !== 'function') throw Error('Missing onCandle(ctx)');
-    const cursors = {}, visibleBars = {}, decisions = [];
-    for (const tf of config.timeframes) {
-      cursors[tf] = 0;
-      visibleBars[tf] = [];
-      datasets[tf].forEach(Object.freeze);
-    }
-    for (let i = 0; i < candles.length; i++) {
-      const current = Object.freeze(candles[i]);
-      clock = (current.time + durations[config.executionTimeframe]) * 1000;
-      const timeframes = {};
-      for (const tf of config.timeframes) {
-        while (cursors[tf] < datasets[tf].length && isBarComplete(datasets[tf][cursors[tf]].time, tf, current.time, config.executionTimeframe)) {
-          visibleBars[tf].push(datasets[tf][cursors[tf]++]);
-        }
-        timeframes[tf] = Object.freeze(visibleBars[tf].slice(-1000));
-      }
-      const decision = strategy.onCandle({ candle: current, index: i, timeframes: Object.freeze(timeframes) });
-      if (!decision || !['BUY', 'SELL', 'WAIT'].includes(decision.action)) {
-        throw Error('Invalid strategy decision at candle ' + i + ': expected BUY, SELL, or WAIT');
-      }
-      decisions.push({ action: decision.action, stopLoss: decision.stopLoss, takeProfit: decision.takeProfit });
-    }
-    parent.postMessage({ type: 'done', decisions }, '*');
-  } catch (error) {
-    parent.postMessage({ type: 'error', message: String(error && error.message || error) }, '*');
-  }
-};
+let worker;
+onmessage=event=>{if(event.data.type!=='run')return;try{
+ worker?.terminate();const url=URL.createObjectURL(new Blob([${JSON.stringify(workerProgram)}],{type:'text/javascript'}));worker=new Worker(url);URL.revokeObjectURL(url);
+ worker.onmessage=e=>parent.postMessage(e.data,'*');worker.onerror=()=>parent.postMessage({type:'error',message:'Isolated strategy worker failed.'},'*');worker.postMessage(event.data);
+}catch(e){parent.postMessage({type:'error',message:String(e.message||e)},'*')}};
+onunload=()=>worker?.terminate();
 </script>`;
 
 function runInSandbox(
@@ -145,11 +109,12 @@ export async function runBacktest(
   const logs = [
     `Strategy validated · ${config.timeframes.join(', ')}`,
     `Loaded ${candles.length.toLocaleString()} execution candles`,
-    'Running deterministic isolated strategy…',
+    `Costs assumed · spread ${config.backtestSpread||0} price units · slippage ${config.backtestSlippage||0} per fill · commission ${config.backtestCommissionR||0}R per trade`,
+    'Running deterministic isolated strategy worker…',
   ];
   const started = performance.now();
   const decisions = await runInSandbox(code, candles, config, datasets, signal);
-  const result = simulate(candles, decisions, startingR);
+  const result = simulate(candles, decisions, startingR,{spread:config.backtestSpread||0,slippage:config.backtestSlippage||0,commissionR:config.backtestCommissionR||0});
   logs.push(...result.logs);
   for (const trade of result.trades.slice(0, 30)) {
     logs.push(`#${trade.id} ${trade.side} · ${trade.reason} · ${trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)}R`);

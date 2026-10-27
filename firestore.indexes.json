@@ -1,0 +1,8 @@
+{
+  "indexes": [],
+  "fieldOverrides": [
+    {"collectionGroup":"customerExecutions","fieldPath":"result","indexes":[]},
+    {"collectionGroup":"customerExecutions","fieldPath":"order","indexes":[]},
+    {"collectionGroup":"deployments","fieldPath":"observed","indexes":[]}
+  ]
+}

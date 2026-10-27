@@ -1,12 +1,18 @@
 import 'dotenv/config';
+import {requestLimit} from './request-limits.ts';
 import express from 'express';
 import { createPublicKey, randomUUID, verify as verifySignature } from 'node:crypto';
 import { deleteR2Object, getR2Config, listR2Objects, readR2Object, writeR2Object } from './r2.ts';
 import { candleObjectKey, countObservedGaps, intervalMs, isAsset, isTimeframe, mapConcurrent, normalizeCandles, parseCandleCsv, utcDateKey, type MarketAsset, type MarketCandle, type MarketTimeframe } from './market-data.ts';
 import { sharedBotRoutes } from './shared-bots.ts';
 import { ctraderRoutes } from './ctrader.ts';
+import { marketplace,marketplaceRoutes } from './marketplace.ts';
+import { FirestoreStore } from './firestore-store.ts';
+import { brokerRoutes,gatewayRequest } from './broker-routes.ts';
+import { BrokerTokenStore } from './broker-tokens.ts';
 
 const app = express();
+app.use(['/api/marketplace','/api/brokers'],requestLimit);
 app.use(express.json({ limit: '10mb' }));
 const assets = ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD'] as const;
 
@@ -235,8 +241,10 @@ async function firebaseUidOrReply(req: express.Request, res: express.Response): 
   }
 }
 
-const publications = sharedBotRoutes(app, { read: readR2Object, write: writeR2Object, remove: deleteR2Object, uid: firebaseUidOrReply, root: userBotRoot });
-ctraderRoutes(app, { read: readR2Object, write: writeR2Object, uid: firebaseUidOrReply });
+const publications = sharedBotRoutes(app, { read: readR2Object, write: writeR2Object, remove: deleteR2Object, uid: firebaseUidOrReply, root: userBotRoot,...(FirestoreStore.configured()?{onPublish:(bot:any)=>marketplace.publish(bot),onAcquire:async(uid:string,id:string,bot:any)=>{if(!await marketplace.store.get(`marketplaceBots/${id}`))await marketplace.publish(bot);return marketplace.acquire(uid,id)},onUnpublish:(uid:string,id:string)=>marketplace.unpublish(uid,id),onView:(bot:any,visitor:string)=>marketplace.view(bot,visitor)}:{}) });
+ctraderRoutes(app, { ...(process.env.CTRADER_GATEWAY_URL?{saveTokens:async(uid:string,tokens:any)=>{await gatewayRequest('authorizeTokens',{uid,tokens})}}:{}),read: readR2Object, write: writeR2Object, uid: firebaseUidOrReply,...(FirestoreStore.configured()?{onAuthorized:async(uid:string)=>{await marketplace.emergencyPause(uid,'Broker authorization changed');await marketplace.store.put(`brokerConnections/${Buffer.from(uid).toString('base64url')}`,{uid,connected:false,emergencyPaused:true,updatedAt:Date.now()})}}:{}) });
+marketplaceRoutes(app,{uid:firebaseUidOrReply,read:readR2Object,write:writeR2Object,root:userBotRoot,gateway:gatewayRequest});
+brokerRoutes(app,{uid:firebaseUidOrReply,tokens:new BrokerTokenStore({read:readR2Object,write:writeR2Object}),remove:deleteR2Object});
 
 app.put('/api/user-bots/:botId/current', async (req, res) => {
   const uid = await firebaseUidOrReply(req, res); if (!uid) return;

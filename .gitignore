@@ -3,3 +3,10 @@ dist/
 .env
 .dukascopy-cache/
 coverage/
+
+.wrangler/
+workers/wrangler.production.json
+workers/.dev.vars
+
+.env.local
+.env.*.local
