@@ -42,3 +42,22 @@
  .economy-discovery-heading h1{margin:10px 0;font-size:32px}
  .economy-search input,.economy-search select{min-height:40px}
 }
+
+/* Mobile creator navigation sits immediately below bot search. */
+.mobile-library-nav,.economy-nav .account-link-mobile{display:none}
+.economy-account-settings{margin:24px 0;padding:20px;border:1px solid #ffffff1a;border-radius:12px;background:#111713}
+.economy-account-settings h2{font-size:19px;margin:0 0 8px}.economy-account-settings p{font-size:12px;color:#a3afa5;line-height:1.6}.economy-account-settings button{border:1px solid #ffffff25;min-height:42px}
+@media(max-width:640px){
+ .creator-home:not(.economy-account-screen)>.economy-profile,.creator-home:not(.economy-account-screen)>.economy-profile-loading{display:none}
+ .economy-home>.creator-nav-primary{display:none}
+ .mobile-library-nav{display:block;min-width:0;margin:-3px 0 16px}
+ .mobile-library-nav .economy-nav{margin:0;gap:2px;scrollbar-width:thin;overflow-x:auto;overflow-y:hidden}
+ .mobile-library-nav .economy-nav button,.mobile-library-nav .economy-nav a{flex:none;min-height:44px;padding:12px 11px;font-size:11px}
+ .creator-nav-primary .economy-nav{margin:8px 0 0}
+ .creator-home .account-link-desktop{display:none}
+ .creator-home .economy-nav .account-link-mobile{display:flex}
+ .economy-account-screen>.economy-profile{margin-top:16px}
+ .economy-account-screen .economy-profile-actions{margin-left:0;flex-wrap:wrap}
+ .economy-account-screen .economy-profile-actions .ghost{min-height:40px}
+ .economy-home>.economy-edit:not(.economy-release){order:4}
+}
