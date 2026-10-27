@@ -213,7 +213,7 @@ ${appContext}`;
   finally{setShareBusy(false)}
  };
  useEffect(()=>{if(!pendingSharedAction||!authReady||screen!=='shared'||!cloudClient)return;const action=pendingSharedAction;setPendingSharedAction(null);void openSharedAction(action)},[pendingSharedAction,authReady,screen,cloudClient]);
- useEffect(()=>{if(!queuedBacktest||draftId!==queuedBacktest||screen!=='workspace'||!codeHydrated||busy||!availableDates.includes(from)||!availableDates.includes(to))return;setQueuedBacktest('');void backtest()},[queuedBacktest,draftId,screen,codeHydrated,busy,from,to,marketAvailability,executionTimeframe]);
+ useEffect(()=>{if(!queuedBacktest||draftId!==queuedBacktest||screen!=='workspace'||!codeHydrated||busy||!availableDates.includes(from)||!availableDates.includes(to))return;const intervals:Record<string,number>={m1:60_000,m5:300_000,m15:900_000,m30:1_800_000,h1:3_600_000,h4:14_400_000,d1:86_400_000};const start=Date.parse(`${from}T00:00:00Z`),end=Date.parse(`${to}T23:59:59Z`);if(!Number.isFinite(start)||!Number.isFinite(end)||end<=start||Math.ceil((end-start)/(intervals[executionTimeframe]||60_000))+500>50_000)return;setQueuedBacktest('');void backtest()},[queuedBacktest,draftId,screen,codeHydrated,busy,from,to,marketAvailability,executionTimeframe]);
  const prepareSharing=async()=>{
   if(!shareTarget||!cloudClient)throw new Error('Sign in to share a robot.');
   if(shareTarget.id===draftId&&created){
