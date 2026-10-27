@@ -54,6 +54,27 @@ describe('HTTP authorization and public metadata',()=>{
  it('requires sign-in for source, publishing, acquisitions, profiles and member operations',async()=>{for(const path of ['/me','/members','/acquisitions','/versions/secret/source','/invitations'])expect((await request(path)).status).toBe(401);expect((await request('/projects/original/packages',undefined,'POST',{})).status).toBe(401)});
  it('public discovery does not leak source, private IDs, emails or storage pointers',async()=>{const p=await release();const listing=await request('/bots');expect(listing.status).toBe(200);expect(listing.data.items[0].name).toBe('Gold strategy');const encoded=JSON.stringify(listing.data);expect(encoded).not.toContain('privateBotId');expect(encoded).not.toContain('codeKey');expect(encoded).not.toContain('sourceVersions');const detail=await request('/bots/listing');expect(detail.data.packages.items[0].id).toBe(p.id);expect(JSON.stringify(detail.data)).not.toContain('codeKey');expect(JSON.stringify(detail.data)).not.toContain('privateBotId')});
  it('denies cross-user source access and paginates actual records',async()=>{const p=await release(),a=await economy.acquire(alice,p.id);expect((await request(`/versions/${a.versionIds[0]}/source?acquisition=${a.id}`,'bob')).status).toBe(400);for(let n=0;n<32;n++)await store.put(`botActivity/event_${String(n).padStart(2,'0')}`,{uid:'alice',createdAt:n,type:'test'});const first=await request('/activity','alice');expect(first.data.items).toHaveLength(30);const second=await request(`/activity?after=${first.data.next}`,'alice');expect(second.data.items).toHaveLength(2);expect(second.data.next).toBeNull()});
+ it('stores covers in object storage, serves the image, and updates public and private views',async()=>{
+  const png='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB';
+  await save('creator','coverbot');await store.put('users/creator/bots/coverbot',{name:'Cover bot',asset:'XAUUSD',prompt:'Description'});
+  expect((await request('/projects/coverbot/cover','alice','PUT',{coverImage:png})).status).toBe(400);
+  const upload=await request('/projects/coverbot/cover','creator','PUT',{coverImage:png});expect(upload.status).toBe(200);expect(upload.data.coverImage).toMatch(/^\/api\/economy\/images\//);
+  const image=await fetch(base+upload.data.coverImage);expect(image.status).toBe(200);expect(image.headers.get('content-type')).toContain('image/png');expect(Buffer.from(await image.arrayBuffer())).toEqual(Buffer.from(png.split(',')[1],'base64'));
+  expect((await request('/covers','alice')).data.items).toHaveLength(0);expect((await request('/covers','creator')).data.items[0].coverImage).toBe(upload.data.coverImage);
+  const publish=await request('/projects/coverbot/publish','creator','POST',{});const detail=await request(`/bots/${publish.data.id}`);expect(detail.data.bot.coverImage).toBe(upload.data.coverImage);
+  expect(JSON.stringify(await store.get(`marketplaceBots/${publish.data.id}`))).not.toContain('data:image');
+  const removed=await request('/projects/coverbot/cover','creator','PUT',{coverImage:''});expect(removed.status).toBe(200);expect((await request(`/bots/${publish.data.id}`)).data.bot.coverImage).toBe('');
+ });
+ it('keeps legacy sharing covers in R2 and stores a small marketplace URL',async()=>{
+  const png='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB';
+  await economy.legacyPublish({id:'legacy',ownerUid:'creator',botId:'original',name:'Legacy',asset:'XAUUSD',description:'Description',access:'free',published:true,code:starterCode,coverImage:png});
+  const listing=await store.get('marketplaceBots/legacy');expect(listing?.coverImage).toMatch(/^\/api\/economy\/images\//);expect(JSON.stringify(listing)).not.toContain('data:image');expect([...objects.keys()].some(key=>key.startsWith('bot-economy/images/'))).toBe(true);
+ });
+ it('serves creator avatar and profile cover from object storage',async()=>{
+  const png='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB';
+  const response=await request('/me','creator','PUT',{username:'picturecreator',displayName:'Creator',bio:'',avatar:png,cover:png});expect(response.status).toBe(200);
+  const profile=await request('/creators/picturecreator');for(const url of [profile.data.avatar,profile.data.cover]){expect(url).toMatch(/^\/api\/economy\/images\//);const image=await fetch(base+url);expect(image.status).toBe(200);expect(image.headers.get('content-type')).toContain('image/png');}
+ });
  it('publishes a saved bot once to discovery and the creator profile without exposing its source',async()=>{
   await save('creator','clickbot');await store.put('users/creator/bots/clickbot',{name:'Click bot',asset:'XAUUSD',prompt:'A public description'});
   expect((await request('/projects/clickbot/publish',undefined,'POST',{})).status).toBe(401);
