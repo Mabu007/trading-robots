@@ -25,7 +25,6 @@ export type CloudClient = {
   getProfile: () => { uid: string; email: string | null; displayName: string; isAnonymous: boolean; emailVerified: boolean } | null;
   createAccount: (email: string, password: string, displayName: string) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
-  signInWithGoogle: () => Promise<void>;
   sendVerificationEmail: () => Promise<void>;
   refreshIdentity: () => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
@@ -62,7 +61,6 @@ export function connectFirebase(): Promise<CloudClient | null> {
     const auth = authSdk.getAuth(app);
     await authSdk.setPersistence(auth, authSdk.browserLocalPersistence);
     await auth.authStateReady();
-    await authSdk.getRedirectResult(auth);
     const db = storeSdk.getFirestore(app);
     const signedInUser = async () => {
       await auth.authStateReady();
@@ -154,13 +152,6 @@ export function connectFirebase(): Promise<CloudClient | null> {
         await authSdk.signInWithEmailAndPassword(auth, email, password);
         await auth.authStateReady();
       },
-      async signInWithGoogle() {
-        const provider = new authSdk.GoogleAuthProvider();
-        provider.setCustomParameters({ prompt: 'select_account' });
-        // Popup completes on this origin, avoiding redirect storage restrictions on hosted domains.
-        if (auth.currentUser?.isAnonymous) await authSdk.linkWithPopup(auth.currentUser, provider);
-        else await authSdk.signInWithPopup(auth, provider);
-      },
       async sendVerificationEmail(){const user=await signedInUser();if(user.emailVerified)return;if(!user.email)throw Error('This account needs an email address.');await authSdk.sendEmailVerification(user);},
       async refreshIdentity(){const user=await signedInUser();await authSdk.reload(user);await user.getIdToken(true);},
       async sendPasswordReset(email: string) {
@@ -185,21 +176,17 @@ export function readableFirebaseError(error: unknown): string {
   const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : '';
   if(error instanceof Error&&/Account services are not configured|Your sign-in is no longer active/.test(error.message))return error.message;
   if (code.includes('auth/api-key-not-valid') || code.includes('auth/configuration-not-found')) return 'Account services are temporarily unavailable. Please try again later.';
-  if (code.includes('auth/unauthorized-domain')) return `Google sign-in needs ${window.location.hostname} added to Firebase Authentication → Settings → Authorized domains.`;
   if (code.includes('auth/too-many-requests')) return 'Too many sign-in attempts. Wait a few minutes, then try again.';
   if (code.includes('auth/user-disabled')) return 'This account is currently unavailable. Please contact support.';
   if (code.includes('auth/network-request-failed')) return 'Could not reach account services. Check your connection and try again.';
-  if (code.includes('auth/account-exists-with-different-credential')) return 'An account already uses this email. Sign in with your email and password, then connect Google from your account settings.';
+  if (code.includes('auth/account-exists-with-different-credential')) return 'An account already uses this email. Try signing in or resetting your password.';
   if (code.includes('auth/admin-restricted-operation') || code.includes('auth/operation-not-allowed')) return 'This sign-in option is temporarily unavailable. Try another option or contact support.';
   if (code.includes('permission-denied')) return 'Could not access your saved workspace. Please refresh and try again.';
   if (code.includes('auth/email-already-in-use') || code.includes('auth/credential-already-in-use')) return 'That email already has an account. Choose Sign in to open its robot library.';
   if (code.includes('auth/weak-password')) return 'Choose a password with at least 6 characters.';
   if (code.includes('auth/invalid-email')) return 'Enter a valid email address.';
   if (code.includes('auth/invalid-credential') || code.includes('auth/wrong-password') || code.includes('auth/user-not-found')) return 'Email or password is incorrect. Check the details or reset your password.';
-  if (code.includes('auth/popup-blocked')) return 'Google sign-in popup was blocked. Allow popups for this site and try again.';
-  if (code.includes('auth/popup-closed-by-user')) return 'Google sign-in was cancelled. Try again when you are ready.';
   if (code.includes('auth/web-storage-unsupported')) return 'This browser is blocking secure sign-in storage. Enable site data and try again.';
-  if (code.includes('auth/credential-already-in-use')) return 'That Google account already has a Trading Vibes profile. Choose Sign in to open it.';
   if (code.includes('unavailable') || code.includes('network')) return 'Cloud sync is temporarily unavailable. Your work on this device is still available.';
   return 'Something went wrong with account sync. Please try again.';
 }

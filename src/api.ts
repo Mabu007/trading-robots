@@ -96,7 +96,7 @@ export async function postApiStream(
   try {
     while (!finished) {
       const { value, done } = await reader.read();
-      pending += decoder.decode(value, { stream: !done }).replace(/\r\n/g, '\n');
+      pending = (pending + decoder.decode(value, { stream: !done })).replace(/\r\n/g, '\n');
       let boundary = pending.indexOf('\n\n');
       while (boundary >= 0) {
         processEvent(pending.slice(0, boundary));
