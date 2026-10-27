@@ -22,10 +22,12 @@ export type CloudClient = {
   saveVersionPointer: (botId: string, version: BotVersion) => Promise<void>;
   renameVersionPointer: (botId: string, version: BotVersion) => Promise<void>;
   deleteVersionPointer: (botId: string, versionId: string) => Promise<void>;
-  getProfile: () => { uid: string; email: string | null; displayName: string; isAnonymous: boolean } | null;
+  getProfile: () => { uid: string; email: string | null; displayName: string; isAnonymous: boolean; emailVerified: boolean } | null;
   createAccount: (email: string, password: string, displayName: string) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
+  sendVerificationEmail: () => Promise<void>;
+  refreshIdentity: () => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
   updateDisplayName: (displayName: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -138,7 +140,7 @@ export function connectFirebase(): Promise<CloudClient | null> {
       getProfile() {
         const user = auth.currentUser;
         if (!user) return null;
-        return { uid: user.uid, email: user.email, displayName: user.displayName || '', isAnonymous: user.isAnonymous };
+        return { uid: user.uid, email: user.email, displayName: user.displayName || '', isAnonymous: user.isAnonymous, emailVerified:user.emailVerified };
       },
       async createAccount(email: string, password: string, displayName: string) {
         const user = auth.currentUser;
@@ -159,6 +161,8 @@ export function connectFirebase(): Promise<CloudClient | null> {
         if (auth.currentUser?.isAnonymous) await authSdk.linkWithPopup(auth.currentUser, provider);
         else await authSdk.signInWithPopup(auth, provider);
       },
+      async sendVerificationEmail(){const user=await signedInUser();if(user.emailVerified)return;if(!user.email)throw Error('This account needs an email address.');await authSdk.sendEmailVerification(user);},
+      async refreshIdentity(){const user=await signedInUser();await authSdk.reload(user);await user.getIdToken(true);},
       async sendPasswordReset(email: string) {
         await authSdk.sendPasswordResetEmail(auth, email);
       },

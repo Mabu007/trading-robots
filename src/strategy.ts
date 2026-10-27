@@ -36,6 +36,7 @@ export function parseStrategyConfig(code:string) {
   for(const tf of tfs)if(!allowedTimeframes.includes(tf))throw new Error(`Unsupported timeframe: ${tf}. Use ${allowedTimeframes.join(', ')}.`);
   if(!Number.isFinite(config.riskPercent)||config.riskPercent<=0||config.riskPercent>10)throw new Error('riskPercent must be between 0 and 10.');
   if(!Number.isFinite(config.riskReward)||config.riskReward<=0)throw new Error('riskReward must be a positive number.');
+  for(const field of ['backtestSpread','backtestSlippage','backtestCommissionR'])if(config[field]!==undefined&&(!Number.isFinite(config[field])||config[field]<0))throw Error(`${field} must be a non-negative number.`);
   return {...config,timeframes:tfs};
 }
 export function validateCandles(input:Candle[]) {

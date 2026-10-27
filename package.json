@@ -9,7 +9,13 @@
     "build": "tsc -b && vite build",
     "test": "vitest run --config vitest.config.ts",
     "server": "node --import tsx server/local.ts",
-    "dev:all": "npm run dev"
+    "dev:all": "npm run dev",
+    "gateway": "node --import tsx gateway/local.ts",
+    "check:runtime": "tsc -p workers/tsconfig.json && tsc -p gateway/tsconfig.json",
+    "worker:dev": "wrangler dev --config workers/wrangler.local.jsonc",
+    "worker:build": "wrangler deploy --dry-run --config workers/wrangler.local.jsonc",
+    "worker:configure": "node scripts/configure-cloudflare.mjs",
+    "test:cloudflare": "node scripts/test-cloudflare-runtime.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1156.0",
@@ -23,6 +29,7 @@
     "react-dom": "^19.1.1"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261027.1",
     "@types/express": "^5.0.3",
     "@types/node": "^24.5.2",
     "@types/react": "^19.1.13",
@@ -32,6 +39,10 @@
     "tsx": "^4.20.5",
     "typescript": "~5.9.2",
     "vite": "^7.1.7",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "wrangler": "^4.153.0"
+  },
+  "overrides": {
+    "dompurify": "3.4.17"
   }
 }

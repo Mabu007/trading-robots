@@ -1,20 +1,28 @@
 import 'dotenv/config';
+import {requestLimit} from './request-limits.ts';
 import express from 'express';
 import { createPublicKey, randomUUID, verify as verifySignature } from 'node:crypto';
 import { deleteR2Object, getR2Config, listR2Objects, readR2Object, writeR2Object } from './r2.ts';
 import { candleObjectKey, countObservedGaps, intervalMs, isAsset, isTimeframe, mapConcurrent, normalizeCandles, parseCandleCsv, utcDateKey, type MarketAsset, type MarketCandle, type MarketTimeframe } from './market-data.ts';
+import {recordAIUsage} from './usage.ts';
+import { BotEconomy, economyRoutes } from './bot-economy.ts';
 import { sharedBotRoutes } from './shared-bots.ts';
 import { ctraderRoutes } from './ctrader.ts';
+import { marketplace,marketplaceRoutes } from './marketplace.ts';
+import { FirestoreStore } from './firestore-store.ts';
+import { brokerRoutes,gatewayRequest } from './broker-routes.ts';
+import { BrokerTokenStore } from './broker-tokens.ts';
 
 const app = express();
+app.use(['/api/marketplace','/api/brokers','/api/economy'],requestLimit);
 app.use(express.json({ limit: '10mb' }));
 const assets = ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD'] as const;
 
 type StoredMarketDay = { schemaVersion: 1; asset: MarketAsset; timeframe: MarketTimeframe; date: string; source: 'manual'; priceType: 'unknown'; updatedAt: string; candles: MarketCandle[] };
 
-type FirebaseClaims = { sub?: string; user_id?: string; aud?: string; iss?: string; exp?: number; iat?: number };
+type FirebaseClaims = { email?:string; email_verified?:boolean; name?:string; sub?: string; user_id?: string; aud?: string; iss?: string; exp?: number; iat?: number };
 let secureTokenJwks: { keys: any[]; expiresAt: number } | undefined;
-async function verifyFirebaseUser(authorization: string | undefined): Promise<string> {
+async function verifyFirebaseUser(authorization: string | undefined): Promise<{uid:string;email?:string;emailVerified:boolean;name?:string}> {
   const projectId = process.env.FIREBASE_PROJECT_ID?.trim() || process.env.VITE_FIREBASE_PROJECT_ID?.trim();
   if (!projectId) throw new Error('Firebase project ID is not configured on the API server.');
   const token = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
@@ -42,7 +50,7 @@ async function verifyFirebaseUser(authorization: string | undefined): Promise<st
   }
   const uid = claims.user_id || claims.sub;
   if (!uid || uid.length > 128) throw new Error('Firebase account ID is invalid.');
-  return uid;
+  return {uid,email:claims.email,emailVerified:claims.email_verified===true,name:claims.name};
 }
 
 function sameOhlc(left: MarketCandle, right: MarketCandle): boolean {
@@ -226,7 +234,7 @@ app.get('/api/assets', (_req, res) => res.json([...assets]));
 function validBotId(value: string): boolean { return /^[A-Za-z0-9_-]{1,100}$/.test(value); }
 function userBotRoot(uid: string, botId: string): string { return `user-bots/${Buffer.from(uid).toString('base64url')}/${botId}`; }
 async function firebaseUidOrReply(req: express.Request, res: express.Response): Promise<string | null> {
-  try { return await verifyFirebaseUser(req.header('authorization')); }
+  try { const identity=await verifyFirebaseUser(req.header('authorization'));(req as any).verifiedIdentity=identity;res.locals.identity=identity;return identity.uid; }
   catch (error) {
     const message = error instanceof Error ? error.message : 'Could not verify Firebase sign-in.';
     const unavailable = /not configured|Could not verify Firebase|verification is unavailable/i.test(message);
@@ -235,8 +243,12 @@ async function firebaseUidOrReply(req: express.Request, res: express.Response): 
   }
 }
 
-const publications = sharedBotRoutes(app, { read: readR2Object, write: writeR2Object, remove: deleteR2Object, uid: firebaseUidOrReply, root: userBotRoot });
-ctraderRoutes(app, { read: readR2Object, write: writeR2Object, uid: firebaseUidOrReply });
+const economy=new BotEconomy(marketplace.store,{read:readR2Object,write:writeR2Object,root:userBotRoot},marketplace);
+economyRoutes(app,economy,async(req,res)=>{const uid=await firebaseUidOrReply(req,res);return uid?res.locals.identity:null;});
+const publications = sharedBotRoutes(app, { read: readR2Object, write: writeR2Object, remove: deleteR2Object, uid: firebaseUidOrReply, root: userBotRoot,...(FirestoreStore.configured()?{onPublish:(bot:any)=>economy.legacyPublish(bot),onAcquire:async(uid:string,id:string,bot:any)=>{if(!await marketplace.store.get(`marketplaceBots/${id}`))await marketplace.publish(bot);return economy.legacyCopy(uid,bot)},onUnpublish:(uid:string,id:string)=>marketplace.unpublish(uid,id),onView:(bot:any,visitor:string)=>marketplace.view(bot,visitor)}:{}) });
+ctraderRoutes(app, { ...(process.env.CTRADER_GATEWAY_URL?{saveTokens:async(uid:string,tokens:any)=>{await gatewayRequest('authorizeTokens',{uid,tokens})}}:{}),read: readR2Object, write: writeR2Object, uid: firebaseUidOrReply,...(FirestoreStore.configured()?{onAuthorized:async(uid:string)=>{await marketplace.emergencyPause(uid,'Broker authorization changed');await marketplace.store.put(`brokerConnections/${Buffer.from(uid).toString('base64url')}`,{uid,connected:false,emergencyPaused:true,updatedAt:Date.now()})}}:{}) });
+marketplaceRoutes(app,{uid:firebaseUidOrReply,read:readR2Object,write:writeR2Object,root:userBotRoot,gateway:gatewayRequest,checkLicense:(uid,botId,code)=>economy.checkDeployment(uid,botId,code),ensureMember:(uid,botId,req)=>economy.ensureMember((req as any).verifiedIdentity,botId),versionSource:(uid,versionId)=>economy.source(uid,versionId)});
+brokerRoutes(app,{uid:firebaseUidOrReply,tokens:new BrokerTokenStore({read:readR2Object,write:writeR2Object}),remove:deleteR2Object});
 
 app.put('/api/user-bots/:botId/current', async (req, res) => {
   const uid = await firebaseUidOrReply(req, res); if (!uid) return;
@@ -628,6 +640,7 @@ app.post('/api/ai', async (req, res) => {
 
   const model = process.env.OPENROUTER_MODEL?.trim() || 'minimax/minimax-m3:free';
   const fallbackModel = process.env.OPENROUTER_FALLBACK_MODEL?.trim();
+  let meteredModel=model,usageStatus:'completed'|'failed'|'interrupted'='failed',measuredUsage:any=null,usageBuffer='';const usageDecoder=new TextDecoder();
   let upstreamReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   const clientAbort = new AbortController();
   res.status(200);
@@ -653,7 +666,7 @@ app.post('/api/ai', async (req, res) => {
       ? [{ role: 'system', content: `Use the following available historical price data when writing XAUUSD code. Treat it as historical reference; code must still operate on runtime ctx candles, never hard-code a guessed live price.\n\n${marketContext}` }, ...messages]
       : messages;
     const requestModel = (targetModel: string) => requestOpenRouter(
-      JSON.stringify({ model: targetModel, messages: enrichedMessages, temperature: 0.2, max_tokens: maxTokens, stream: true }),
+      JSON.stringify({ model: targetModel, messages: enrichedMessages, temperature: 0.2, max_tokens: maxTokens, stream: true,stream_options:{include_usage:true} }),
       apiKey,
       AbortSignal.any([clientAbort.signal, AbortSignal.timeout(45_000)]),
     );
@@ -675,6 +688,7 @@ app.post('/api/ai', async (req, res) => {
       usedModel = fallbackModel;
       response = await requestModel(fallbackModel);
     }
+    meteredModel=usedModel;
     if (!response.ok) {
       const responseBody = await response.text();
       let data: any = {};
@@ -692,10 +706,12 @@ app.post('/api/ai', async (req, res) => {
     while (true) {
       const { value, done } = await upstreamReader.read();
       if (done) break;
+      usageBuffer+=usageDecoder.decode(value,{stream:true});const lines=usageBuffer.split('\n');usageBuffer=lines.pop()!.slice(-16000);for(const line of lines){if(line.startsWith('data: ')){try{const event=JSON.parse(line.slice(6));if(event.usage)measuredUsage=event.usage;}catch{}}}
       if (!res.write(value)) await new Promise<void>(resolve => res.once('drain', resolve));
     }
-    return res.end();
+    usageStatus='completed';return res.end();
   } catch (error) {
+    if(clientAbort.signal.aborted)usageStatus='interrupted';
     const causes: any[] = [];
     const pending: any[] = [error];
     const seen = new Set<unknown>();
@@ -720,6 +736,7 @@ app.post('/api/ai', async (req, res) => {
     return res.end();
   } finally {
     clearInterval(heartbeat);
+    if(FirestoreStore.configured())await recordAIUsage(marketplace.store,uid,{provider:'openrouter',model:meteredModel,status:usageStatus,inputTokens:measuredUsage?.prompt_tokens,outputTokens:measuredUsage?.completion_tokens}).catch(()=>console.warn('AI usage record unavailable'));
   }
 });
 

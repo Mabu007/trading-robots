@@ -1,6 +1,13 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Marketplace, broker and execution records are accessed only through the
+    // authenticated API. Admin IAM bypasses these rules; browsers cannot forge
+    // entitlements, sourceVersions, packages, acquisitions, forks, invitations,
+    // memberships, follows, revenue, signals, ownership or deployment health.
+    match /{collection}/{document} {
+      allow read, write: if false;
+    }
     match /users/{userId}/bots/{botId} {
       function ownsBot() {
         return request.auth != null && request.auth.uid == userId;
