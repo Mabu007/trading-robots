@@ -13,7 +13,7 @@ export type BotVersion = { id: string; name: string; storageKey: string; created
 
 export type CloudClient = {
   listBots: () => Promise<CloudBot[]>;
-  getIdToken: () => Promise<string>;
+  getIdToken: (forceRefresh?: boolean) => Promise<string>;
   saveBot: (bot: CloudBot, storageKey: string) => Promise<void>;
   deleteBot: (botId: string) => Promise<void>;
   loadChats: (botId: string) => Promise<any[]>;
@@ -78,8 +78,8 @@ export function connectFirebase(): Promise<CloudClient | null> {
         const snapshot = await storeSdk.getDocs(storeSdk.query(botCollection, storeSdk.limit(100)));
         return snapshot.docs.map((doc: any) => { const data = doc.data(); return { id: doc.id, ...data, storageKey: data.storage?.key } }) as CloudBot[];
       },
-      async getIdToken() {
-        return (await signedInUser()).getIdToken();
+      async getIdToken(forceRefresh = false) {
+        return (await signedInUser()).getIdToken(forceRefresh);
       },
       async saveBot(bot: CloudBot, storageKey: string) {
         const reference = storeSdk.doc(db, 'users', await currentUserId(), 'bots', bot.id);
