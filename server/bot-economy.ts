@@ -82,14 +82,14 @@ export class BotEconomy {
     });
     return {coverImage:url};
   }
-  async publishProject(who:Identity,botId:string){
+  async publishProject(who:Identity,botId:string,input:RecordData={}){
     id(botId);
     if(botId.length>100)throw Error('Invalid robot ID.');
     const [saved,bot,profile,cover]=await Promise.all([this.current(who.uid,botId),this.store.get(`users/${who.uid}/bots/${botId}`),this.profile(who),this.store.get(`botCovers/${recordId(who.uid)}_${botId}`)]);
     if(!bot)throw Error('Save this robot to your account before making it public.');
     if(!saved.code.trim())throw Error('Save a strategy before making this robot public.');
     await this.checkLicense(who.uid,botId,saved.code);
-    const name=text(bot.name,64,true),description=text(typeof bot.prompt==='string'?bot.prompt.slice(0,2000):'',2000),asset=bot.asset;
+    const name=text(bot.name,64,true),defaultDescription=text(typeof bot.prompt==='string'?bot.prompt.slice(0,2000):'',2000),description=input.description===undefined?undefined:text(input.description,2000),asset=bot.asset;
     if(!['XAUUSD','EURUSD','GBPUSD','USDJPY'].includes(asset))throw Error('This robot has an unsupported asset.');
     let timeframe:string|undefined;try{timeframe=parseStrategyConfig(saved.code).executionTimeframe}catch{/* A profile listing does not execute source. */}
     const pointerKey=`${this.storage.root(who.uid,botId)}/publication.json`,raw=await this.storage.read(pointerKey);
@@ -105,7 +105,7 @@ export class BotEconomy {
       // did not intend when making a profile-only listing public.
       if(current&&!current.published&&(current.managedAccess||current.packageId))throw Error('Use sharing or releases to republish this existing bot and its access settings.');
       if(current?.published&&(current.managedAccess||current.packageId))return {};
-      return {[path]:{...current,id:listingId,privateBotId:botId,creatorId:who.uid,name,description,asset,timeframe,coverImage:cover?.coverImage||current?.coverImage||'',creator:profile.displayName,username:profile.username,access:current?.access||'free',priceMinor:current?.priceMinor||0,currency:'ZAR',managedAccess:Boolean(current?.managedAccess),published:true,publicCreatorId:who.uid,createdAt:current?.createdAt||now,updatedAt:now}};
+      return {[path]:{...current,id:listingId,privateBotId:botId,creatorId:who.uid,name,description:description??current?.description??defaultDescription,asset,timeframe,coverImage:cover?.coverImage||current?.coverImage||'',creator:profile.displayName,username:profile.username,access:current?.access||'free',priceMinor:current?.priceMinor||0,currency:'ZAR',managedAccess:Boolean(current?.managedAccess),published:true,publicCreatorId:who.uid,createdAt:current?.createdAt||now,updatedAt:now}};
     });
     return {id:listingId,username:profile.username};
   }
@@ -243,7 +243,7 @@ export function economyRoutes(app:Express,economy:BotEconomy,authenticate:(req:R
   route('get','/creators/:username/follow',true,async(who,req)=>{const p=await economy.creator(String(req.params.username));return {following:Boolean((await economy.store.get(`creatorFollows/${recordId(who.uid)}_${recordId(p.uid)}`))?.active)};});
   route('get','/bots',false,async(_,req)=>{const page=await economy.page('marketplaceBots','published',true,after(req));return {...page,items:page.items.map(publicBot)};});
   route('get','/bots/:id',false,async(_,req)=>{const b=await economy.store.get(`marketplaceBots/${req.params.id}`);if(!b?.published)throw Error('Bot unavailable.');const [packages,acquisitions,remixes]=await Promise.all([economy.page('botPackages','botId',b.id,after(req)),economy.count('botAcquisitions','botId',b.id),economy.count('botForks','botId',b.id)]);return {bot:publicBot(b),packages:{...packages,items:packages.items.filter(p=>p.published).map(publicPackage)},acquisitions,remixes};});
-  route('post','/projects/:botId/publish',true,(who,req)=>economy.publishProject(who,String(req.params.botId)));
+  route('post','/projects/:botId/publish',true,(who,req)=>economy.publishProject(who,String(req.params.botId),req.body||{}));
   route('put','/projects/:botId/cover',true,(who,req)=>economy.setBotCover(who,String(req.params.botId),req.body?.coverImage));
   route('get','/covers',true,(who,req)=>economy.page('botCovers','uid',who.uid,after(req),100));
   route('post','/projects/:botId/versions',true,(who,req)=>economy.version(who.uid,String(req.params.botId),req.body));

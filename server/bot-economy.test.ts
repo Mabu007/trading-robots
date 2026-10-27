@@ -84,7 +84,10 @@ describe('HTTP authorization and public metadata',()=>{
   expect((await request('/projects/clickbot/publish',undefined,'POST',{})).status).toBe(401);
   expect((await request('/projects/clickbot/publish','alice','POST',{})).status).toBe(400);
   const first=await request('/projects/clickbot/publish','creator','POST',{});expect(first.status).toBe(200);
-  const second=await request('/projects/clickbot/publish','creator','POST',{});expect(second.data.id).toBe(first.data.id);
+  const second=await request('/projects/clickbot/publish','creator','POST',{description:'A new public description'});expect(second.data.id).toBe(first.data.id);
+  expect((await request(`/bots/${first.data.id}`)).data.bot.description).toBe('A new public description');
+  expect((await request('/projects/clickbot/publish','creator','POST',{})).status).toBe(200);
+  expect((await request(`/bots/${first.data.id}`)).data.bot.description).toBe('A new public description');
   const discovery=await request('/bots'),profile=await request(`/creators/${first.data.username}/bots`),detail=await request(`/bots/${first.data.id}`);
   expect(discovery.data.items.filter((bot:any)=>bot.id===first.data.id)).toHaveLength(1);expect(profile.data.items.some((bot:any)=>bot.id===first.data.id)).toBe(true);
   expect(detail.data.bot).toMatchObject({name:'Click bot',managedAccess:false});expect(detail.data.packages.items).toHaveLength(0);
