@@ -1,0 +1,65 @@
+{
+  "indexes": [],
+  "fieldOverrides": [
+    {
+      "collectionGroup": "customerExecutions",
+      "fieldPath": "result",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "customerExecutions",
+      "fieldPath": "order",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "deployments",
+      "fieldPath": "observed",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "sourceVersions",
+      "fieldPath": "config",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "sourceVersions",
+      "fieldPath": "provenance",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "botPackages",
+      "fieldPath": "versions",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "botPackages",
+      "fieldPath": "licenseTerms",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "botPackages",
+      "fieldPath": "provenance",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "botAcquisitions",
+      "fieldPath": "versions",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "botAcquisitions",
+      "fieldPath": "licenseTerms",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creatorProfiles",
+      "fieldPath": "bio",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "botForks",
+      "fieldPath": "provenance",
+      "indexes": []
+    }
+  ]
+}

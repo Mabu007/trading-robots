@@ -26,7 +26,7 @@ describe('shared robots', () => {
     const saved = await publish(); expect(saved.status).toBe(200);
     const result = await request(`/api/shared-bots/${saved.body.publication.id}`);
     expect(result.status).toBe(200);
-    expect(Object.keys(result.body.bot).sort()).toEqual(['id','name','asset','description','coverImage','access','publishedAt'].sort());
+    expect(Object.keys(result.body.bot).sort()).toEqual(['id','name','asset','description','coverImage','access','publishedAt','priceMinor','currency','creator'].sort());
     expect(result.body.bot.name).toBe('Gold robot');
   });
   it('requires authentication for publishing, settings, and copying', async () => {

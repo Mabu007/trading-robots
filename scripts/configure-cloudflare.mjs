@@ -1,0 +1,15 @@
+// Inventory first. This script never creates infrastructure or deploys a Worker.
+import {writeFile} from 'node:fs/promises';
+const env=process.env,required=['CLOUDFLARE_API_TOKEN','CLOUDFLARE_ACCOUNT_ID','R2_BUCKET','ROBOT_WORKER_NAME','SIGNAL_QUEUE_NAME','SIGNAL_DEAD_QUEUE_NAME','CONTROL_API_URL','CTRADER_GATEWAY_URL'];
+for(const key of required)if(!env[key])throw Error(`Missing ${key}`);
+for(const key of ['R2_BUCKET','ROBOT_WORKER_NAME','SIGNAL_QUEUE_NAME','SIGNAL_DEAD_QUEUE_NAME'])if(!/^[a-z0-9][a-z0-9-]{1,62}$/.test(env[key]))throw Error(`Invalid ${key}`);
+for(const key of ['CONTROL_API_URL','CTRADER_GATEWAY_URL'])if(new URL(env[key]).protocol!=='https:')throw Error(`${key} must use HTTPS in production`);
+const base=`https://api.cloudflare.com/client/v4/accounts/${env.CLOUDFLARE_ACCOUNT_ID}`;
+async function list(path){const r=await fetch(base+path,{headers:{Authorization:`Bearer ${env.CLOUDFLARE_API_TOKEN}`}});const d=await r.json();if(!r.ok||!d.success)throw Error(`Cloudflare inventory failed for ${path} (HTTP ${r.status})`);return d.result;}
+const [r2,queues,workers]=await Promise.all([list('/r2/buckets?per_page=1000'),list('/queues?per_page=100'),list('/workers/scripts')]);
+if(queues.length===100)throw Error('Queue inventory requires additional pages; review the account inventory before generating production config.');
+if(!r2.buckets?.some(b=>b.name===env.R2_BUCKET))throw Error('Selected R2 bucket was not found; reuse the existing application data bucket.');
+for(const name of [env.SIGNAL_QUEUE_NAME,env.SIGNAL_DEAD_QUEUE_NAME])if(!queues.some(q=>q.queue_name===name))throw Error(`Queue ${name} is absent. Create this reviewed queue before generating production config.`);
+if(workers.some(w=>w.id===env.ROBOT_WORKER_NAME))throw Error('Worker already exists. Review and reuse its current namespace bindings and migration tags before updating its production config; this script will not overwrite them.');
+const config={name:env.ROBOT_WORKER_NAME,account_id:env.CLOUDFLARE_ACCOUNT_ID,main:'index.ts',compatibility_date:'2026-10-01',durable_objects:{bindings:[{name:'ROBOTS',class_name:'Robot'},{name:'ACCOUNTS',class_name:'Account'}]},migrations:[{tag:'marketplace-v1',new_sqlite_classes:['Robot','Account']}],r2_buckets:[{binding:'DATA',bucket_name:env.R2_BUCKET}],worker_loaders:[{binding:'LOADER'}],queues:{producers:[{binding:'SIGNALS',queue:env.SIGNAL_QUEUE_NAME}],consumers:[{queue:env.SIGNAL_QUEUE_NAME,max_batch_size:5,max_batch_timeout:1,max_retries:5,dead_letter_queue:env.SIGNAL_DEAD_QUEUE_NAME}]},vars:{STRATEGY_ISOLATION_VERIFIED:'false',DEMO_TRADING_ENABLED:'false',CONTROL_API_URL:env.CONTROL_API_URL,CTRADER_GATEWAY_URL:env.CTRADER_GATEWAY_URL},observability:{enabled:true},limits:{cpu_ms:1000}};
+await writeFile('workers/wrangler.production.json',JSON.stringify(config,null,2)+'\n',{flag:'wx'});console.log('Inventory verified. Wrote workers/wrangler.production.json. No resources created or deployed. Set the shared secret using wrangler secret put; demo execution remains disabled.');

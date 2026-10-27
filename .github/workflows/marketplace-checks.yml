@@ -1,0 +1,25 @@
+name: Marketplace checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npm run check:runtime
+      - run: npm run worker:build
+      - run: npm run test:cloudflare
+        # Local fixtures only. Production CPU/provider demo tests remain gates.
