@@ -38,11 +38,25 @@ export async function resizeCover(file: File): Promise<string> {
   } finally { URL.revokeObjectURL(url); }
 }
 
-export function ShareBotDialog({ bot, client, prepare, creator, onClose }: { bot: CloudBot; client: CloudClient; prepare: () => Promise<void>;creator:string; onClose: () => void }) {
+async function coverForShare(cover: string): Promise<string> {
+  if (!cover || cover.startsWith('data:image/')) return cover;
+  if (!/^\/api\/economy\/images\/[a-f0-9]{64}$/.test(cover)) throw new Error('Could not load this cover. Choose it again.');
+  const response = await fetch(cover);
+  if (!response.ok) throw new Error('Could not load the saved cover. Please retry.');
+  const blob = await response.blob();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Could not read the saved cover.'));
+    reader.onerror = () => reject(new Error('Could not read the saved cover.'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+export function ShareBotDialog({ bot, client, prepare, makePublic, coverUrl, onCoverChanged, coverLoadError, creator, onClose }: { bot: CloudBot; client: CloudClient; prepare: () => Promise<void>; makePublic:(description:string|undefined,coverImage?:string)=>Promise<string>; coverUrl:string; onCoverChanged:(cover:string)=>void; coverLoadError:string; creator:string; onClose: () => void }) {
   const [publication, setPublication] = useState<Publication | null>(null);
-  const [description, setDescription] = useState(bot.prompt.slice(0, 2000));
+  const [description, setDescription] = useState(bot.prompt.slice(0, 2000)), [descriptionDirty,setDescriptionDirty]=useState(false);
   const [access,setAccess]=useState<'free'|'paid'>('free'),[price,setPrice]=useState('99.00');
-  const [cover, setCover] = useState('');
+  const [cover, setCover] = useState(coverUrl), [coverDirty, setCoverDirty] = useState(false), [publicUrl, setPublicUrl] = useState('');
   const [loading, setLoading] = useState(true), [loadError, setLoadError] = useState(false), [working, setWorking] = useState(false);
   const [error, setError] = useState(''), [copied, setCopied] = useState(false), [retry, setRetry] = useState(0);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -54,11 +68,12 @@ export function ShareBotDialog({ bot, client, prepare, creator, onClose }: { bot
     privateRequest<{ publication: Publication | null }>(client, path).then(({ publication: saved }) => {
       if (!active) return;
       setPublication(saved);
-      if (saved) { setDescription(saved.description); setCover(saved.coverImage);setAccess(saved.access);setPrice(((saved.priceMinor||9900)/100).toFixed(2)); }
+      if (saved) { setDescription(saved.description); setCover(saved.coverImage || coverUrl);setAccess(saved.access);setPrice(((saved.priceMinor||9900)/100).toFixed(2)); }
     }).catch(cause => { if (active) { setError(cause instanceof Error ? cause.message : 'Could not load sharing settings.'); setLoadError(true); } })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [client, path, retry]);
+  useEffect(() => { if (!coverDirty && coverUrl && (!publication || !publication.coverImage)) setCover(coverUrl); }, [coverUrl, coverDirty, publication]);
   useEffect(() => { const previous = document.activeElement as HTMLElement | null; closeRef.current?.focus(); return () => previous?.focus(); }, []);
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
@@ -80,9 +95,23 @@ export function ShareBotDialog({ bot, client, prepare, creator, onClose }: { bot
     setWorking(true); setError(''); setCopied(false);
     try {
       await prepare();
-      const saved = await privateRequest<{ publication: Publication }>(client, path, 'PUT', { name: bot.name, asset: bot.asset, description, coverImage: cover, access,priceMinor:Math.round(Number(price)*100),currency:'ZAR',creator });
+      const coverImage = await coverForShare(cover);
+      const saved = await privateRequest<{ publication: Publication }>(client, path, 'PUT', { name: bot.name, asset: bot.asset, description, coverImage, access,priceMinor:Math.round(Number(price)*100),currency:'ZAR',creator });
       setPublication(saved.publication);
+      if (coverDirty) onCoverChanged(coverImage);
+      setCoverDirty(false);
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not publish this robot.'); }
+    finally { setWorking(false); }
+  };
+  const publishListing = async () => {
+    if (working || loading || loadError) return;
+    setWorking(true); setError(''); setPublicUrl('');
+    try {
+      await prepare();
+      const url = await makePublic(descriptionDirty ? description : undefined, coverDirty ? cover : undefined);
+      setPublicUrl(url);
+      setCoverDirty(false); setDescriptionDirty(false);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not make this bot public.'); }
     finally { setWorking(false); }
   };
   const unpublish = async () => {
@@ -104,17 +133,19 @@ export function ShareBotDialog({ bot, client, prepare, creator, onClose }: { bot
           <label className="share-cover-upload"><img src={cover || '/robot-cover.svg'} alt="Robot cover preview"/><span><ImagePlus size={16}/> Change cover</span><input type="file" accept="image/jpeg,image/png,image/webp" aria-label="Robot cover image" onChange={async event => {
             const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (!file) return;
             setWorking(true); setError('');
-            try { setCover(await resizeCover(file)); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not use this image.'); } finally { setWorking(false); }
+            try { setCover(await resizeCover(file)); setCoverDirty(true); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not use this image.'); } finally { setWorking(false); }
           }}/></label>
-          <label className="share-description">Description<textarea rows={3} maxLength={2000} value={description} onChange={event => setDescription(event.target.value)} required placeholder="Tell people what your robot does…"/></label>
-          <div className="market-form-grid"><label>Access<select value={access} onChange={e=>setAccess(e.target.value as 'free'|'paid')}><option value="free">Free</option><option value="paid">Paid · checkout coming soon</option></select></label>{access==='paid'&&<label>Price (ZAR)<input type="number" min="1" max="1000000" step="0.01" required value={price} onChange={e=>setPrice(e.target.value)}/></label>}</div>
-          <p className="share-hint">Free bots allow private backtesting copies. Paid bots display their price; access stays locked until verified payments are available.</p>
+          <label className="share-description">Description<textarea rows={3} maxLength={2000} value={description} onChange={event => {setDescription(event.target.value);setDescriptionDirty(true)}} required placeholder="Tell people what your robot does…"/></label>
+          <div className="market-form-grid"><label>Share-link access<select value={access} onChange={e=>setAccess(e.target.value as 'free'|'paid')}><option value="free">Free</option><option value="paid">Paid · checkout coming soon</option></select></label>{access==='paid'&&<label>Price (ZAR)<input type="number" min="1" max="1000000" step="0.01" required value={price} onChange={e=>setPrice(e.target.value)}/></label>}</div>
+          <p className="share-hint">Make public lists your bot in Explore and on your profile without sharing its code. A free share link allows others to make editable copies of your code.</p>
         </fieldset>
         {error && <p className="share-error" role="alert">{error}</p>}
+        {!cover && coverLoadError && <p className="share-hint" role="status">{coverLoadError}</p>}
         {loadError && <button type="button" className="ghost" onClick={() => setRetry(value => value + 1)}>Retry</button>}
+        {publicUrl && <p className="share-hint" role="status">Your bot is public in Explore and on your profile. <a href={publicUrl} target="_blank" rel="noreferrer">View bot ↗</a></p>}
         {publication?.published && <div className="share-link-row"><input aria-label="Shareable robot link" value={shareUrl} readOnly onFocus={event => event.target.select()}/><button type="button" className="icon-button" onClick={() => void copy()} aria-label={copied ? 'Link copied' : 'Copy bot link'}>{copied ? <Check size={16}/> : <Copy size={16}/>}</button><a href={shareUrl} target="_blank" rel="noreferrer" aria-label="Open bot page"><Link2 size={16}/></a></div>}
         {publication && !publication.published && <p className="share-hint">Link unpublished. Publish again to reactivate the same link.</p>}
-        <footer className="share-dialog-foot">{publication?.published && <button type="button" className="text-button" onClick={() => void unpublish()} disabled={working}>Unpublish</button>}<button type="submit" className="primary" disabled={loading || working || loadError || !description.trim()}>{loading ? 'Loading…' : working ? 'Saving…' : publication?.published ? 'Update page' : 'Publish robot'}</button></footer>
+        <footer className="share-dialog-foot">{publication?.published && <button type="button" className="text-button" onClick={() => void unpublish()} disabled={working}>Unpublish</button>}<button type="submit" className="ghost" disabled={loading || working || loadError || !description.trim()}>{publication?.published ? 'Update share link' : 'Create share link'}</button><button type="button" className="primary" disabled={loading || working || loadError} onClick={() => void publishListing()}>{loading ? 'Loading…' : working ? 'Saving…' : publicUrl ? 'Update public page' : 'Make public'}</button></footer>
       </form>
     </section>
   </div>;
