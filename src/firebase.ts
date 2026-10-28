@@ -6,7 +6,7 @@ export type CloudBot = {
   code?: string;
   storageKey?: string;
   updatedAt?: unknown;
-  lastBacktest?: { metrics: Record<string, number | string>; candleCount: number; from: string; to: string } | null;
+  lastBacktest?: { metrics: Record<string, number | string>; candleCount: number; from: string; to: string; money?: {netProfit:number;returnPercent:number;currency:'ZAR'} } | null;
 };
 
 export type BotVersion = { id: string; name: string; storageKey: string; createdAt: string };
