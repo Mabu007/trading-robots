@@ -61,3 +61,4 @@
  .economy-account-screen .economy-profile-actions .ghost{min-height:40px}
  .economy-home>.economy-edit:not(.economy-release){order:4}
 }
+.access-code-layout{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));align-items:start;gap:16px}.access-code-layout>section{min-width:0}.access-code-layout input{max-width:100%}.access-code-layout small{overflow-wrap:anywhere}

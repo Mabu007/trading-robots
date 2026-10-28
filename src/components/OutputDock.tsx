@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { Activity, AlertTriangle, Check, ChevronDown, ChevronRight, Copy, GripHorizontal, History, ListChecks, Pencil, Sparkles, Terminal as TerminalIcon, Trash2, X } from 'lucide-react';
 import type { Result, Trade } from '../types';
-import type { MonetaryResult } from '../monetary-backtest';
+import type { MonetaryResult, MonetaryTrade } from '../monetary-backtest';
+import type {LiveExecution,LiveReadiness} from '../live-status';
 import { MonetaryResults } from './MonetaryResults';
 import type { BotVersion } from '../firebase';
 
@@ -10,6 +11,8 @@ export type OutputTab = 'terminal' | 'results' | 'trades' | 'versions';
 
 type Props = {
   monetary: MonetaryResult | null;
+  liveStatus?: LiveReadiness | null;
+  liveExecutions?: LiveExecution[];
   asset: string;
   timeframe?: string;
   from: string;
@@ -42,6 +45,8 @@ export function createTradeId(asset: string, timeframe: string | undefined, trad
   const day = new Date(trade.entryTime * 1000).toISOString().slice(0, 10).replaceAll('-', '');
   return `${asset}-${timeframe?.toUpperCase() || 'BT'}-${day}-${String(trade.id).padStart(4, '0')}`;
 }
+
+const formatRand = (value:number) => new Intl.NumberFormat('en-ZA',{style:'currency',currency:'ZAR'}).format(value);
 
 function formatTime(time: number) {
   return new Date(time * 1000).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -77,21 +82,22 @@ function ResultPanel({ result, from, to, asset, monetary }: { result: Result | n
   if (!result) return <div className="output-empty"><Activity size={18}/><strong>No backtest results yet</strong><span>Run a backtest to see performance and data coverage.</span></div>;
   const metrics = result.metrics;
   return <div className="output-result-panel">
-    <div className="output-result-heading"><div><span className="output-eyebrow">THEORETICAL R SNAPSHOT</span><strong>{asset} <i>·</i> {result.timeframe?.toUpperCase() || '—'}</strong><small>{from} <span>→</span> {to} · {result.candles.length.toLocaleString()} candles</small></div><span className="output-result-mark"><Check size={15}/></span></div>
-    <div className="output-metrics">
+    <div className="output-result-heading"><div><span className="output-eyebrow">{monetary?'MONEY BACKTEST · SIMULATION':'BACKTEST RESULTS · R ONLY'}</span><strong>{asset} <i>·</i> {result.timeframe?.toUpperCase() || '—'}</strong><small>{from} <span>→</span> {to} · {result.candles.length.toLocaleString()} candles</small></div><span className="output-result-mark"><Check size={15}/></span></div>
+    <MonetaryResults result={monetary}/>
+    <details className="theoretical-results"><summary>View theoretical R results</summary><div className="output-metrics">
       <div className="output-metric featured"><span>NET RESULT</span><strong className={metrics.netReturn >= 0 ? 'green' : 'red'}>{metrics.netReturn >= 0 ? '+' : ''}{metrics.netReturn.toFixed(2)}R</strong></div>
       <div className="output-metric"><span>PROFIT FACTOR</span><strong>{metrics.profitFactor === Infinity ? '∞' : metrics.profitFactor.toFixed(2)}</strong></div>
       <div className="output-metric"><span>WIN RATE</span><strong>{(metrics.winRate * 100).toFixed(1)}%</strong></div>
       <div className="output-metric"><span>MAX DRAWDOWN</span><strong className="red">{metrics.maxDrawdown.toFixed(2)}R</strong></div>
       <div className="output-metric"><span>WINS / LOSSES</span><strong>{metrics.wins} <i>/</i> {metrics.losses}</strong></div>
     </div>
-    <p className="output-disclaimer">Theoretical R results use the trading costs configured in the strategy.</p><MonetaryResults result={monetary}/>
+    <p className="output-disclaimer">Theoretical R results use the trading costs configured in the strategy and may include different trades than the money simulation.</p></details>
   </div>;
 }
 
 function TradesPanel({ props }: { props: Props }) {
   const [copied, setCopied] = useState('');
-  const trades = props.result?.trades || [];
+  const trades:Trade[] = props.monetary?.trades ?? props.result?.trades ?? [];
   const selected = trades.find(trade => trade.id === props.selectedTrade?.id) || null;
   const copyId = async (trade: Trade) => {
     const id = createTradeId(props.asset, props.result?.timeframe, trade);
@@ -99,6 +105,7 @@ function TradesPanel({ props }: { props: Props }) {
     catch { setCopied(''); }
   };
 
+  if(props.liveStatus?.runtime.running)return <div className="live-executions"><p>{props.liveStatus.live?'Demo order activity':'Instance running · demo execution not confirmed'} · These are order intents and acknowledgements, not a statement of realized profit.</p>{props.liveExecutions?.length?props.liveExecutions.map(row=><article key={row.id}><strong>{row.action||'ORDER'} · {row.state.toUpperCase()}</strong><small>{row.updatedAt?new Date(row.updatedAt).toLocaleString():'Time unavailable'}{row.entryPrice!=null?` · requested price ${row.entryPrice}`:''}{row.volume!=null?` · ${row.volume/100} units`:''}</small>{row.error&&<span>{row.error}</span>}</article>):<div className="output-empty"><ListChecks size={18}/><strong>No recorded demo orders yet</strong><span>New broker acknowledgements will appear here.</span></div>}</div>;
   if (!props.result) return <div className="output-empty"><ListChecks size={18}/><strong>No trades to inspect</strong><span>Run a backtest and each trade will be available here.</span></div>;
   return <>
     <div className="output-trade-list" role="list" aria-label="Backtest trades">
@@ -109,7 +116,7 @@ function TradesPanel({ props }: { props: Props }) {
           <button type="button" className="output-trade-select" aria-pressed={active} onClick={() => props.onSelectTrade(trade)}>
             <span className={`output-trade-side ${trade.side === 'LONG' ? 'long' : 'short'}`}>{trade.side === 'LONG' ? '↗' : '↘'}</span>
             <span className="output-trade-main"><strong>{id}</strong><small>{formatTime(trade.entryTime)} <i>·</i> {trade.reason}</small></span>
-            <b className={trade.pnl >= 0 ? 'green' : 'red'}>{trade.pnl >= 0 ? '+' : ''}{trade.pnl.toFixed(2)}R</b>
+            <b className={trade.pnl >= 0 ? 'green' : 'red'}>{'pnlZar' in trade ? formatRand((trade as MonetaryTrade).pnlZar) : `${trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)}R`}</b>
           </button>
           <button type="button" className="copy-trade-button" aria-label={`Copy trade ID ${id}`} title="Copy trade ID" onClick={() => void copyId(trade)}>{copied === id ? <Check size={14}/> : <Copy size={14}/>}</button>
         </div>;
@@ -119,6 +126,7 @@ function TradesPanel({ props }: { props: Props }) {
       <section className="trade-modal" role="dialog" aria-modal="true" aria-labelledby="trade-modal-title">
         <header className="trade-modal-head"><div><span className="output-eyebrow">TRADE AUDIT</span><h2 id="trade-modal-title">{createTradeId(props.asset, props.result?.timeframe, selected)}</h2></div><button type="button" className="shadcn-icon-button" aria-label="Close trade details" onClick={props.onClearSelectedTrade}><X size={16}/></button></header>
         <div className="trade-audit-pills"><span className={selected.side === 'LONG' ? 'long' : 'short'}>{selected.side}</span><span>{selected.reason.toUpperCase()}</span><b className={selected.pnl >= 0 ? 'green' : 'red'}>{selected.pnl >= 0 ? '+' : ''}{selected.pnl.toFixed(2)}R</b></div>
+        {'pnlZar' in selected && <><div className="trade-money-highlight"><div><small>NET PROFIT / LOSS</small><strong className={(selected as MonetaryTrade).pnlZar>=0?'green':'red'}>{formatRand((selected as MonetaryTrade).pnlZar)}</strong></div><div><small>RISK AT STOP</small><strong>{formatRand((selected as MonetaryTrade).riskAtStop)}</strong></div><div><small>RISK BUDGET</small><strong>{formatRand((selected as MonetaryTrade).intendedRisk)}</strong></div></div><p className="output-disclaimer">Estimated loss at the intended stop; price gaps and execution costs can increase the loss.</p></>}
         <div className="trade-audit-grid">
           <div><small>ENTRY</small><strong>{displayPrice(selected.entry, props.asset)}</strong><span>{formatTime(selected.entryTime)}</span></div>
           <div><small>EXIT</small><strong>{displayPrice(selected.exit, props.asset)}</strong><span>{formatTime(selected.exitTime)}</span></div>
@@ -172,7 +180,7 @@ export function OutputDock(props: Props) {
   const tabs: { id: OutputTab; label: string; count?: number; icon: typeof TerminalIcon }[] = [
     { id: 'terminal', label: 'Terminal', count: props.logs.length, icon: TerminalIcon },
     { id: 'results', label: 'Results', count: props.result ? 1 : 0, icon: Activity },
-    { id: 'trades', label: 'Trades', count: props.result?.trades.length || 0, icon: ListChecks },
+    { id: 'trades', label: 'Trades', count: props.liveStatus?.runtime.running?(props.liveExecutions?.length||0):(props.monetary?.trades.length ?? props.result?.trades.length ?? 0), icon: ListChecks },
     { id: 'versions', label: 'Versions', count: props.versions.length, icon: History },
   ];
   const beginRename = (version: BotVersion) => { setRenameTarget(version); setRenameValue(version.name); setVersionActionError(''); };
@@ -182,7 +190,7 @@ export function OutputDock(props: Props) {
     {!props.compact && !props.collapsed && <div className={`output-resize-handle${dragging ? ' dragging' : ''}`} role="separator" aria-label="Resize output panel" aria-orientation="horizontal" aria-valuenow={height} aria-valuemin={96} aria-valuemax={Math.round(window.innerHeight * .72)} tabIndex={0} onPointerDown={event => { event.preventDefault(); dragRef.current = { y: event.clientY, height }; setDragging(true); }} onKeyDown={event => { if (event.key === 'ArrowUp') { event.preventDefault(); setHeight(value => Math.min(Math.round(window.innerHeight * .72), value + 24)); } if (event.key === 'ArrowDown') { event.preventDefault(); setHeight(value => Math.max(96, value - 24)); } if (event.key === 'Home') setHeight(96); if (event.key === 'End') setHeight(Math.round(window.innerHeight * .72)); }}><GripHorizontal size={18}/></div>}
     <header className="output-dock-head">
       <div className="output-tab-list" role="tablist" aria-label="Backtest output">
-        {tabs.map(({ id, label, count, icon: Icon }) => <button key={id} type="button" role="tab" aria-selected={props.active === id} aria-controls={`output-panel-${id}`} className={`output-tab${props.active === id ? ' selected' : ''}`} onClick={() => { props.onTabChange(id); if (props.collapsed) props.onCollapse(); }}><Icon size={14}/><span>{label}</span>{count !== undefined && <small>{count}</small>}</button>)}
+        {tabs.map(({ id, label, count, icon: Icon }) => <button key={id} type="button" role="tab" aria-selected={props.active === id} aria-controls={`output-panel-${id}`} className={`output-tab${props.active === id ? ' selected' : ''}`} onClick={() => { props.onTabChange(id); if (props.collapsed) props.onCollapse(); }}><Icon size={14}/><span>{label}</span>{id==='trades'&&props.liveStatus?.live&&<span className="live-trades-label"><i/> (LIVE · DEMO)</span>}{count !== undefined && <small>{count}</small>}</button>)}
       </div>
       <div className="output-dock-actions">{props.busy === 'backtest' && <span className="running-label"><i/> RUNNING</span>}{props.busy === 'backtest' && <button type="button" className="output-stop" onClick={props.onStop}>Stop</button>}{props.active === 'terminal' && <button type="button" className="output-clear" aria-label="Clear terminal" title="Clear terminal" onClick={()=>setClearConfirm(true)}><Trash2 size={15}/></button>}{props.result&&['results','trades'].includes(props.active)&&<button type="button" className="output-clear" aria-label="Delete saved backtest" title="Delete saved backtest" onClick={()=>setDeleteBacktestConfirm(true)}><Trash2 size={15}/></button>}<button type="button" className="shadcn-icon-button output-collapse" aria-label={props.collapsed ? 'Expand output dock' : 'Collapse output dock'} onClick={props.onCollapse}>{props.collapsed ? <ChevronRight size={16}/> : <ChevronDown size={16}/>}</button></div>
     </header>

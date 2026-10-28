@@ -6,7 +6,7 @@ export type MonetaryAssumptions = {
   spread: number; slippage: number; commissionPerLotZar: number; leverage?: number;
 };
 export type MonetaryTrade = Trade & {
-  volume: number; intendedRisk: number; pnlZar: number; equityAfter: number;
+  volume: number; intendedRisk: number; riskAtStop: number; pnlZar: number; equityAfter: number;
   spreadZar: number; slippageZar: number; commissionZar: number;
 };
 export type MonetaryResult = {
@@ -45,7 +45,7 @@ export function simulateMoney(candles: Candle[], decisions: any[], startingBalan
     const pnlZar = (exit - pos.entry) * direction * pos.volume * valuePerUnit - commissionZar;
     const pnl = (exit - pos.entry) * direction / pos.riskDistance - commissionZar / (pos.riskDistance * pos.volume * valuePerUnit);
     equity += pnlZar;
-    const trade: MonetaryTrade = { id: trades.length + 1, side: pos.side, entryTime: pos.entryTime, exitTime: candle.time, entry: pos.entry, exit, stop: pos.stop, target: pos.target, reason, pnl, volume: pos.volume, intendedRisk: pos.intendedRisk, pnlZar, equityAfter: equity, spreadZar: a.spread * pos.volume * valuePerUnit, slippageZar: 2 * a.slippage * pos.volume * valuePerUnit, commissionZar };
+    const trade: MonetaryTrade = { id: trades.length + 1, side: pos.side, entryTime: pos.entryTime, exitTime: candle.time, entry: pos.entry, exit, stop: pos.stop, target: pos.target, reason, pnl, volume: pos.volume, intendedRisk: pos.intendedRisk, riskAtStop: (pos.riskDistance + a.slippage) * pos.volume * valuePerUnit + commissionZar, pnlZar, equityAfter: equity, spreadZar: a.spread * pos.volume * valuePerUnit, slippageZar: 2 * a.slippage * pos.volume * valuePerUnit, commissionZar };
     trades.push(trade); curve.push({ time: candle.time, value: equity, tradeId: trade.id });
     observe(equity);
   }
