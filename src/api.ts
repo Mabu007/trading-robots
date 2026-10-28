@@ -111,7 +111,7 @@ export async function postApiStream(
     throw error;
   }
   if (!finished) throw new Error(`${service} connection ended before the response was complete. Retry the request.`);
-  if (truncated) throw new Error(`${service} stopped before finishing its response. Retry or ask for a shorter change.`);
+  if (truncated) throw new Error(`${service} reached the model’s output limit before finishing. Ask for a smaller change or configure another permitted model; existing code was preserved.`);
   if (!fullText.trim()) throw new Error(`${service} returned an empty assistant response.`);
   return fullText;
 }

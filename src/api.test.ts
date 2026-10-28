@@ -64,4 +64,24 @@ describe('API response diagnostics', () => {
         .rejects.toThrow('connection ended before the response was complete');
     } finally { fetchMock.mockRestore(); }
   });
+  it('rejects a response that hits the output limit even after DONE', async () => {
+    const body = 'data: {"choices":[{"delta":{"content":"partial strategy"},"finish_reason":null}]}\n\n' +
+      'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n' + 'data: [DONE]\n\n';
+    const mock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(body));
+    try {
+      await expect(postApiStream('/api/ai', {}, 'OpenRouter', () => undefined))
+        .rejects.toThrow('output limit');
+    } finally { mock.mockRestore(); }
+  });
+
+  it('reports an error delivered in the stream', async () => {
+    const mock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(
+      'event: error\ndata: {"error":"OpenRouter rate limit reached. Wait briefly and retry."}\n\n',
+    ));
+    try {
+      await expect(postApiStream('/api/ai', {}, 'OpenRouter', () => undefined))
+        .rejects.toThrow('rate limit');
+    } finally { mock.mockRestore(); }
+  });
+
 });

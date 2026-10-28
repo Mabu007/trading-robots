@@ -2,11 +2,14 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { Activity, AlertTriangle, Check, ChevronDown, ChevronRight, Copy, GripHorizontal, History, ListChecks, Pencil, Sparkles, Terminal as TerminalIcon, Trash2, X } from 'lucide-react';
 import type { Result, Trade } from '../types';
+import type { MonetaryResult } from '../monetary-backtest';
+import { MonetaryResults } from './MonetaryResults';
 import type { BotVersion } from '../firebase';
 
 export type OutputTab = 'terminal' | 'results' | 'trades' | 'versions';
 
 type Props = {
+  monetary: MonetaryResult | null;
   asset: string;
   timeframe?: string;
   from: string;
@@ -70,11 +73,11 @@ async function copyText(value: string) {
   if (!copied) throw new Error('Clipboard access was denied.');
 }
 
-function ResultPanel({ result, from, to, asset }: { result: Result | null; from: string; to: string; asset: string }) {
+function ResultPanel({ result, from, to, asset, monetary }: { result: Result | null; from: string; to: string; asset: string; monetary: MonetaryResult | null }) {
   if (!result) return <div className="output-empty"><Activity size={18}/><strong>No backtest results yet</strong><span>Run a backtest to see performance and data coverage.</span></div>;
   const metrics = result.metrics;
   return <div className="output-result-panel">
-    <div className="output-result-heading"><div><span className="output-eyebrow">BACKTEST SNAPSHOT</span><strong>{asset} <i>·</i> {result.timeframe?.toUpperCase() || '—'}</strong><small>{from} <span>→</span> {to} · {result.candles.length.toLocaleString()} candles</small></div><span className="output-result-mark"><Check size={15}/></span></div>
+    <div className="output-result-heading"><div><span className="output-eyebrow">THEORETICAL R SNAPSHOT</span><strong>{asset} <i>·</i> {result.timeframe?.toUpperCase() || '—'}</strong><small>{from} <span>→</span> {to} · {result.candles.length.toLocaleString()} candles</small></div><span className="output-result-mark"><Check size={15}/></span></div>
     <div className="output-metrics">
       <div className="output-metric featured"><span>NET RESULT</span><strong className={metrics.netReturn >= 0 ? 'green' : 'red'}>{metrics.netReturn >= 0 ? '+' : ''}{metrics.netReturn.toFixed(2)}R</strong></div>
       <div className="output-metric"><span>PROFIT FACTOR</span><strong>{metrics.profitFactor === Infinity ? '∞' : metrics.profitFactor.toFixed(2)}</strong></div>
@@ -82,7 +85,7 @@ function ResultPanel({ result, from, to, asset }: { result: Result | null; from:
       <div className="output-metric"><span>MAX DRAWDOWN</span><strong className="red">{metrics.maxDrawdown.toFixed(2)}R</strong></div>
       <div className="output-metric"><span>WINS / LOSSES</span><strong>{metrics.wins} <i>/</i> {metrics.losses}</strong></div>
     </div>
-    <p className="output-disclaimer">Price-relative R results. Spread, slippage, commission, swaps and contract values are not modeled.</p>
+    <p className="output-disclaimer">Theoretical R results use the trading costs configured in the strategy.</p><MonetaryResults result={monetary}/>
   </div>;
 }
 
@@ -185,7 +188,7 @@ export function OutputDock(props: Props) {
     </header>
     {!props.collapsed && <div className="output-dock-body" role="tabpanel" id={`output-panel-${props.active}`}>
       {props.active === 'terminal' && <div className="terminal-content">{props.logs.length ? props.logs.map((line, index) => <div className={`log-line ${line.includes('failed')||line.includes('stopped')?'error':''}`} key={`${index}-${line}`}><span className="log-prompt">›</span>{line}</div>) : <div className="terminal-placeholder"><span>›</span> Backtest activity, market data, and errors appear here.</div>}</div>}
-      {props.active === 'results' && <ResultPanel result={props.result} from={props.from} to={props.to} asset={props.asset}/>}
+      {props.active === 'results' && <ResultPanel result={props.result} from={props.from} to={props.to} asset={props.asset} monetary={props.monetary}/>}
       {props.active === 'trades' && <TradesPanel props={props}/>}
       {props.active === 'versions' && <VersionsPanel props={props} onRename={beginRename} onDelete={version=>{setDeleteTarget(version);setVersionActionError('')}}/>}
     </div>}

@@ -57,3 +57,13 @@ Use **Share robot** in the workspace or a robot card. Add a cover and public des
 **Start** is disabled until live execution is implemented. **Connect broker** starts cTrader OAuth when the three `CTRADER_*` server environment variables are configured. Register `https://trading-robots.vercel.app/api/brokers/ctrader/callback` in the approved cTrader Open API application. Use the matching local callback URL for development. The current scope is `accounts` (read only). Tokens stay in private R2 storage; the callback checks a ten-minute, browser-bound OAuth state and fails closed if the provider does not return it. Verify the complete provider redirect and account approval flow with the registered application before enabling it for users. No trading orders or background processes are started by connecting.
 
 Official cTrader setup: https://help.ctrader.com/open-api/api-application/ and https://help.ctrader.com/open-api/account-authentication/.
+
+### AI generation diagnostics
+
+The server uses the configured `OPENROUTER_MODEL` for each request and does not silently switch models. If a model is unavailable, an administrator can configure another permitted model. A stream ending with `finish_reason: length` has reached its output limit; ask for a smaller change or configure another model. Server logs include the model, completion status, finish reason and token count when available, without logging prompts or credentials. A successful stream alone does not establish that the generated strategy is valid or profitable.
+
+### Chart drawings and monetary simulation
+
+The chart toolbar provides pan, measurement and drawings. Drawings and a user-configured pip size are stored locally for the signed-in account, robot and instrument; they are not synced between devices. Set the pip size explicitly before relying on pip measurements.
+
+Account balance defaults to R500. Enter the instrument contract size, minimum volume, volume step and quote-currency-to-ZAR conversion under Assumptions to enable monetary results. These are user-supplied simulation assumptions, not verified broker specifications. Spread and slippage are in price units; commission is round-trip ZAR per lot. These monetary cost inputs are independent of the strategy’s theoretical R cost settings. The model treats candles as mid prices, charges the full spread on entry and slippage on both fills, rejects trades below minimum volume or above supplied margin limits, and compounds on closed equity. Stops can gap beyond intended risk. Margin is not checked without leverage. Drawdown uses candle-close and closed-trade equity; intrabar paths, swaps, and changing conversion rates are not modeled. Results are simulations and do not change live trading.
