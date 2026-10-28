@@ -23,6 +23,7 @@ describe('instance control',()=>{
     const html=render({...base,locked:true,runtime:{available:true,deployed:true,running:true},broker:{...base.broker,accountVerified:false}}, {workBusy:true});
     expect(html).toContain('aria-label="Stop bot"');
     expect(html).toContain('Existing positions remain open');
+    expect(html).toContain('Orders already being submitted may complete');
     expect(html).not.toContain('disabled');
   });
   it('routes a stopped bot with a changed or unverified source to broker setup',()=>{

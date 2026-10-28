@@ -272,7 +272,7 @@ ${appContext}`;
   try{
    const observed=await requestInstanceAction(cloudClient,target,action,controller.signal);
    setLiveStatus(previous=>previous?.bot.id===target?{...previous,live:false,locked:observed.running!,runtime:{...previous.runtime,available:true,deployed:true,running:observed.running,evaluating:Boolean(observed.evaluating),nextAlarm:observed.nextAlarm??null,lastError:observed.lastError??null},observedAt:Date.now()}:previous);
-   if(editorIdentityRef.current.draftId===projectId)log(action==='stop'?'Instance stopped · future signals paused. Existing positions remain open.':'Instance started · waiting for a completed broker candle. Approved demo orders may resume.');
+   if(editorIdentityRef.current.draftId===projectId)log(action==='stop'?'Instance stopped · future signals paused. Orders already being submitted may complete. Existing positions remain open.':'Instance started · waiting for a completed broker candle. Approved demo orders may resume.');
   }catch(error){if(editorIdentityRef.current.draftId===projectId){setLiveCheck('checking');log(`Instance ${action} was not confirmed · ${err(error)}. Checking current status; do not assume the request failed.`)}}
   finally{window.clearTimeout(timeout);instancePendingRef.current.delete(projectId);setInstancePendingByBot(previous=>{const next={...previous};delete next[projectId];return next});if(editorIdentityRef.current.draftId===projectId)setLiveRevision(v=>v+1)}
  };
