@@ -90,7 +90,7 @@ export async function runBacktest(
   data: Candle[] | Record<string, Candle[]>,
   startingR = 0,
   signal?: AbortSignal,
-): Promise<Result> {
+): Promise<Result & { decisions: any[] }> {
   if (signal?.aborted) throw new Error('Backtest cancelled by user.');
   const config = parseStrategyConfig(code);
   if (!/export\s+function\s+onCandle\s*\(/.test(code)) {
@@ -121,5 +121,5 @@ export async function runBacktest(
   }
   if (result.trades.length > 30) logs.push(`${result.trades.length - 30} additional trade events available in the trade list.`);
   logs.push(`Backtest complete · ${result.trades.length} trades · ${(performance.now() - started).toFixed(0)} ms`);
-  return { ...result, logs };
+  return { ...result, logs, decisions };
 }
