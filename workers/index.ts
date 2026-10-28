@@ -20,7 +20,7 @@ export class Robot extends SerializedObject {
     },
     sendFanout:async(key,cursor)=>{const object=await env.DATA.get(key);if(!object)throw Error('Signal outbox is missing');const data=await object.json<any>();if(data.signal.expiresAt<Date.now())return {done:true,next:data.targets.length};const batch=data.targets.slice(cursor,cursor+100).map((s:any)=>({body:{...s,signal:data.signal}}));if(batch.length)await env.SIGNALS.sendBatch(batch);return {next:cursor+batch.length,done:cursor+batch.length>=data.targets.length};}
   });}
-  async fetch(req:Request){return this.serial(async()=>{try{const action=new URL(req.url).pathname.split('/').at(-1)!;if(action==='status')return json(await this.runtime.status());if(req.method!=='POST')return json({error:'POST required'},405);if(action==='deploy'||action==='update'){
+  async fetch(req:Request){return this.serial(async()=>{try{const action=new URL(req.url).pathname.split('/').at(-1)!;if(action==='status')return json({...await this.runtime.status(),demoExecutionEnabled:this.env.DEMO_TRADING_ENABLED==='true'});if(req.method!=='POST')return json({error:'POST required'},405);if(action==='deploy'||action==='update'){
       const d=await req.json<any>();if(!id(d.botId)||!id(d.version)||!d.codeKey||!d.ownerUid)throw Error('Invalid deployment');return json(await this.runtime.deploy(d));
     }return json(await this.runtime.control(action));}catch(e){return json({error:e instanceof Error?e.message:'Runtime operation failed'},400);}});}
   async alarm(){return this.serial(()=>this.runtime.alarm());}

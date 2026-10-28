@@ -103,9 +103,9 @@ export class BotEconomy {
       if(current&&(current.creatorId!==who.uid||current.privateBotId!==botId))throw Error('Publication ownership mismatch.');
       // Restoring a legacy link or a source package could grant access the creator
       // did not intend when making a profile-only listing public.
-      if(current&&!current.published&&(current.managedAccess||current.packageId))throw Error('Use sharing or releases to republish this existing bot and its access settings.');
-      if(current?.published&&(current.managedAccess||current.packageId))return {};
-      return {[path]:{...current,id:listingId,privateBotId:botId,creatorId:who.uid,name,description:description??current?.description??defaultDescription,asset,timeframe,coverImage:cover?.coverImage||current?.coverImage||'',creator:profile.displayName,username:profile.username,access:current?.access||'free',priceMinor:current?.priceMinor||0,currency:'ZAR',managedAccess:Boolean(current?.managedAccess),published:true,publicCreatorId:who.uid,createdAt:current?.createdAt||now,updatedAt:now}};
+      if(current&&!current.published&&(current.packageId||(current.managedAccess&&!current.livePublic)))throw Error('Use sharing or releases to republish this existing bot and its access settings.');
+      if(current?.published&&(current.packageId||(current.managedAccess&&!current.livePublic)))return {};
+      return {[path]:{...current,id:listingId,privateBotId:botId,creatorId:who.uid,name,description:description??current?.description??defaultDescription,asset,timeframe,coverImage:cover?.coverImage||current?.coverImage||'',creator:profile.displayName,username:profile.username,access:'free',priceMinor:0,currency:'ZAR',managedAccess:true,livePublic:true,published:true,publicCreatorId:who.uid,createdAt:current?.createdAt||now,updatedAt:now}};
     });
     return {id:listingId,username:profile.username};
   }
@@ -166,24 +166,44 @@ export class BotEconomy {
     const v=await this.store.get(`sourceVersions/${versionId}`),bot={id:botId,name:`${a.name} · My copy`.slice(0,64),asset:v?.asset||'XAUUSD',prompt:'Licensed private copy',storage:{provider:'r2',key:storageKey},updatedAt:new Date().toISOString()};
     await this.store.create(`users/${who.uid}/bots/${botId}`,bot);await this.atomic([`marketplaceBots/${a.botId}`],([listing])=>listing?{[`marketplaceBots/${a.botId}`]:{...listing,remixCount:(listing.remixCount||0)+1}}:{});await this.activity(who.uid,'bot.remixed',a.botId,a.name);return {...bot,storageKey,code};
   }
+  async copyProject(who:Identity,botId:string){
+    id(botId);const saved=await this.current(who.uid,botId),original=await this.store.get(`users/${who.uid}/bots/${botId}`);if(!original)throw Error('Robot unavailable.');
+    let code=saved.code;const pointerRaw=await this.storage.read(`${this.storage.root(who.uid,botId)}/publication.json`);
+    if(pointerRaw){const listingId=id(JSON.parse(pointerRaw).id),listing=await this.trading.owned(who.uid,listingId);if(listing.privateBotId!==botId)throw Error('Robot pointer mismatch.');const deployment=await this.store.get(`deployments/${listingId}`);
+      if(deployment){const observed=await this.trading.deploymentStatus(who.uid,listingId);if(observed.running){if(!/^[a-f0-9]{64}$/.test(String(observed.version)))throw Error('Running version is unavailable.');const pinned=await this.storage.read(`runtime-code/${listingId}/${observed.version}.js`);if(!pinned||hash(pinned)!==observed.version)throw Error('Running strategy snapshot is unavailable or failed integrity validation.');code=pinned;}}
+    }
+    const fork=await this.store.get(`botForks/${recordId(who.uid)}_${botId}`);if(botId.startsWith('shared-')&&!fork)throw Error('This shared copy has no verified license record.');
+    const copyId=`copy-${randomUUID()}`,storageKey=`${this.storage.root(who.uid,copyId)}/current.json`,now=new Date().toISOString();
+    if(fork)await this.store.create(`botForks/${recordId(who.uid)}_${copyId}`,{...fork,id:copyId,uid:who.uid,createdAt:Date.now()});
+    await this.storage.write(storageKey,JSON.stringify({schemaVersion:1,userId:who.uid,botId:copyId,code,updatedAt:now}));
+    const copy={id:copyId,name:`${String(original.name||'Robot').slice(0,54)} · Copy`,asset:original.asset,prompt:original.prompt||'',storage:{provider:'r2',key:storageKey},updatedAt:now};
+    if(!await this.store.create(`users/${who.uid}/bots/${copyId}`,copy))throw Error('Could not create a unique copy. Retry.');return {...copy,storageKey,code};
+  }
   async invite(who:Identity,botId:string,input:RecordData){
     await this.trading.owned(who.uid,id(botId));const email=text(input.email||'',254).toLowerCase();if(email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))throw Error('Enter a valid recipient email.');
-    const expiresAt=Number(input.expiresAt||Date.now()+7*86400000);if(!Number.isFinite(expiresAt)||expiresAt<=Date.now()||expiresAt>Date.now()+30*86400000)throw Error('Invitations expire within 30 days.');
+    const expiresAt=Number(input.expiresAt||Date.now()+30*86400000);if(!Number.isFinite(expiresAt)||expiresAt<=Date.now()||expiresAt>Date.now()+30*86400000)throw Error('Invitations expire within 30 days.');
     const memberExpiresAt=input.memberExpiresAt?Number(input.memberExpiresAt):null;if(memberExpiresAt&&(!Number.isFinite(memberExpiresAt)||memberExpiresAt<=Date.now()))throw Error('Invalid membership expiration.');
     const token=randomBytes(32).toString('base64url'),key=hash(token);
-    await this.store.create(`botInvitations/${key}`,{id:key,botId,creatorId:who.uid,email,expiresAt,memberExpiresAt,status:'pending',createdAt:Date.now()});
+    const quotaPath=`botInvitationQuota/${botId}`, invitationPath=`botInvitations/${key}`;
+    await this.atomic([quotaPath,invitationPath],([quota,existing])=>{if(existing)throw Error('Invitation collision. Please retry.');const pending=Number(quota?.pending||0);if(!Number.isSafeInteger(pending)||pending<0||pending>=100)throw Error('This bot already has 100 unused access codes. Revoke an unused or expired code to create another.');return {[quotaPath]:{botId,creatorId:who.uid,pending:pending+1},[invitationPath]:{id:key,botId,creatorId:who.uid,email,expiresAt,memberExpiresAt,status:'pending',quotaTracked:true,createdAt:Date.now()}};});
     return {id:key,token,expiresAt};
   }
   async accept(who:Identity,token:string){
     if(!/^[A-Za-z0-9_-]{43}$/.test(token))throw Error('Invitation unavailable.');const invitationPath=`botInvitations/${hash(token)}`,inv=await this.store.get(invitationPath);if(!inv)throw Error('Invitation unavailable.');
     const memberPath=`botMembers/${accessId(inv.botId,who.uid)}`,entitlementPath=`entitlements/${accessId(inv.botId,who.uid)}`;
-    await this.atomic([invitationPath,memberPath,entitlementPath],([current,member,entitlement])=>{
+    const quotaPath=`botInvitationQuota/${inv.botId}`;
+    await this.atomic([invitationPath,memberPath,entitlementPath,quotaPath],([current,member,entitlement,quota])=>{
       if(!current||current.status!=='pending'||current.expiresAt<=Date.now())throw Error('Invitation expired, revoked or already accepted.');
       if(current.email&&(!who.emailVerified||who.email?.toLowerCase()!==current.email))throw Error('Sign in with the intended verified email address to accept.');
       if(entitlement?.status==='revoked')throw Error('Access has been revoked. Contact the creator.');
       if(member&&['revoked','suspended'].includes(member.status))throw Error('Ask the creator to restore access first.');
-      return {[invitationPath]:{...current,status:'accepted',acceptedBy:who.uid,acceptedAt:Date.now()},[memberPath]:{...member,id:accessId(inv.botId,who.uid),uid:who.uid,creatorId:inv.creatorId,botId:inv.botId,email:who.emailVerified?who.email||'':'',displayName:who.name||'',status:'active',accessType:current.email?'email_invitation':'invitation_link',expiresAt:current.memberExpiresAt,createdAt:member?.createdAt||Date.now(),executionEnabled:false},[entitlementPath]:{...entitlement,id:accessId(inv.botId,who.uid),uid:who.uid,botId:inv.botId,creatorId:inv.creatorId,type:'membership',status:'active',createdAt:entitlement?.createdAt||Date.now()}};
+      return {...(current.quotaTracked?{[quotaPath]:{...quota,pending:Math.max(0,Number(quota?.pending||0)-1)}}:{}),[invitationPath]:{...current,status:'accepted',acceptedBy:who.uid,acceptedAt:Date.now()},[memberPath]:{...member,id:accessId(inv.botId,who.uid),uid:who.uid,creatorId:inv.creatorId,botId:inv.botId,email:who.emailVerified?who.email||'':'',displayName:who.name||'',status:'active',accessType:current.email?'email_invitation':'invitation_link',expiresAt:current.memberExpiresAt,createdAt:member?.createdAt||Date.now(),executionEnabled:false},[entitlementPath]:{...entitlement,id:accessId(inv.botId,who.uid),uid:who.uid,botId:inv.botId,creatorId:inv.creatorId,type:'membership',status:'active',createdAt:entitlement?.createdAt||Date.now()}};
     });await this.activity(inv.creatorId,'member.joined',inv.botId);return {botId:inv.botId};
+  }
+  async revokeInvitation(who:Identity,invitationId:string){
+    const invitationPath=`botInvitations/${id(invitationId)}`,inv=await this.store.get(invitationPath);if(!inv||inv.creatorId!==who.uid)throw Error('Invitation unavailable.');
+    const quotaPath=`botInvitationQuota/${inv.botId}`;
+    await this.atomic([invitationPath,quotaPath],([current,quota])=>{if(!current||current.creatorId!==who.uid)throw Error('Invitation unavailable.');if(current.status!=='pending')return {};return {[invitationPath]:{...current,status:'revoked'},...(current.quotaTracked?{[quotaPath]:{...quota,pending:Math.max(0,Number(quota?.pending||0)-1)}}:{})};});return {revoked:true};
   }
   async member(who:Identity,memberId:string,input:RecordData){
     const path=`botMembers/${id(memberId)}`,m=await this.store.get(path);if(!m||m.creatorId!==who.uid)throw Error('Member unavailable.');
@@ -246,6 +266,7 @@ export function economyRoutes(app:Express,economy:BotEconomy,authenticate:(req:R
   route('post','/projects/:botId/publish',true,(who,req)=>economy.publishProject(who,String(req.params.botId),req.body||{}));
   route('put','/projects/:botId/cover',true,(who,req)=>economy.setBotCover(who,String(req.params.botId),req.body?.coverImage));
   route('get','/covers',true,(who,req)=>economy.page('botCovers','uid',who.uid,after(req),100));
+  route('post','/projects/:botId/copy',true,(who,req)=>economy.copyProject(who,String(req.params.botId)));
   route('post','/projects/:botId/versions',true,(who,req)=>economy.version(who.uid,String(req.params.botId),req.body));
   route('get','/projects/:botId/versions',true,(who,req)=>economy.page('sourceVersions','projectKey',`${recordId(who.uid)}_${req.params.botId}`,after(req)));
   route('post','/projects/:botId/packages',true,(who,req)=>economy.package(who,String(req.params.botId),req.body));
@@ -258,12 +279,12 @@ export function economyRoutes(app:Express,economy:BotEconomy,authenticate:(req:R
   route('get','/members',true,(who,req)=>economy.memberList(who,after(req)));
   route('post','/members/:id',true,(who,req)=>economy.member(who,String(req.params.id),req.body));
   route('get','/memberships',true,async(who,req)=>{const page=await economy.page('botMembers','uid',who.uid,after(req));const items=await Promise.all(page.items.map(async m=>{const bot=await economy.store.get(`marketplaceBots/${m.botId}`);return {...m,botName:bot?.name||m.botId,asset:bot?.asset||''};}));return {...page,items};});
-  route('post','/bots/:id/unpublish',true,async(who,req)=>{const b=await economy.trading.owned(who.uid,String(req.params.id));await economy.trading.unpublish(who.uid,b.id);const key=`${economy.storage.root(who.uid,b.privateBotId)}/publication.json`;const raw=await economy.storage.read(key);if(raw){const pointer=JSON.parse(raw);if(pointer.id===b.id){const published=await economy.storage.read(`shared-bots/v1/${b.id}.json`);if(published)await economy.storage.write(`shared-bots/v1/${b.id}.json`,JSON.stringify({...JSON.parse(published),published:false}));}}return {unpublished:true};});
+  route('post','/bots/:id/unpublish',true,async(who,req)=>{const b=await economy.trading.owned(who.uid,String(req.params.id));const key=`${economy.storage.root(who.uid,b.privateBotId)}/publication.json`;const raw=await economy.storage.read(key);if(raw){const pointer=JSON.parse(raw);if(pointer.id===b.id){const snapshotKey=`shared-bots/v1/${b.id}.json`,published=await economy.storage.read(snapshotKey);if(published){const snapshot=JSON.parse(published);if(snapshot.ownerUid!==who.uid||snapshot.botId!==b.privateBotId)throw Error('Publication ownership mismatch.');await economy.storage.write(snapshotKey,JSON.stringify({...snapshot,published:false}));}}}await economy.trading.unpublish(who.uid,b.id);return {unpublished:true};});
   route('post','/bots/:id/invitations',true,(who,req)=>economy.invite(who,String(req.params.id),req.body));
   route('get','/invitations',true,(who,req)=>economy.page('botInvitations','creatorId',who.uid,after(req)));
-  route('post','/invitations/:id/revoke',true,async(who,req)=>{const path=`botInvitations/${req.params.id}`;await economy.atomic([path],([inv])=>{if(!inv||inv.creatorId!==who.uid)throw Error('Invitation unavailable.');return {[path]:{...inv,status:'revoked'}};});return {revoked:true};});
+  route('post','/invitations/:id/revoke',true,(who,req)=>economy.revokeInvitation(who,String(req.params.id)));
   route('post','/invitations/accept',true,(who,req)=>economy.accept(who,text(req.body?.token,100,true)));
   route('get','/activity',true,(who,req)=>economy.page('botActivity','uid',who.uid,after(req)));
   route('get','/usage',true,async(who,req)=>({...(await economy.page('resourceUsage','uid',who.uid,after(req))),billingEnabled:false}));
 }
-export function publicBot(b:RecordData){return {id:b.id,name:b.name,description:b.description,asset:b.asset,creator:b.creator,username:b.username,coverImage:b.coverImage||'',category:b.category||'Experimental',packageId:b.packageId||null,sourceAcquisitions:b.sourceAcquisitions??null,remixCount:b.remixCount??null,managedAccess:Boolean(b.managedAccess),access:b.access,priceMinor:b.priceMinor||0,timeframe:b.timeframe,updatedAt:b.updatedAt};}
+export function publicBot(b:RecordData){return {id:b.id,name:b.name,description:b.description,asset:b.asset,creator:b.creator,username:b.username,coverImage:b.coverImage||'',category:b.category||'Experimental',packageId:b.packageId||null,sourceAcquisitions:b.sourceAcquisitions??null,remixCount:b.remixCount??null,managedAccess:Boolean(b.managedAccess),livePublic:Boolean(b.livePublic),access:b.access,priceMinor:b.priceMinor||0,timeframe:b.timeframe,updatedAt:b.updatedAt};}
