@@ -8,3 +8,6 @@ export type LiveReadiness = {
 };
 
 export type LiveExecution={id:string;state:string;updatedAt:number;action:string|null;entryPrice:number|null;volume:number|null;error:string|null};
+
+export type InstanceAction='start'|'stop';
+export type InstanceObservation={deployed?:boolean;running?:boolean;evaluating?:boolean;nextAlarm?:number|null;lastError?:string|null};

@@ -9,10 +9,10 @@ export function sharedIdFromPath(path: string) {
   const match = path.match(/^\/bot\/([A-Za-z0-9_-]+)\/?$/);
   return match?.[1] ?? null;
 }
-async function privateRequest<T>(client: CloudClient, path: string, method = 'GET', body?: unknown): Promise<T> {
+async function privateRequest<T>(client: CloudClient, path: string, method = 'GET', body?: unknown, options?: {signal?: AbortSignal}): Promise<T> {
   const request = async (forceRefresh: boolean) => {
     const token = await client.getIdToken(forceRefresh);
-    return fetch(path, { method, headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    return fetch(path, { method, headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}), ...(options?.signal ? { signal: options.signal } : {}) });
   };
   let response = await request(false);
   if (response.status === 401) response = await request(true);
