@@ -642,8 +642,8 @@ app.post('/api/ai', async (req, res) => {
   for (const [id, entry] of aiHits) if (now - entry.started > 120_000) aiHits.delete(id);
 
   const model = process.env.OPENROUTER_MODEL?.trim() || 'minimax/minimax-m3:free';
-  const fallbackModel = process.env.OPENROUTER_FALLBACK_MODEL?.trim();
-  let meteredModel=model,usageStatus:'completed'|'failed'|'interrupted'='failed',measuredUsage:any=null,usageBuffer='';const usageDecoder=new TextDecoder();
+  const meteredModel=model;
+  let usageStatus:'completed'|'failed'|'interrupted'='failed',measuredUsage:any=null,usageBuffer='',finishReason:string|null=null,sawDone=false,providerError=false;const usageDecoder=new TextDecoder();
   let upstreamReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   const clientAbort = new AbortController();
   res.status(200);
@@ -673,35 +673,18 @@ app.post('/api/ai', async (req, res) => {
       apiKey,
       AbortSignal.any([clientAbort.signal, AbortSignal.timeout(45_000)]),
     );
-    let usedModel = model;
-    let response: Response;
-    try {
-      response = await requestModel(model);
-    } catch (error) {
-      if (!fallbackModel || fallbackModel === model || clientAbort.signal.aborted) throw error;
-      console.warn('OpenRouter primary model failed; trying fallback', { model, fallbackModel, error: error instanceof Error ? error.name : 'UnknownError' });
-      usedModel = fallbackModel;
-      response = await requestModel(fallbackModel);
-    }
-    const retryableProviderStatus = (status: number) => status === 400 || status === 402 || status === 403 || status === 404 || status === 408 || status === 429 || status >= 500;
-    if (!response.ok && fallbackModel && fallbackModel !== usedModel && retryableProviderStatus(response.status) && !clientAbort.signal.aborted) {
-      const failedStatus = response.status;
-      await response.body?.cancel().catch(() => undefined);
-      console.warn('OpenRouter primary model returned a retryable status; trying fallback', { model, fallbackModel, status: failedStatus });
-      usedModel = fallbackModel;
-      response = await requestModel(fallbackModel);
-    }
-    meteredModel=usedModel;
+    const response = await requestModel(model);
     if (!response.ok) {
-      const responseBody = await response.text();
-      let data: any = {};
-      try { data = JSON.parse(responseBody); } catch { /* Use an HTTP status fallback below. */ }
-      const upstreamMessage = typeof data.error?.message === 'string' ? data.error.message : '';
+      await response.body?.cancel().catch(() => undefined);
+      console.warn('OpenRouter rejected request', { model, status: response.status });
       const friendly = response.status === 401 ? 'OpenRouter rejected the API key. Check OPENROUTER_API_KEY in .env and restart the server.'
         : response.status === 402 ? 'OpenRouter needs available credits or billing before it can generate a response.'
           : response.status === 404 ? 'The configured OpenRouter model was not found. Check OPENROUTER_MODEL in .env.'
             : response.status === 429 ? 'OpenRouter rate limit reached. Wait briefly and retry.'
-              : upstreamMessage || `OpenRouter request failed (HTTP ${response.status}).`;
+              : response.status === 400 ? 'The request is too long or invalid for this model. Shorten the request or configure another model.'
+                : response.status === 403 ? 'The configured model is unavailable to this account. Update OPENROUTER_MODEL to another permitted model.'
+                  : response.status >= 500 ? 'The model provider is temporarily unavailable. Retry later.'
+                    : `OpenRouter request failed (HTTP ${response.status}).`;
       throw new Error(friendly);
     }
     if (!response.body) throw new Error('OpenRouter returned no streaming response body.');
@@ -709,10 +692,12 @@ app.post('/api/ai', async (req, res) => {
     while (true) {
       const { value, done } = await upstreamReader.read();
       if (done) break;
-      usageBuffer+=usageDecoder.decode(value,{stream:true});const lines=usageBuffer.split('\n');usageBuffer=lines.pop()!.slice(-16000);for(const line of lines){if(line.startsWith('data: ')){try{const event=JSON.parse(line.slice(6));if(event.usage)measuredUsage=event.usage;}catch{}}}
+      usageBuffer+=usageDecoder.decode(value,{stream:true});const lines=usageBuffer.split('\n');usageBuffer=lines.pop()!.slice(-16000);for(const line of lines){if(line.startsWith('data:')){const payload=line.slice(5).trim();if(payload==='[DONE]'){sawDone=true;continue}try{const event=JSON.parse(payload);if(event.usage)measuredUsage=event.usage;if(event.error)providerError=true;if(event.choices?.[0]?.finish_reason)finishReason=event.choices[0].finish_reason;}catch{}}}
       if (!res.write(value)) await new Promise<void>(resolve => res.once('drain', resolve));
     }
-    usageStatus='completed';return res.end();
+    usageStatus=providerError ? 'failed' : sawDone && finishReason !== 'length' ? 'completed' : 'interrupted';
+    console.info('OpenRouter stream finished', { model, finishReason, sawDone, providerError, status: usageStatus, completionTokens: measuredUsage?.completion_tokens ?? null });
+    return res.end();
   } catch (error) {
     if(clientAbort.signal.aborted)usageStatus='interrupted';
     const causes: any[] = [];
@@ -728,13 +713,13 @@ app.post('/api/ai', async (req, res) => {
     }
     const networkCode = causes.map(cause => cause.code).find(code => typeof code === 'string' && /^(EAI_AGAIN|ENOTFOUND|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH)$/.test(code));
     const message = error instanceof Error && (error.name === 'TimeoutError' || causes.some(cause => cause.name === 'TimeoutError'))
-      ? 'The configured OpenRouter model did not respond within 45 seconds. Its fallback was also unavailable or timed out. Retry in a moment.'
+      ? 'Generation timed out after 45 seconds. Retry or configure another permitted model.'
       : networkCode
         ? `Could not connect to OpenRouter (${networkCode}). Check server internet access, DNS, or firewall and retry.`
         : error instanceof Error && error.message.toLowerCase().includes('fetch failed')
           ? 'Could not connect to OpenRouter. Check server internet access, DNS, or firewall and retry.'
           : error instanceof Error ? error.message : 'AI request failed.';
-    console.error('OpenRouter request failed', { model, fallbackModel: fallbackModel || null, networkCode: networkCode ?? null, name: error instanceof Error ? error.name : typeof error, message: error instanceof Error ? error.message : String(error) });
+    console.error('OpenRouter request failed', { model, networkCode: networkCode ?? null, name: error instanceof Error ? error.name : typeof error });
     if (!res.destroyed) res.write(`event: error\ndata: ${JSON.stringify({ error: message })}\n\n`);
     return res.end();
   } finally {

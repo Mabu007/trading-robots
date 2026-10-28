@@ -167,7 +167,7 @@ ${appContext}`;
   void sendChat('Audit this trade using the attached prices and strategy. Report only conclusions supported by this context.',context);
  };
  function ai(messages:any[],selectedAsset:string,onText:(fullText:string)=>void,maxTokens=1200,includeMarketContext=false){
-  const controller=new AbortController();const timer=window.setTimeout(()=>controller.abort(),100_000);
+  const controller=new AbortController();const timer=window.setTimeout(()=>controller.abort(),55_000);
   return cloudClient!.getIdToken().then(token=>postApiStream('/api/ai',{messages,asset:selectedAsset,maxTokens,includeMarketContext},'OpenRouter',(_chunk,fullText)=>onText(fullText),controller.signal,token)).finally(()=>window.clearTimeout(timer));
  }
  const openDemo=(bot:DemoBot)=>{botLoadRef.current=bot.id;hydratedWorkspaceRef.current=bot.id;setDraftId(bot.id);setName(bot.name);setAsset(bot.asset);setPrompt(bot.prompt);setCode(bot.code);setCodeHydrated(true);setCreated(true);setChatHydrated(true);setScreen('workspace');setResult(null);setChat([{role:'assistant',content:`${bot.description} This example is ready to customize and backtest.`}]);setSelectedTrade(null);setView('chart');setTab('chart');setQueuedBacktest(bot.id)};
