@@ -5,6 +5,14 @@ historical data and the existing cTrader deployment flow. Do not describe it
 as a VALR trading integration, and do not enable real-money trading on this
 basis. Existing running deployments are not stopped or modified by this code.
 
+The branch also contains unconnected account primitives for signed VALR
+account inspection and AES-256-GCM encrypted credential storage with
+user-bound authentication. They reject keys with permissions beyond View and
+Trade. These primitives have mock tests only, are not exposed through an API
+or UI, and do not connect an account or submit orders. A production deployment
+would need a dedicated, securely provisioned 32-byte base64
+`VALR_CREDENTIAL_ENCRYPTION_KEY` and an operational key-rotation plan.
+
 ## Public endpoints
 
 `GET /api/valr/markets` returns active pairs and the exchange's pair fields,
