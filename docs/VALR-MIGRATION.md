@@ -41,8 +41,9 @@ failure after those retries stops the run rather than returning partial data.
 The branch contains a spot-only paper Durable Object and workspace controls.
 Its customer-and-bot identity is derived server-side; it stores paper state,
 replays the pinned strategy in the sandbox, and receives no exchange keys. A
-separate paper-only Worker is deployed to the Cloudflare preview account; an
-ETHZAR WAIT strategy processed a real completed candle and was stopped. Local
+paper-only Workers are deployed for preview and production; an ETHZAR WAIT
+strategy processed a real completed candle and was stopped on each. The production
+website has not been switched to this branch. Local
 mock tests cover restarts, duplicate candles, stop, minimums and retries. This
 is not live execution. SELL short signals are rejected in spot paper mode;
 fees and slippage are not modelled by this initial paper simulator. It starts
