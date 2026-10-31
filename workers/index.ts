@@ -1,9 +1,10 @@
 import { DurableObject } from 'cloudflare:workers';
 import { RobotRuntime,AccountRuntime,type Deployment,type ExecutionJob,type DurableStore } from './runtime-core';
-import { STRATEGY_RUNTIME_SOURCE } from '../src/strategy-runtime';
+import { getQuickJSWASMModule } from '@cf-wasm/quickjs/workerd';
+import { evaluateStrategyInSandbox } from './strategy-sandbox';
 import { TF_SECONDS } from '../shared/trading';
 import { parseStrategyConfig } from '../src/strategy';
-interface Env { STRATEGY_ISOLATION_VERIFIED:string; ROBOTS:DurableObjectNamespace;ACCOUNTS:DurableObjectNamespace;DATA:R2Bucket;SIGNALS:Queue<ExecutionJob>;LOADER:WorkerLoader;TRADING_INTERNAL_SECRET:string;CONTROL_API_URL:string;CTRADER_GATEWAY_URL:string;DEMO_TRADING_ENABLED:string; }
+interface Env { STRATEGY_ISOLATION_VERIFIED:string; ROBOTS:DurableObjectNamespace;ACCOUNTS:DurableObjectNamespace;DATA:R2Bucket;SIGNALS:Queue<ExecutionJob>;TRADING_INTERNAL_SECRET:string;CONTROL_API_URL:string;CTRADER_GATEWAY_URL:string;DEMO_TRADING_ENABLED:string; }
 const json=(v:unknown,status=200)=>Response.json(v,{status});
 async function rpc(env:Env,target:'control'|'gateway',action:string,body:any){const base=target==='control'?env.CONTROL_API_URL:env.CTRADER_GATEWAY_URL;if(!base||!env.TRADING_INTERNAL_SECRET)throw Error(`${target} is not configured`);const r=await fetch(new URL(target==='control'?`/api/internal/trading/${action}`:`/rpc/${action}`,base),{method:'POST',headers:{Authorization:`Bearer ${env.TRADING_INTERNAL_SECRET}`,'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(25000)});const d=await r.json<any>();if(!r.ok)throw Error(d.error||`${target} unavailable`);return d;}
 const storage=(ctx:DurableObjectState):DurableStore=>({get:key=>ctx.storage.get(key),put:(key,value)=>ctx.storage.put(key,value),putMany:entries=>ctx.storage.put(entries),setAlarm:time=>ctx.storage.setAlarm(time),deleteAlarm:()=>ctx.storage.deleteAlarm()});
@@ -31,10 +32,9 @@ export class Robot extends SerializedObject {
       if(from<cutoff){const loaded=await rpc(this.env,'gateway','candles',{uid:d.sourceUid,accountId:d.sourceAccountId,symbolId:d.sourceSymbolId,timeframe:tf,from,to:cutoff});const map=new Map(rows.map(c=>[c.time,c]));for(const c of loaded.candles){if(![c.time,c.open,c.high,c.low,c.close,c.volume].every(Number.isFinite)||c.high<c.low||c.high<Math.max(c.open,c.close)||c.low>Math.min(c.open,c.close))throw Error('Invalid broker candles');map.set(c.time,c);}merged=[...map.values()].sort((a,b)=>a.time-b.time);await this.env.DATA.put(key,JSON.stringify(merged));}
       datasets[tf]=merged.filter(c=>(c.time+TF_SECONDS[tf])*1000<=cutoff);total+=datasets[tf].length;if(total>50000)throw Error('Replay safety limit reached. Stop and deploy a new validated version.');
     }
-    const main=`import {evaluate} from './canonical.js';export default {async fetch(request){const data=await request.json();const decisions=await evaluate(()=>import('./strategy.js'),data.code,data.datasets,data.config);return Response.json({decision:decisions.at(-1)});}}`;
-    const isolated=this.env.LOADER.load({compatibilityDate:'2026-10-01',mainModule:'main.js',modules:{'main.js':main,'strategy.js':source,'canonical.js':STRATEGY_RUNTIME_SOURCE},env:{},globalOutbound:null});
-    const response=await isolated.getEntrypoint(undefined,{limits:{cpuMs:500,subRequests:0}}).fetch(new Request('https://strategy.invalid/evaluate',{method:'POST',body:JSON.stringify({code:source,datasets,config:d.strategy})}));
-    if(!response.ok)throw Error('Isolated strategy execution failed');const result=await response.json<any>();const last=datasets[d.strategy.executionTimeframe].at(-1);if(!last)throw Error('No completed execution candle');return {...result,reference:last.close,candleClose:(last.time+TF_SECONDS[d.strategy.executionTimeframe])*1000};
+    const quick=await getQuickJSWASMModule();
+    const decisions=evaluateStrategyInSandbox(quick,source,datasets,d.strategy);
+    const last=datasets[d.strategy.executionTimeframe].at(-1);if(!last)throw Error('No completed execution candle');return {decision:decisions.at(-1),reference:last.close,candleClose:(last.time+TF_SECONDS[d.strategy.executionTimeframe])*1000};
   }
 }
 export class Account extends SerializedObject {

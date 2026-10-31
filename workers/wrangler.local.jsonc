@@ -5,7 +5,6 @@
   "durable_objects": {"bindings":[{"name":"ROBOTS","class_name":"Robot"},{"name":"ACCOUNTS","class_name":"Account"}]},
   "migrations":[{"tag":"v1","new_sqlite_classes":["Robot","Account"]}],
   "r2_buckets":[{"binding":"DATA","bucket_name":"trading-robots-local"}],
-  "worker_loaders":[{"binding":"LOADER"}],
   "queues":{"producers":[{"binding":"SIGNALS","queue":"trading-robots-signals-local"}],"consumers":[{"queue":"trading-robots-signals-local","max_batch_size":5,"max_batch_timeout":1,"max_retries":5,"dead_letter_queue":"trading-robots-signals-dead-local"}]},
   "vars":{"STRATEGY_ISOLATION_VERIFIED":"false","DEMO_TRADING_ENABLED":"false","CONTROL_API_URL":"http://127.0.0.1:8787","CTRADER_GATEWAY_URL":"http://127.0.0.1:8790"},
   "observability":{"enabled":true},

@@ -42,6 +42,16 @@ minimums and retries. They are not yet bound to a deployed Durable Object or
 the strategy evaluator. SELL short signals are rejected in spot paper mode;
 fees and slippage are not modelled by this initial paper simulator.
 
+The account's Workers Free plan rejects Cloudflare Dynamic Workers. This branch
+uses an isolated QuickJS WebAssembly VM instead, with no host APIs, a memory
+ceiling and a count-based interruption limit. A temporary Worker deployed to
+the actual Free account successfully ran a 1,000-candle synthetic replay,
+reported `fetch` and `process` as unavailable, and interrupted an infinite
+loop; it was deleted afterward. Local tests also compare the sandbox against
+the canonical evaluator. This is an initial probe, not a complete security,
+performance or strategy-compatibility review. Keep the production isolation
+gate disabled pending the complete runtime and end-to-end verification.
+
 ## Still required before switching the product
 
 - Add live WebSocket updates and verify the workspace and coverage UI in an
