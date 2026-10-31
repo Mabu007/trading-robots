@@ -62,7 +62,12 @@ This connection has mock tests only and has not been validated with a real key.
 The old shared AI key is disabled by default; administrators can explicitly
 set `ALLOW_SHARED_OPENROUTER_KEY=true` if they intend to pay for shared usage.
 
-A separate unconnected order-journal primitive records an intent before
+A mock-tested, unconnected per-account coordinator serializes bots, persists
+intent before submission, reconciles fills and verifies protective orders. It
+locks the account when a submission is ambiguous and cannot yet reconcile a
+completed protective exit or maintain a verified daily loss ledger. It is not
+exposed to users or connected to real-money execution. A separate unconnected
+order-journal primitive records an intent before
 submission and refuses to resend ambiguous orders until exchange status is
 resolved. An unconnected VALR adapter can construct price-capped FOK limit and OCO conditional
 requests; neither is exposed in an API or places orders in the application.

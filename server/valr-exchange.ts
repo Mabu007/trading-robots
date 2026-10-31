@@ -1,4 +1,5 @@
 import { valrSignature } from './valr-account.ts';
+import { parseValrSnapshot } from './valr-snapshot.ts';
 
 type Credentials={apiKey:string;apiSecret:string};
 type OrderStatus={orderId:string;customerOrderId:string;orderStatusType:string;currencyPair:string;remainingQuantity?:string;originalQuantity?:string};
@@ -18,6 +19,20 @@ export class ValrExchange {
   catch{throw Error('VALR request failed; the order outcome may be unknown.')}
   if(!response.ok)throw Error(`VALR request returned HTTP ${response.status}; reconcile order status before retrying.`);
   try{return await response.json()}catch{throw Error('VALR response was invalid; the order outcome may be unknown.')}
+ }
+ private async publicGet(path:string):Promise<unknown>{
+  let response:Response;try{response=await this.request(`https://api.valr.com${path}`,{signal:AbortSignal.timeout(12000)})}catch{throw Error('VALR public market request failed.')}
+  if(!response.ok)throw Error(`VALR public market request returned HTTP ${response.status}.`);
+  try{return await response.json()}catch{throw Error('VALR returned invalid public market data.')}
+ }
+ async snapshot(pair:string,ledger:{dayStartEquity:string;dailyLoss:string;reconciled:boolean}){
+  if(!pairOk(pair))throw Error('Invalid market');
+  // Explicitly request zero balances: a missing base balance must not be
+  // assumed flat. All account state is fetched using signed read-only calls.
+  const [pairs,balances,orders,conditionals,orderTypes,fees,slippage,orderbook]=await Promise.all([
+   this.publicGet('/v1/public/pairs'),this.call('GET','/v1/account/balances?excludeZeroBalances=false'),this.call('GET','/v1/orders/open'),this.call('GET','/v1/orders/conditionals'),this.publicGet(`/v1/public/${pair}/ordertypes`),this.call('GET','/v1/account/fees/trade'),this.publicGet('/v1/public/slippage'),this.call('GET',`/v1/marketdata/${pair}/orderbook`),
+  ]);
+  return parseValrSnapshot({pair,pairs,balances,orders,conditionals,orderTypes,fees,slippage,orderbook,ledger});
  }
  async limitBuy(pair:string,quantity:string,price:string,customerOrderId:string){
   if(!pairOk(pair)||!positive(quantity)||!positive(price)||!idOk(customerOrderId))throw Error('Invalid limit order');
@@ -50,5 +65,23 @@ export class ValrExchange {
   const matches=result.filter(item=>item?.customerOrderId===customerOrderId&&item?.currencyPair===pair);
   if(matches.length>1)throw Error('Multiple conditional orders share the same ID.');
   return matches[0]??null; // Missing does not prove an order was never placed.
+ }
+ async protectionStatus(pair:string,customerOrderId:string,orderId?:string){
+  if(!pairOk(pair)||!idOk(customerOrderId)||(orderId!==undefined&&!idOk(orderId)))throw Error('Invalid protection lookup');
+  let resolved=orderId;
+  if(!resolved){
+   const active=await this.activeProtection(pair,customerOrderId);
+   if(active){if(typeof active.orderId!=='string'||!idOk(active.orderId))throw Error('VALR returned an invalid protection ID.');resolved=active.orderId}
+   else{
+    const history=await this.call('GET',`/v1/orders/conditionals/${pair}/history`);if(!Array.isArray(history))throw Error('VALR returned invalid protection history.');
+    const ids=[...new Set(history.filter(item=>item?.customerOrderId===customerOrderId&&item?.currencyPair===pair).map(item=>item?.orderId))];
+    if(ids.length>1)throw Error('Multiple conditional orders share the same ID.');
+    if(ids.length===0)return null;
+    if(typeof ids[0]!=='string'||!idOk(ids[0]))throw Error('VALR returned an invalid protection ID.');resolved=ids[0];
+   }
+  }
+  const result=await this.call('GET',`/v1/orders/conditionals/conditional/${pair}/orderid/${resolved}`) as Record<string,unknown>;
+  if(result?.orderId!==resolved||result.customerOrderId!==customerOrderId||result.currencyPair!==pair)throw Error('VALR returned a mismatched protection status.');
+  return result;
  }
 }
