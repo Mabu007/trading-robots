@@ -66,7 +66,8 @@ set `ALLOW_SHARED_OPENROUTER_KEY=true` if they intend to pay for shared usage.
 A mock-tested, unconnected per-account coordinator serializes bots, persists
 intent before submission, reconciles fills and verifies protective orders. It
 locks the account when a submission is ambiguous and cannot yet reconcile a
-completed protective exit or maintain a verified daily loss ledger. A local
+completed protective exit or populate the durable daily-loss ledger from
+verified exchange fills. A local
 Durable Object test verifies dropped acknowledgements and restart recovery with
 a mock exchange; it sends no orders. It is not
 exposed to users or connected to real-money execution. A separate unconnected
