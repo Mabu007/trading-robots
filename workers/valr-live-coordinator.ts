@@ -1,11 +1,12 @@
 import {sizeValrSpotBuy,type Snapshot,type Specification,type Limits} from '../shared/valr-risk';
 import {reconcileSpotBuy,verifySpotProtection} from './valr-fill-reconciliation';
+import {ValrLossLedger} from './valr-loss-ledger';
 
 type Config={pair:string;limits:Omit<Limits,'authorized'>};
 type Signal={id:string;candleClose:number;stopLoss:string;takeProfit:string};
-type Market={baseCurrency:string;quoteCurrency:string;spec:Specification;account:Snapshot;takerFeeBps:number;protectiveSlippageBps:number;ledgerDay:string};
+type Market={baseCurrency:string;quoteCurrency:string;spec:Specification;account:Omit<Snapshot,'dayStartEquity'|'dailyLoss'>;takerFeeBps:number;protectiveSlippageBps:number};
 type Phase='entry_pending'|'entry_unknown'|'unprotected'|'protection_pending'|'protection_unknown'|'protected';
-type Active={botId:string;signalId:string;pair:string;entryId:string;protectionId:string;entryOrderId?:string;protectionOrderId?:string;quantity:string;limitPrice:string;stopLoss:string;takeProfit:string;baseCurrency:string;quoteCurrency:string;baseDecimalPlaces:number;minBaseAmount:string;minQuoteAmount:string;slippageBps:number;phase:Phase;protectableQuantity?:string;lastError?:string};
+type Active={botId:string;signalId:string;pair:string;entryId:string;protectionId:string;entryOrderId?:string;protectionOrderId?:string;quantity:string;limitPrice:string;stopLoss:string;takeProfit:string;expiresAt:number;baseCurrency:string;quoteCurrency:string;baseDecimalPlaces:number;minBaseAmount:string;minQuoteAmount:string;slippageBps:number;phase:Phase;protectableQuantity?:string;lastError?:string};
 type State={bots:Record<string,{running:boolean;config:Config}>;active:Active|null};
 type Storage={get<T>(key:string):Promise<T|undefined>;put(key:string,value:unknown):Promise<void>};
 type Provider={snapshot:(pair:string)=>Promise<Market>;submitEntry:(order:Active)=>Promise<{orderId:string}>;entrySummary:(order:Active)=>Promise<Record<string,unknown>|null>;submitProtection:(order:Active)=>Promise<{orderId:string}>;protectionStatus:(order:Active)=>Promise<Record<string,unknown>|null>};
@@ -15,8 +16,8 @@ async function orderIds(bot:string,signal:string){const bytes=new TextEncoder().
 // route. A separate Durable Object must own one instance per VALR customer;
 // all provider methods must use server-side credentials and verified data.
 export class ValrLiveCoordinator {
- private tail:Promise<unknown>=Promise.resolve();private storage:Storage;private provider:Provider;private now:()=>number;
- constructor(storage:Storage,provider:Provider,now=Date.now){this.storage=storage;this.provider=provider;this.now=now}
+ private tail:Promise<unknown>=Promise.resolve();private storage:Storage;private provider:Provider;private now:()=>number;private ledger:ValrLossLedger;
+ constructor(storage:Storage,provider:Provider,now=Date.now){this.storage=storage;this.provider=provider;this.now=now;this.ledger=new ValrLossLedger(storage)}
  private serial<T>(fn:()=>Promise<T>):Promise<T>{const result=this.tail.then(fn,fn);this.tail=result.catch(()=>{});return result}
  private async load():Promise<State>{return await this.storage.get<State>('live-account')??{bots:{},active:null}}
  private save(state:State){return this.storage.put('live-account',state)}
@@ -37,15 +38,25 @@ export class ValrLiveCoordinator {
   const market=await this.provider.snapshot(bot.config.pair);
   const checkedAt=this.now();
   if(!Number.isSafeInteger(checkedAt)||signal.candleClose>checkedAt+1000||signal.candleClose<checkedAt-120000)throw Error('Signal became stale while checking the account');
-  if(market.ledgerDay!==new Date(checkedAt).toISOString().slice(0,10))throw Error('Daily account ledger is not current');
   if(!Number.isInteger(market.takerFeeBps)||market.takerFeeBps<0||market.takerFeeBps>1000||!Number.isInteger(market.protectiveSlippageBps)||market.protectiveSlippageBps<0||market.protectiveSlippageBps>500)throw Error('Verified fee or protective slippage is unavailable');
-  const stopSlippage=Math.max(bot.config.limits.slippageBps,bot.config.limits.stopSlippageBps??0,market.protectiveSlippageBps);
-  const size=sizeValrSpotBuy(signal,market.account,market.spec,{...bot.config.limits,feeBps:Math.max(bot.config.limits.feeBps,market.takerFeeBps),stopSlippageBps:stopSlippage,authorized:true},checkedAt);
   if(!market.baseCurrency||!market.quoteCurrency)throw Error('Market currencies are unavailable');
-  const active:Active={botId,signalId:signal.id,pair:bot.config.pair,...ids,quantity:size.baseAmount,limitPrice:size.entryEstimate,stopLoss:size.stopLoss,takeProfit:size.takeProfit,baseCurrency:market.baseCurrency,quoteCurrency:market.quoteCurrency,baseDecimalPlaces:market.spec.baseDecimalPlaces,minBaseAmount:market.spec.minBaseAmount,minQuoteAmount:market.spec.minQuoteAmount,slippageBps:stopSlippage,phase:'entry_pending'};
+  if(!market.account.reconciled||market.account.openOrders!==0||market.account.openPositions!==0)throw Error('Account must be reconciled and flat before trading');
+  const utcDay=new Date(checkedAt).toISOString().slice(0,10);
+  await this.ledger.beginDay(utcDay,market.quoteCurrency,market.account.availableQuote,true);
+  const ledger=await this.ledger.snapshot(utcDay,market.quoteCurrency);
+  const stopSlippage=Math.max(bot.config.limits.slippageBps,bot.config.limits.stopSlippageBps??0,market.protectiveSlippageBps);
+  const account={...market.account,dayStartEquity:ledger.dayStartEquity,dailyLoss:ledger.dailyLoss},limits={...bot.config.limits,feeBps:Math.max(bot.config.limits.feeBps,market.takerFeeBps),stopSlippageBps:stopSlippage,authorized:true};
+  const size=sizeValrSpotBuy(signal,account,market.spec,limits,this.now());
+  // A future execution gateway must reject an entry that arrives after this
+  // deadline; network transit must not turn a fresh quote into a stale trade.
+  const expiresAt=Math.min(signal.candleClose+120000,market.account.quoteTime+limits.maxPriceAgeMs,Date.parse(`${utcDay}T00:00:00.000Z`)+86400000-1);
+  const active:Active={botId,signalId:signal.id,pair:bot.config.pair,...ids,quantity:size.baseAmount,limitPrice:size.entryEstimate,stopLoss:size.stopLoss,takeProfit:size.takeProfit,expiresAt,baseCurrency:market.baseCurrency,quoteCurrency:market.quoteCurrency,baseDecimalPlaces:market.spec.baseDecimalPlaces,minBaseAmount:market.spec.minBaseAmount,minQuoteAmount:market.spec.minQuoteAmount,slippageBps:stopSlippage,phase:'entry_pending'};
   // The permanent marker precedes both the reservation and network submission.
   // A crash at any point can lose a signal but can never resend its order.
   await this.storage.put(seenKey,{botId,signalId:signal.id});state.active=active;await this.save(state);
+  // Durable storage can itself be slow. Revalidate immediately before the
+  // only submission attempt; a failed check consumes the signal safely.
+  try{const submitAt=this.now();if(!Number.isSafeInteger(submitAt)||submitAt>expiresAt||signal.candleClose<submitAt-120000||signal.candleClose>submitAt+1000||new Date(submitAt).toISOString().slice(0,10)!==utcDay)throw Error('Signal or daily ledger became stale');sizeValrSpotBuy(signal,account,market.spec,limits,submitAt)}catch(error){state.active=null;await this.save(state);throw error}
   try{const result=await this.provider.submitEntry(active);if(typeof result?.orderId!=='string'||!result.orderId)throw Error('Missing acknowledgement');active.entryOrderId=result.orderId;active.phase='entry_unknown'}catch{active.phase='entry_unknown';active.lastError='Entry outcome is unknown; reconciling without resubmission'}
   await this.save(state);return state;
  })}

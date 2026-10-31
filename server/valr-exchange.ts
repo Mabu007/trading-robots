@@ -34,14 +34,14 @@ export class ValrExchange {
   })();slot.pending=pending;cache.set(path,slot);
   try{return structuredClone(await pending)}catch(e){if(cache.get(path)===slot)cache.delete(path);throw e}
  }
- async snapshot(pair:string,ledger:{utcDay:string;dayStartEquity:string;dailyLoss:string;reconciled:boolean}){
+ async snapshot(pair:string){
   if(!pairOk(pair))throw Error('Invalid market');
   // Explicitly request zero balances: a missing base balance must not be
   // assumed flat. All account state is fetched using signed read-only calls.
   const [pairs,balances,orders,conditionals,orderTypes,fees,slippage,orderbook]=await Promise.all([
    this.publicGet('/v1/public/pairs'),this.call('GET','/v1/account/balances?excludeZeroBalances=false'),this.call('GET','/v1/orders/open'),this.call('GET','/v1/orders/conditionals'),this.publicGet(`/v1/public/${pair}/ordertypes`),this.call('GET','/v1/account/fees/trade'),this.publicGet('/v1/public/slippage'),this.call('GET',`/v1/marketdata/${pair}/orderbook`),
   ]);
-  return parseValrSnapshot({pair,pairs,balances,orders,conditionals,orderTypes,fees,slippage,orderbook,ledger});
+  return parseValrSnapshot({pair,pairs,balances,orders,conditionals,orderTypes,fees,slippage,orderbook});
  }
  async limitBuy(pair:string,quantity:string,price:string,customerOrderId:string){
   if(!pairOk(pair)||!positive(quantity)||!positive(price)||!idOk(customerOrderId))throw Error('Invalid limit order');
