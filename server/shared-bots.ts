@@ -88,7 +88,7 @@ export function sharedBotRoutes(app: Express, storage: Storage) {
     const { name, asset, description, coverImage = '', access = 'free',priceMinor=0,currency='ZAR',creator='' } = req.body ?? {};
     if (!['free','paid'].includes(access)||access==='paid'&&(!storage.onPublish||!Number.isSafeInteger(priceMinor)||priceMinor<100||priceMinor>100_000_000||currency!=='ZAR')) return res.status(400).json({ error: 'Paid publishing requires marketplace configuration and a valid ZAR price. Checkout is coming soon.' });
     if(typeof creator!=='string'||creator.length>80)return res.status(400).json({error:'Creator display name is invalid.'});
-    if (typeof name !== 'string' || !name.trim() || name.length > 64 || !['EURUSD','GBPUSD','USDJPY','XAUUSD'].includes(asset)
+    if (typeof name !== 'string' || !name.trim() || name.length > 64 || typeof asset !== 'string' || !/^[A-Z0-9]{3,30}$/.test(asset)
       || typeof description !== 'string' || !description.trim() || description.length > 2000 || !validCover(coverImage)) {
       return res.status(400).json({ error: 'Add a name, description (up to 2,000 characters), and a JPG, PNG, or WebP cover under 500 KB.' });
     }

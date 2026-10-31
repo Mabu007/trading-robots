@@ -12,10 +12,18 @@ import { marketplace,marketplaceRoutes,assertProjectEditable } from './marketpla
 import { FirestoreStore } from './firestore-store.ts';
 import { brokerRoutes,gatewayRequest,gatewayHealth } from './broker-routes.ts';
 import { BrokerTokenStore } from './broker-tokens.ts';
+import { ValrMarketData } from './valr-market-data.ts';
+import { valrAccountRoutes } from './valr-routes.ts';
+import { valrPaperRoutes } from './valr-paper-routes.ts';
+import { legacyProviderGuard } from './legacy-provider-guard.ts';
+import { OpenRouterAccounts, openRouterRoutes } from './openrouter-account.ts';
+import { readOwnedBotAsset } from './firebase-owned-bot.ts';
 
 const app = express();
-app.use(['/api/marketplace','/api/brokers','/api/economy'],requestLimit);
+const valrMarketData = new ValrMarketData();
+app.use(['/api/marketplace','/api/brokers','/api/economy','/api/valr','/api/openrouter'],requestLimit);
 app.use(express.json({ limit: '10mb' }));
+app.use(legacyProviderGuard);
 const assets = ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD'] as const;
 
 type StoredMarketDay = { schemaVersion: 1; asset: MarketAsset; timeframe: MarketTimeframe; date: string; source: 'manual'; priceType: 'unknown'; updatedAt: string; candles: MarketCandle[] };
@@ -218,6 +226,19 @@ function friendlyR2Error(error: unknown): string {
 }
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, aiConfigured: Boolean(process.env.OPENROUTER_API_KEY) }));
+// New provider endpoints are separate until the live runtime and workspace
+// are migrated together. No credentials are needed for these public calls.
+app.get('/api/valr/markets', async (_req, res) => {
+  try { return res.json({ markets: await valrMarketData.pairs() }); }
+  catch (error) { return res.status(502).json({ error: error instanceof Error ? error.message : 'VALR market data unavailable.' }); }
+});
+app.post('/api/valr/candles', async (req, res) => {
+  try { return res.json(await valrMarketData.candles(req.body ?? {})); }
+  catch (error) {
+    const message = error instanceof Error ? error.message : 'VALR market data unavailable.';
+    return res.status(/^Choose|^Unsupported|^Dates|^A page|^This market/.test(message) ? 400 : 502).json({ error: message });
+  }
+});
 app.get('/api/r2/status', async (_req, res) => {
   if (!getR2Config()) return res.json({ configured: false, connected: false, mode: 'private-s3-compatible' });
   try {
@@ -246,12 +267,21 @@ async function firebaseUidOrReply(req: express.Request, res: express.Response): 
   }
 }
 
+const openRouterAccounts = new OpenRouterAccounts({read:readR2Object,write:writeR2Object,remove:deleteR2Object});
+openRouterRoutes(app,openRouterAccounts,firebaseUidOrReply);
 const economy=new BotEconomy(marketplace.store,{read:readR2Object,write:writeR2Object,root:userBotRoot},marketplace);
+valrAccountRoutes(app,{ uid:firebaseUidOrReply, read:readR2Object, write:writeR2Object, remove:deleteR2Object });
+valrPaperRoutes(app,{uid:firebaseUidOrReply,bot:async(uid,id,req)=>{
+  const [bot,raw]=await Promise.all([FirestoreStore.configured()?marketplace.store.get(`users/${uid}/bots/${id}`):readOwnedBotAsset(uid,id,req.header('authorization')),readR2Object(`${userBotRoot(uid,id)}/current.json`)]);
+  if(!bot||!raw)return null;const saved=JSON.parse(raw);
+  if(saved.userId!==uid||saved.botId!==id||typeof saved.code!=='string'||typeof bot.asset!=='string')return null;
+  return {asset:bot.asset,code:saved.code};
+}});
 economyRoutes(app,economy,async(req,res)=>{const uid=await firebaseUidOrReply(req,res);return uid?res.locals.identity:null;});
 const publications = sharedBotRoutes(app, { read: readR2Object, write: writeR2Object, remove: deleteR2Object, uid: firebaseUidOrReply, root: userBotRoot,...(FirestoreStore.configured()?{onPublish:(bot:any)=>economy.legacyPublish(bot),onAcquire:async(uid:string,id:string,bot:any)=>{if(!await marketplace.store.get(`marketplaceBots/${id}`))await marketplace.publish(bot);return economy.legacyCopy(uid,bot)},onUnpublish:(uid:string,id:string)=>marketplace.unpublish(uid,id),onView:(bot:any,visitor:string)=>marketplace.view(bot,visitor)}:{}) });
-ctraderRoutes(app, { ...(process.env.CTRADER_GATEWAY_URL?{saveTokens:async(uid:string,tokens:any)=>{await gatewayRequest('authorizeTokens',{uid,tokens})}}:{}),read: readR2Object, write: writeR2Object, uid: firebaseUidOrReply,...(FirestoreStore.configured()?{onAuthorized:async(uid:string)=>{await marketplace.emergencyPause(uid,'Broker authorization changed');await marketplace.store.put(`brokerConnections/${Buffer.from(uid).toString('base64url')}`,{uid,connected:false,emergencyPaused:true,updatedAt:Date.now()})}}:{}) });
+if(process.env.ENABLE_LEGACY_CTRADER==='true')ctraderRoutes(app, { ...(process.env.CTRADER_GATEWAY_URL?{saveTokens:async(uid:string,tokens:any)=>{await gatewayRequest('authorizeTokens',{uid,tokens})}}:{}),read: readR2Object, write: writeR2Object, uid: firebaseUidOrReply,...(FirestoreStore.configured()?{onAuthorized:async(uid:string)=>{await marketplace.emergencyPause(uid,'Broker authorization changed');await marketplace.store.put(`brokerConnections/${Buffer.from(uid).toString('base64url')}`,{uid,connected:false,emergencyPaused:true,updatedAt:Date.now()})}}:{}) });
 marketplaceRoutes(app,{uid:firebaseUidOrReply,read:readR2Object,write:writeR2Object,root:userBotRoot,gateway:gatewayRequest,gatewayHealth,checkLicense:(uid,botId,code)=>economy.checkDeployment(uid,botId,code),ensureMember:(uid,botId,req)=>economy.ensureMember((req as any).verifiedIdentity,botId),versionSource:(uid,versionId)=>economy.source(uid,versionId)});
-brokerRoutes(app,{uid:firebaseUidOrReply,tokens:new BrokerTokenStore({read:readR2Object,write:writeR2Object}),remove:deleteR2Object});
+if(process.env.ENABLE_LEGACY_CTRADER==='true')brokerRoutes(app,{uid:firebaseUidOrReply,tokens:new BrokerTokenStore({read:readR2Object,write:writeR2Object}),remove:deleteR2Object});
 
 app.put('/api/user-bots/:botId/current', async (req, res) => {
   const uid = await firebaseUidOrReply(req, res); if (!uid) return;
@@ -623,8 +653,10 @@ async function requestOpenRouter(body: string, apiKey: string, signal: AbortSign
 
 app.post('/api/ai', async (req, res) => {
   const uid = await firebaseUidOrReply(req, res); if (!uid) return;
-  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
-  if (!apiKey) return res.status(503).json({ error: 'Set OPENROUTER_API_KEY in .env to enable AI generation.' });
+  let personalAI: Awaited<ReturnType<typeof openRouterAccounts.load>>;
+  try { personalAI = await openRouterAccounts.load(uid); } catch { return res.status(503).json({ error: 'Unable to access AI credentials. Reconnect your key.' }); }
+  const apiKey = personalAI?.apiKey || (process.env.ALLOW_SHARED_OPENROUTER_KEY === 'true' ? process.env.OPENROUTER_API_KEY?.trim() : undefined);
+  if (!apiKey) return res.status(503).json({ error: 'Connect your OpenRouter API key to enable AI.' });
   const messages = req.body?.messages;
   if (!Array.isArray(messages) || messages.length < 1 || messages.length > 24
     || messages.some((m: any) => !m || !['system', 'user', 'assistant'].includes(m.role)
@@ -632,7 +664,7 @@ app.post('/api/ai', async (req, res) => {
     return res.status(400).json({ error: 'Send 1–24 chat messages with supported roles and text content under 80 KB each.' });
   }
   const selectedAsset = req.body?.asset;
-  if (selectedAsset !== undefined && !isAsset(selectedAsset)) return res.status(400).json({ error: 'Choose a supported instrument for AI context.' });
+  if (selectedAsset !== undefined && (typeof selectedAsset !== 'string' || !/^[A-Z0-9]{3,30}$/.test(selectedAsset))) return res.status(400).json({ error: 'Choose a supported instrument for AI context.' });
   const requestedTokens = Number(req.body?.maxTokens);
   const maxTokens = Number.isInteger(requestedTokens) ? Math.max(200, Math.min(6000, requestedTokens)) : 1600;
 
@@ -645,7 +677,7 @@ app.post('/api/ai', async (req, res) => {
   aiHits.set(clientId, current);
   for (const [id, entry] of aiHits) if (now - entry.started > 120_000) aiHits.delete(id);
 
-  const model = process.env.OPENROUTER_MODEL?.trim() || 'minimax/minimax-m3:free';
+  const model = personalAI?.model || process.env.OPENROUTER_MODEL?.trim() || 'minimax/minimax-m3:free';
   const meteredModel=model;
   let usageStatus:'completed'|'failed'|'interrupted'='failed',measuredUsage:any=null,usageBuffer='',finishReason:string|null=null,sawDone=false,providerError=false;const usageDecoder=new TextDecoder();
   let upstreamReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
@@ -681,12 +713,12 @@ app.post('/api/ai', async (req, res) => {
     if (!response.ok) {
       await response.body?.cancel().catch(() => undefined);
       console.warn('OpenRouter rejected request', { model, status: response.status });
-      const friendly = response.status === 401 ? 'OpenRouter rejected the API key. Check OPENROUTER_API_KEY in .env and restart the server.'
+      const friendly = response.status === 401 ? 'OpenRouter rejected the API key. Check your connection and key settings.'
         : response.status === 402 ? 'OpenRouter needs available credits or billing before it can generate a response.'
-          : response.status === 404 ? 'The configured OpenRouter model was not found. Check OPENROUTER_MODEL in .env.'
+          : response.status === 404 ? 'The selected OpenRouter model was not found. Choose another model.'
             : response.status === 429 ? 'OpenRouter rate limit reached. Wait briefly and retry.'
               : response.status === 400 ? 'The request is too long or invalid for this model. Shorten the request or configure another model.'
-                : response.status === 403 ? 'The configured model is unavailable to this account. Update OPENROUTER_MODEL to another permitted model.'
+                : response.status === 403 ? 'The selected model is unavailable to this account. Choose another model.'
                   : response.status >= 500 ? 'The model provider is temporarily unavailable. Retry later.'
                     : `OpenRouter request failed (HTTP ${response.status}).`;
       throw new Error(friendly);

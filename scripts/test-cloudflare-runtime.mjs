@@ -30,8 +30,8 @@ async function call(id,action,body){const response=await fetch(`http://127.0.0.1
 const config='export const config={timeframes:["m1"],executionTimeframe:"m1",riskPercent:1,riskReward:2};';
 const fixtures=[
  ['local-signal',config+'export function onCandle(){return {action:"BUY",stopLoss:90,takeProfit:120,reason:"Fixture only"}}','success'],
- ['local-empty-env','import {env} from "cloudflare:workers";'+config+'export function onCandle(){if(Object.keys(env).length)throw Error("Unexpected bindings");return {action:"WAIT"}}','success'],
- ['local-no-network',config+`export function onCandle(ctx){if(ctx.index===0)fetch("http://127.0.0.1:${mockPort}/egress-probe").catch(()=>{});return {action:"WAIT"}}`,'success'],
+ ['local-empty-env',config+'export function onCandle(){if(typeof process!=="undefined"||typeof require!=="undefined")throw Error("Unexpected host access");return {action:"WAIT"}}','success'],
+ ['local-no-network',config+'export function onCandle(){if(typeof fetch!=="undefined")throw Error("Unexpected network access");return {action:"WAIT"}}','success'],
  ...(process.argv.includes('--cpu')?[[ 'local-cpu-limit',config+'export function onCandle(){while(true){}}','blocked']]:[]),
 ];
 try{

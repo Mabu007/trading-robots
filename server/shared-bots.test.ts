@@ -29,6 +29,12 @@ describe('shared robots', () => {
     expect(Object.keys(result.body.bot).sort()).toEqual(['id','name','asset','description','coverImage','access','publishedAt','priceMinor','currency','creator'].sort());
     expect(result.body.bot.name).toBe('Gold robot');
   });
+  it('publishes and copies a VALR pair without changing its symbol', async () => {
+    const saved = await request('/api/user-bots/original/publication', 'PUT', 'creator', {...settings, asset:'ETHZAR'});
+    expect(saved.status).toBe(200);
+    const copy = await request(`/api/shared-bots/${saved.body.publication.id}/copy`, 'POST', 'visitor');
+    expect(copy.status).toBe(200); expect(copy.body.bot.asset).toBe('ETHZAR');
+  });
   it('requires authentication for publishing, settings, and copying', async () => {
     const saved = await publish(), id = saved.body.publication.id;
     expect((await request('/api/user-bots/original/publication', 'PUT', undefined, settings)).status).toBe(401);
