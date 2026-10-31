@@ -2,7 +2,7 @@ import { processPaperCandle, type PaperCandle, type PaperDecision, type PaperRis
 
 type Stored = { state:PaperState; spec:PaperSpec; risk:PaperRisk; lastError:string; attempts:number; nextAlarm:number|null };
 type Storage = { get<T>(key:string):Promise<T|undefined>; put(key:string,value:unknown):Promise<void>; setAlarm(time:number):Promise<void>; deleteAlarm():Promise<void> };
-type Dependencies = { now:()=>number; next:(lastCandle:number|null)=>Promise<{candle:PaperCandle;decision:PaperDecision}|null> };
+type Dependencies = { now:()=>number; next:(lastCandle:number|null)=>Promise<{candle:PaperCandle;decision:PaperDecision;discardPending?:boolean}|null> };
 
 // One runtime is owned by one customer and bot. The caller must authorize that
 // identity before obtaining the Durable Object stub. No provider credentials
@@ -23,7 +23,7 @@ export class ValrPaperRuntime {
   await this.storage.put('paper',{state,spec,risk,lastError:'',attempts:0,nextAlarm:null} satisfies Stored);
   return state;
  })}
- async start(){return this.serial(async()=>{const data=await this.load();data.state.running=true;data.lastError='';data.nextAlarm=this.deps.now()+1000;await this.storage.setAlarm(data.nextAlarm);await this.storage.put('paper',data);return data.state})}
+ async start(){return this.serial(async()=>{const data=await this.load();if(data.state.running)return data.state;data.state.running=true;data.state.pending=null;data.state.resumeLatest=data.state.lastCandle!==null&&!data.state.position;data.lastError='';data.nextAlarm=this.deps.now()+1000;await this.storage.setAlarm(data.nextAlarm);await this.storage.put('paper',data);return data.state})}
  async stop(){return this.serial(async()=>{const data=await this.load();data.state.running=false;data.state.pending=null;data.nextAlarm=data.state.position?this.deps.now()+1000:null;if(data.nextAlarm)await this.storage.setAlarm(data.nextAlarm);else await this.storage.deleteAlarm();await this.storage.put('paper',data);return data.state})}
  async status(){return this.serial(()=>this.load())}
  async alarm(){return this.serial(async()=>{
@@ -35,7 +35,7 @@ export class ValrPaperRuntime {
   await this.storage.setAlarm(data.nextAlarm);
   try{
    const next=await this.deps.next(data.state.lastCandle);
-   if(next)data.state=processPaperCandle(data.state,next.candle,next.decision,data.spec,data.risk);
+   if(next){if(next.discardPending)data.state.pending=null;data.state=processPaperCandle(data.state,next.candle,next.decision,data.spec,data.risk);}
    data.lastError='';data.attempts=0;
   }catch(error){
    data.lastError=(error instanceof Error?error.message:'Paper evaluation failed').slice(0,300);data.attempts=Math.min(data.attempts+1,10);

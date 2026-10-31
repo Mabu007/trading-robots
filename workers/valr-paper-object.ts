@@ -55,10 +55,11 @@ export class ValrPaper extends DurableObject<any> {
   try{await this.runtime.deploy(state,spec,risk)}catch(e){await this.ctx.storage.delete('paper-deployment');throw e}
   return {deployed:true,mode:'paper',pair:data.pair,state};
  }
- private async next(last:number|null):Promise<{candle:PaperCandle;decision:PaperDecision}|null>{
+ private async next(last:number|null):Promise<{candle:PaperCandle;decision:PaperDecision;discardPending?:boolean}|null>{
   const deployment=await this.ctx.storage.get<Deployment>('paper-deployment');if(!deployment)throw Error('Paper strategy is missing');
+  const saved=await this.ctx.storage.get<{state:PaperState}>('paper');
   const period=TF_SECONDS[deployment.config.executionTimeframe],latest=Math.floor((Date.now()/1000-5)/period)*period;
-  const cutoff=last===null?latest:last+2*period;if(cutoff>latest)return null;
+  const cutoff=last===null||saved?.state.resumeLatest?latest:last+2*period;if(cutoff>latest||last!==null&&cutoff<=last+period)return null;
   const stored=await this.ctx.storage.get<Record<string,PaperCandle[]>>('paper-history')||{};
   const datasets:Record<string,PaperCandle[]>={};let total=0;
   for(const tf of deployment.config.timeframes as string[]){
@@ -72,8 +73,7 @@ export class ValrPaper extends DurableObject<any> {
   }
   await this.ctx.storage.put('paper-history',datasets);
   const candle=datasets[deployment.config.executionTimeframe].at(-1);if(!candle||candle.time+period!==cutoff)throw Error('Execution candle is missing');
-  const saved=await this.ctx.storage.get<{state:PaperState}>('paper');
-  if(!saved?.state.running)return {candle,decision:{action:'WAIT'}};
+  if(!saved?.state.running||cutoff<latest)return {candle,decision:{action:'WAIT'},discardPending:true};
   const quick=await getQuickJSWASMModule();const decisions=evaluateStrategyInSandbox(quick,deployment.code,datasets,deployment.config);
   return {candle,decision:decisions.at(-1) as PaperDecision};
  }

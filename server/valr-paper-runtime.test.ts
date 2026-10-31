@@ -31,3 +31,16 @@ it('persists errors and retries without advancing a candle',async()=>{
  await runtime.deploy(state,spec,risk);await runtime.start();await runtime.alarm();
  const status=await runtime.status();expect(status.lastError).toBe('market unavailable');expect(status.attempts).toBe(1);expect(status.state.lastCandle).toBeNull();expect(storage.alarm).toBe(105000);
 });
+it('does not replay stopped-period entries when restarted',async()=>{
+ const storage=new Memory();let nextTime=60;
+ const runtime=new ValrPaperRuntime(storage,{now:()=>100000,next:async()=>({candle:candle(nextTime),decision:{action:'BUY',stopLoss:90,takeProfit:120}})});
+ await runtime.deploy(state,spec,risk);await runtime.start();await runtime.alarm();await runtime.stop();
+ nextTime=600;await runtime.start();await runtime.alarm();const resumed=await runtime.status();
+ expect(resumed.state.lastCandle).toBe(600);expect(resumed.state.position).toBeNull();expect(resumed.state.pending).not.toBeNull();
+});
+it('discards stale pending entries when catching up after an outage',async()=>{
+ const storage=new Memory();let count=0;
+ const runtime=new ValrPaperRuntime(storage,{now:()=>100000,next:async()=>++count===1?{candle:candle(60),decision:{action:'BUY',stopLoss:90,takeProfit:120}}:{candle:candle(120),decision:{action:'WAIT'},discardPending:true}});
+ await runtime.deploy(state,spec,risk);await runtime.start();await runtime.alarm();await runtime.alarm();const result=await runtime.status();
+ expect(result.state.position).toBeNull();expect(result.state.pending).toBeNull();expect(result.state.balance).toBe(1000);
+});

@@ -9,6 +9,7 @@ export type PaperState = {
   pending:{stopLoss:number;takeProfit:number}|null;
   position:{quantity:number;entry:number;stopLoss:number;takeProfit:number}|null;
   lastSignal?:{action:'BUY'|'SELL'|'WAIT';candleTime:number;reason:string};
+  resumeLatest?:boolean;
   lastResult:string;
 };
 
@@ -16,10 +17,11 @@ export function processPaperCandle(previous:PaperState, candle:PaperCandle, deci
   if (!Number.isSafeInteger(candle.time)||candle.time<=0||![candle.open,candle.high,candle.low,candle.close].every(v=>Number.isFinite(v)&&v>0)||!Number.isFinite(candle.volume)||candle.volume<0||candle.high<Math.max(candle.open,candle.close)||candle.low>Math.min(candle.open,candle.close)||candle.high<candle.low) throw Error('Invalid candle');
   if (!Number.isSafeInteger(risk.timeframeSeconds)||risk.timeframeSeconds<=0||candle.time%risk.timeframeSeconds!==0) throw Error('Invalid timeframe');
   if (previous.lastCandle===candle.time) return previous;
-  if (previous.lastCandle!==null&&candle.time!==previous.lastCandle+risk.timeframeSeconds) throw Error('Paper runtime is missing candles or received an out-of-order candle');
+  if (previous.lastCandle!==null&&candle.time!==previous.lastCandle+risk.timeframeSeconds&&!(previous.resumeLatest&&candle.time>previous.lastCandle)) throw Error('Paper runtime is missing candles or received an out-of-order candle');
   if (!['BUY','SELL','WAIT'].includes(decision?.action)) throw Error('Invalid strategy decision');
   if (![previous.balance,risk.allocation,risk.riskPercent,risk.dailyLossPercent,spec.minBaseAmount,spec.maxBaseAmount,spec.minQuoteAmount,spec.maxQuoteAmount].every(Number.isFinite)||previous.balance<0||risk.allocation<=0||risk.riskPercent<=0||risk.riskPercent>2||risk.dailyLossPercent<=0||risk.dailyLossPercent>10||spec.minBaseAmount<=0||spec.maxBaseAmount<spec.minBaseAmount||spec.minQuoteAmount<=0||spec.maxQuoteAmount<spec.minQuoteAmount||!Number.isInteger(spec.baseDecimalPlaces)||spec.baseDecimalPlaces<0||spec.baseDecimalPlaces>8) throw Error('Invalid paper limits or market specification');
   const state:PaperState = {...previous,pending:previous.pending&&{...previous.pending},position:previous.position&&{...previous.position}};
+  state.resumeLatest=false;
   if(state.running)state.lastSignal={action:decision.action,candleTime:candle.time,reason:typeof decision.reason==='string'?decision.reason.slice(0,300):''};
   const day=new Date(candle.time*1000).toISOString().slice(0,10);
   if(state.day!==day){state.day=day;state.dayStartBalance=state.balance+(state.position?state.position.quantity*candle.open:0)}
