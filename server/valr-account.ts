@@ -14,7 +14,10 @@ function keyBytes(encoded: string | undefined): Buffer {
   return key;
 }
 
-function storageKey(uid: string): string { return `valr-credentials/v1/${Buffer.from(uid).toString('base64url')}.json`; }
+function storageKey(uid: string): string {
+  const environment = process.env.VERCEL_ENV === 'production' ? 'production' : process.env.VERCEL_ENV === 'preview' ? 'preview' : 'development';
+  return `valr-credentials/v1/${environment}/${Buffer.from(uid).toString('base64url')}.json`;
+}
 function associatedData(uid: string): Buffer { return Buffer.from(`trading-vibes:valr:v1:${uid}`); }
 
 // Only account inspection is implemented here. Order routes are deliberately

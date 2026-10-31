@@ -18,7 +18,7 @@ describe('VALR account foundation', () => {
     expect(encrypted).not.toContain(credentials.apiKey);
     expect(encrypted).not.toContain(credentials.apiSecret);
     expect(await accounts.load('alice')).toEqual(credentials);
-    data.set(`valr-credentials/v1/${Buffer.from('bob').toString('base64url')}.json`, encrypted);
+    data.set(`valr-credentials/v1/development/${Buffer.from('bob').toString('base64url')}.json`, encrypted);
     await expect(accounts.load('bob')).rejects.toThrow('Unable to decrypt');
     await accounts.disconnect('alice');
     expect(await accounts.load('alice')).toBeNull();

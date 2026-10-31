@@ -101,7 +101,7 @@ export function DateRangePicker({ dates, from, to, setFrom, setTo, className = '
       <CalendarDays size={15}/><span className="range-trigger-label"><small>DATE RANGE</small><strong>{from && to ? `${shortDate(from)} – ${shortDate(to)}` : 'Choose a range'}</strong></span><ChevronRight size={14} className="range-trigger-chevron"/>
     </button>
     {open&&createPortal(<div ref={popoverRef} className="range-popover range-popover-portal shadcn-popover" style={{top:popoverPosition.top,left:popoverPosition.left}} role="dialog" aria-label="Choose backtest date range">
-      <div className="range-popover-head"><div><strong>Select backtest period</strong><span>Only dates with available prices are enabled</span></div><div className="range-nav">
+      <div className="range-popover-head"><div><strong>Select backtest period</strong><span>VALR coverage is checked when data loads</span></div><div className="range-nav">
         <button type="button" className="shadcn-icon-button" aria-label="Previous month" disabled={monthKey<=minKey} onClick={()=>setMonth(new Date(Date.UTC(month.getUTCFullYear(),month.getUTCMonth()-1,1)))}><ChevronLeft size={16}/></button>
         <button type="button" className="shadcn-icon-button" aria-label="Next month" disabled={monthKey>=maxKey} onClick={()=>setMonth(nextMonth)}><ChevronRight size={16}/></button>
       </div></div>

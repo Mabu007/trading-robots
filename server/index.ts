@@ -13,6 +13,7 @@ import { FirestoreStore } from './firestore-store.ts';
 import { brokerRoutes,gatewayRequest,gatewayHealth } from './broker-routes.ts';
 import { BrokerTokenStore } from './broker-tokens.ts';
 import { ValrMarketData } from './valr-market-data.ts';
+import { valrAccountRoutes } from './valr-routes.ts';
 
 const app = express();
 const valrMarketData = new ValrMarketData();
@@ -262,6 +263,7 @@ async function firebaseUidOrReply(req: express.Request, res: express.Response): 
 }
 
 const economy=new BotEconomy(marketplace.store,{read:readR2Object,write:writeR2Object,root:userBotRoot},marketplace);
+valrAccountRoutes(app,{ uid:firebaseUidOrReply, read:readR2Object, write:writeR2Object, remove:deleteR2Object });
 economyRoutes(app,economy,async(req,res)=>{const uid=await firebaseUidOrReply(req,res);return uid?res.locals.identity:null;});
 const publications = sharedBotRoutes(app, { read: readR2Object, write: writeR2Object, remove: deleteR2Object, uid: firebaseUidOrReply, root: userBotRoot,...(FirestoreStore.configured()?{onPublish:(bot:any)=>economy.legacyPublish(bot),onAcquire:async(uid:string,id:string,bot:any)=>{if(!await marketplace.store.get(`marketplaceBots/${id}`))await marketplace.publish(bot);return economy.legacyCopy(uid,bot)},onUnpublish:(uid:string,id:string)=>marketplace.unpublish(uid,id),onView:(bot:any,visitor:string)=>marketplace.view(bot,visitor)}:{}) });
 ctraderRoutes(app, { ...(process.env.CTRADER_GATEWAY_URL?{saveTokens:async(uid:string,tokens:any)=>{await gatewayRequest('authorizeTokens',{uid,tokens})}}:{}),read: readR2Object, write: writeR2Object, uid: firebaseUidOrReply,...(FirestoreStore.configured()?{onAuthorized:async(uid:string)=>{await marketplace.emergencyPause(uid,'Broker authorization changed');await marketplace.store.put(`brokerConnections/${Buffer.from(uid).toString('base64url')}`,{uid,connected:false,emergencyPaused:true,updatedAt:Date.now()})}}:{}) });
@@ -647,7 +649,7 @@ app.post('/api/ai', async (req, res) => {
     return res.status(400).json({ error: 'Send 1–24 chat messages with supported roles and text content under 80 KB each.' });
   }
   const selectedAsset = req.body?.asset;
-  if (selectedAsset !== undefined && !isAsset(selectedAsset)) return res.status(400).json({ error: 'Choose a supported instrument for AI context.' });
+  if (selectedAsset !== undefined && (typeof selectedAsset !== 'string' || !/^[A-Z0-9]{3,30}$/.test(selectedAsset))) return res.status(400).json({ error: 'Choose a supported instrument for AI context.' });
   const requestedTokens = Number(req.body?.maxTokens);
   const maxTokens = Number.isInteger(requestedTokens) ? Math.max(200, Math.min(6000, requestedTokens)) : 1600;
 

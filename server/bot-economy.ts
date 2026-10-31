@@ -90,7 +90,7 @@ export class BotEconomy {
     if(!saved.code.trim())throw Error('Save a strategy before making this robot public.');
     await this.checkLicense(who.uid,botId,saved.code);
     const name=text(bot.name,64,true),defaultDescription=text(typeof bot.prompt==='string'?bot.prompt.slice(0,2000):'',2000),description=input.description===undefined?undefined:text(input.description,2000),asset=bot.asset;
-    if(!['XAUUSD','EURUSD','GBPUSD','USDJPY'].includes(asset))throw Error('This robot has an unsupported asset.');
+    if(typeof asset!=='string'||!/^[A-Z0-9]{3,30}$/.test(asset))throw Error('This robot has an unsupported asset.');
     let timeframe:string|undefined;try{timeframe=parseStrategyConfig(saved.code).executionTimeframe}catch{/* A profile listing does not execute source. */}
     const pointerKey=`${this.storage.root(who.uid,botId)}/publication.json`,raw=await this.storage.read(pointerKey);
     // A stable UUID keeps retries idempotent and shares the existing publication link.
@@ -115,7 +115,7 @@ export class BotEconomy {
     if(!code.trim()||code.length>180000)throw Error('Strategy must contain 1–180,000 characters.');
     const config=parseStrategyConfig(code),key=randomUUID(),createdAt=Date.now(),codeKey=`bot-economy/versions/${key}.json`;
     const fork=await this.store.get(`botForks/${recordId(uid)}_${botId}`);
-    const v={id:key,creatorId:uid,privateBotId:botId,projectKey:`${recordId(uid)}_${botId}`,label:text(input.label||`Version ${new Date(createdAt).toISOString()}`,64,true),description:text(input.description||'',2000),releaseNotes:text(input.releaseNotes||'',2000),asset:['XAUUSD','EURUSD','GBPUSD','USDJPY'].includes(input.asset)?input.asset:'XAUUSD',config,hash:hash(code),codeKey,createdAt,provenance:fork?.provenance||null};
+    const v={id:key,creatorId:uid,privateBotId:botId,projectKey:`${recordId(uid)}_${botId}`,label:text(input.label||`Version ${new Date(createdAt).toISOString()}`,64,true),description:text(input.description||'',2000),releaseNotes:text(input.releaseNotes||'',2000),asset:typeof input.asset==='string'&&/^[A-Z0-9]{3,30}$/.test(input.asset)?input.asset:'XAUUSD',config,hash:hash(code),codeKey,createdAt,provenance:fork?.provenance||null};
     await this.storage.write(codeKey,JSON.stringify({code}));if(!await this.store.create(`sourceVersions/${key}`,v))throw Error('Version collision. Please retry.');
     await this.activity(uid,'version.saved',botId,v.label);return versionView(v);
   }
