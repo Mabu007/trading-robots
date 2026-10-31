@@ -40,3 +40,11 @@ it('rejects shorts and entries below market minimum without inventing a fill', (
   const skipped=processPaperCandle(queued,candle(120),wait,{...spec,minQuoteAmount:200},risk);
   expect(skipped.position).toBeNull();expect(skipped.lastResult).toContain('minimum');
 });
+
+it('limits a queued trade to the remaining daily loss budget and blocks at the limit',()=>{
+  const queued=processPaperCandle(init(),candle(60),buy,spec,risk);
+  const nearlyExhausted=processPaperCandle({...queued,balance:971},candle(120),wait,spec,risk);
+  expect(nearlyExhausted.position?.quantity).toBe(0.1);
+  const exhausted=processPaperCandle({...queued,balance:970},candle(120),wait,spec,risk);
+  expect(exhausted.position).toBeNull();expect(exhausted.lastResult).toContain('Daily paper loss limit');
+});

@@ -28,9 +28,13 @@ export function processPaperCandle(previous:PaperState, candle:PaperCandle, deci
   let closed=false;
   if(state.running&&state.pending&&!state.position){
     const {stopLoss,takeProfit}=state.pending;state.pending=null;
-    const riskBudget=Math.min(state.balance,risk.allocation)*risk.riskPercent/100;
+    // Cap the next trade at the remaining daily loss budget as well as the
+    // per-trade budget. Price gaps can still exceed either simulated limit.
+    const remainingDaily=Math.max(0,state.balance-state.dayStartBalance*(1-risk.dailyLossPercent/100));
+    const riskBudget=Math.min(Math.min(state.balance,risk.allocation)*risk.riskPercent/100,remainingDaily);
     const price=candle.open;
-    if(!(stopLoss<price&&price<takeProfit)) state.lastResult='Entry skipped: opening price outside protective levels';
+    if(riskBudget<=0)state.lastResult='Daily paper loss limit reached';
+    else if(!(stopLoss<price&&price<takeProfit)) state.lastResult='Entry skipped: opening price outside protective levels';
     else {
       const raw=Math.min(riskBudget/(price-stopLoss),Math.min(state.balance,risk.allocation,spec.maxQuoteAmount)/price,spec.maxBaseAmount);
       const scale=10**spec.baseDecimalPlaces, units=Math.floor(raw*scale), quantity=units/scale;
