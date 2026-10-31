@@ -655,7 +655,7 @@ app.post('/api/ai', async (req, res) => {
   const uid = await firebaseUidOrReply(req, res); if (!uid) return;
   let personalAI: Awaited<ReturnType<typeof openRouterAccounts.load>>;
   try { personalAI = await openRouterAccounts.load(uid); } catch { return res.status(503).json({ error: 'Unable to access AI credentials. Reconnect your key.' }); }
-  const apiKey = personalAI?.apiKey || process.env.OPENROUTER_API_KEY?.trim();
+  const apiKey = personalAI?.apiKey || (process.env.ALLOW_SHARED_OPENROUTER_KEY === 'true' ? process.env.OPENROUTER_API_KEY?.trim() : undefined);
   if (!apiKey) return res.status(503).json({ error: 'Connect your OpenRouter API key to enable AI.' });
   const messages = req.body?.messages;
   if (!Array.isArray(messages) || messages.length < 1 || messages.length > 24

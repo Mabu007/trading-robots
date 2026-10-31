@@ -55,6 +55,8 @@ Personal OpenRouter keys and selected models are encrypted separately with a
 user-bound AES-256-GCM key. Set an independent 32-byte base64
 `AI_CREDENTIAL_ENCRYPTION_KEY`; the provider model list is fetched dynamically.
 This connection has mock tests only and has not been validated with a real key.
+The old shared AI key is disabled by default; administrators can explicitly
+set `ALLOW_SHARED_OPENROUTER_KEY=true` if they intend to pay for shared usage.
 
 A separate unconnected order-journal primitive records an intent before
 submission and refuses to resend ambiguous orders until exchange status is
