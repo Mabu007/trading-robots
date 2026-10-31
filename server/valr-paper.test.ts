@@ -47,6 +47,8 @@ it('limits a queued trade to the remaining daily loss budget and blocks at the l
   expect(nearlyExhausted.position?.quantity).toBe(0.1);
   const exhausted=processPaperCandle({...queued,balance:970},candle(120),wait,spec,risk);
   expect(exhausted.position).toBeNull();expect(exhausted.lastResult).toContain('Daily paper loss limit');
+  const smallAllocation=processPaperCandle({...queued,balance:997},candle(120),wait,spec,{...risk,allocation:100});
+  expect(smallAllocation.position).toBeNull();expect(smallAllocation.lastResult).toContain('Daily paper loss limit');
 });
 
 it('requires a stopped robot and explicit acknowledgement of an open simulated position before reset',()=>{

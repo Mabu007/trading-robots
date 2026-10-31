@@ -30,12 +30,13 @@ export function processPaperCandle(previous:PaperState, candle:PaperCandle, deci
   if(state.running)state.lastSignal={action:decision.action,candleTime:candle.time,reason:typeof decision.reason==='string'?decision.reason.slice(0,300):''};
   const day=new Date(candle.time*1000).toISOString().slice(0,10);
   if(state.day!==day){state.day=day;state.dayStartBalance=state.balance+(state.position?state.position.quantity*candle.open:0)}
+  const dailyFloor=state.dayStartBalance-Math.min(state.dayStartBalance,risk.allocation)*risk.dailyLossPercent/100;
   let closed=false;
   if(state.running&&state.pending&&!state.position){
     const {stopLoss,takeProfit}=state.pending;state.pending=null;
     // Cap the next trade at the remaining daily loss budget as well as the
     // per-trade budget. Price gaps can still exceed either simulated limit.
-    const remainingDaily=Math.max(0,state.balance-state.dayStartBalance*(1-risk.dailyLossPercent/100));
+    const remainingDaily=Math.max(0,state.balance-dailyFloor);
     const riskBudget=Math.min(Math.min(state.balance,risk.allocation)*risk.riskPercent/100,remainingDaily);
     const price=candle.open;
     if(riskBudget<=0)state.lastResult='Daily paper loss limit reached';
@@ -55,7 +56,7 @@ export function processPaperCandle(previous:PaperState, candle:PaperCandle, deci
   }
   if(state.running&&!state.position&&!closed&&!state.pending){
     const equity=state.balance;
-    if(state.dayStartBalance>0&&equity<=state.dayStartBalance*(1-risk.dailyLossPercent/100))state.lastResult='Daily paper loss limit reached';
+    if(state.dayStartBalance>0&&equity<=dailyFloor)state.lastResult='Daily paper loss limit reached';
     else if(decision.action==='SELL')state.lastResult='SELL short is unsupported in spot paper mode';
     else if(decision.action==='BUY'){
       const stop=decision.stopLoss,target=decision.takeProfit;

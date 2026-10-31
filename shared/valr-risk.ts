@@ -28,7 +28,9 @@ export function sizeValrSpotBuy(signal:{stopLoss:string;takeProfit:string},accou
  const stop=decimal(signal.stopLoss)/tick*tick,target=decimal(signal.takeProfit)/tick*tick;
  const entry=ceilDiv(ask*(10000n+BigInt(limits.slippageBps)),10000n*tick)*tick,stopExit=stop*(10000n-BigInt(stopSlippage))/10000n;
  if(stop<=0n||!(stop<ask&&ask<target&&stopExit<entry&&entry<target))throw Error('Invalid protective levels after exchange precision and slippage');
- const dailyLimit=start*BigInt(limits.dailyLossBps)/10000n;if(loss>=dailyLimit)throw Error('Daily loss limit reached');
+ // The daily budget cannot be larger merely because the account contains
+ // funds outside this robot's approved allocation.
+ const dailyLimit=min(start,allocation)*BigInt(limits.dailyLossBps)/10000n;if(loss>=dailyLimit)throw Error('Daily loss limit reached');
  const capital=min(balance,allocation),tradeBudget=capital*BigInt(limits.riskBps)/10000n,budget=min(tradeBudget,dailyLimit-loss);
  const feePerUnit=ceilDiv((entry+stopExit)*BigInt(limits.feeBps),10000n),riskPerUnit=entry-stopExit+feePerUnit;
  const quotePerUnit=entry+ceilDiv(entry*BigInt(limits.feeBps),10000n);

@@ -24,4 +24,5 @@ it('enforces remaining daily loss and blocks existing open orders',()=>{
  expect(()=>sizeValrSpotBuy(signal,{...account,openOrders:1},spec,limits,now)).toThrow('Existing orders');
  const result=sizeValrSpotBuy(signal,{...account,dailyLoss:'29'},spec,limits,now);
  expect(result.estimatedRisk).toBe('1');expect(result.baseAmount).toBe('0.1');
+ expect(()=>sizeValrSpotBuy(signal,{...account,dailyLoss:'3'},spec,{...limits,allocation:'100'},now)).toThrow('Daily loss');
 });

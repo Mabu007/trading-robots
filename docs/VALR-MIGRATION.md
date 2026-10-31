@@ -46,7 +46,8 @@ strategy processed a real completed candle and was stopped on each. The producti
 website has not been switched to this branch. Local
 mock tests cover restarts, duplicate candles, stop, minimums and retries. This
 is not live execution. SELL short signals are rejected in spot paper mode;
-fees and slippage are not modelled by this initial paper simulator. It starts
+fees and slippage are not modelled by this initial paper simulator. Its daily
+loss budget is capped to the approved allocation. It starts
 with 200 closed candles per timeframe, reports missing candles and refuses to
 process beyond 5,000 replay candles in total; the scheduler retries errors.
 A stopped paper instance can be reset from its deployment dialog. Reset
