@@ -28,7 +28,7 @@ export class ValrPaper extends DurableObject<any> {
  async fetch(req:Request){return this.serial(async()=>{
   try{
    const action=new URL(req.url).pathname.split('/').at(-1);
-   if(action==='status'&&req.method==='GET')return reply(await this.runtime.status());
+   if(action==='status'&&req.method==='GET')return reply({...await this.runtime.status(),resetSupported:true});
    if(req.method!=='POST')return reply({error:'POST required'},405);
    if(action==='deploy')return reply(await this.deploy(await req.json()));
    if(action==='start')return reply(await this.runtime.start());
