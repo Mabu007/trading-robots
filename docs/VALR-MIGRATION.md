@@ -93,12 +93,11 @@ gate disabled pending the complete runtime and end-to-end verification.
 
 ## Still required before switching the product
 
-- Deploy the updated `firestore.rules`: earlier rules only permit forex asset
-  symbols and will reject saving VALR bots. Marketplace API features additionally
-  require server-side Firebase service credentials; the current Vercel preview
-  does not have them. Paper deployment can read an owned bot using the signed-in
-  user’s token, subject to the deployed Firestore rules.
-
+- The user supplied the current shared Firestore rules: they already allow an
+  owner to save VALR symbols. The repository rules mirror those supplied rules;
+  do not replace the shared project’s rules with the previous restrictive file.
+  Marketplace API features still require server-side Firebase credentials.
+  Paper deployment can read an owned bot using the signed-in user’s token.
 - Verify the workspace and coverage UI in an actual signed-in deployment.
 - Verify the per-user VALR connection and disconnect flows against the real
   provider, and test the personal OpenRouter key and model selection with a real account.

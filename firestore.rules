@@ -1,59 +1,48 @@
 rules_version = '2';
+
+// SirVibe keeps very little in the cloud: who you are, what your chats are
+// called, and the conversation itself. Everything that matters in size or
+// secrecy — media, renders, API keys, the workspace — stays on the machine.
+//
+// The single rule this file exists to enforce: a signed-in person can reach
+// their own documents and nobody else's. The uid in the path must be the uid
+// on the request's token, which the client cannot forge.
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Marketplace, broker and execution records are accessed only through the
-    // authenticated API. Admin IAM bypasses these rules; browsers cannot forge
-    // entitlements, sourceVersions, packages, acquisitions, forks, invitations,
-    // memberships, follows, revenue, signals, ownership or deployment health.
-    match /{collection}/{document} {
-      allow read, write: if false;
+
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
     }
-    match /users/{userId}/bots/{botId} {
-      function ownsBot() {
-        return request.auth != null && request.auth.uid == userId;
-      }
-      function validBot() {
-        return request.resource.data.keys().hasOnly(['name', 'asset', 'prompt', 'storage', 'code', 'lastBacktest', 'updatedAt'])
-          && request.resource.data.name is string
-          && request.resource.data.name.size() <= 64
-          && request.resource.data.asset is string
-          && request.resource.data.asset.matches('^[A-Z0-9]{3,30}$')
-          && request.resource.data.prompt is string
-          && request.resource.data.prompt.size() <= 12000
-          && (!('code' in request.resource.data) || (request.resource.data.code is string && request.resource.data.code.size() <= 180000))
-          && (!('storage' in request.resource.data) || (request.resource.data.storage is map && request.resource.data.storage.keys().hasOnly(['provider', 'key']) && request.resource.data.storage.provider == 'r2' && request.resource.data.storage.key is string));
-      }
-      allow read, delete: if ownsBot();
-      allow create, update: if ownsBot() && validBot();
+
+    match /users/{uid} {
+      allow read, write: if isOwner(uid);
 
       match /chats/{chatId} {
-        allow read: if ownsBot();
-        allow create, update: if ownsBot()
-          && request.resource.data.keys().hasOnly(['messages', 'updatedAt'])
-          && request.resource.data.messages is list
-          && request.resource.data.messages.size() <= 60;
-        allow delete: if ownsBot();
+        allow read, write: if isOwner(uid);
+
+        match /messages/{messageId} {
+          allow read, write: if isOwner(uid);
+        }
       }
 
-      match /versions/{versionId} {
-        allow read: if ownsBot();
-        allow create: if ownsBot()
-          && request.resource.data.keys().hasOnly(['id', 'name', 'storageKey', 'createdAt', 'updatedAt'])
-          && request.resource.data.id == versionId
-          && request.resource.data.name is string
-          && request.resource.data.storageKey is string
-          && request.resource.data.createdAt is string;
-        allow update: if ownsBot()
-          && request.resource.data.keys().hasOnly(['id', 'name', 'storageKey', 'createdAt', 'updatedAt'])
-          && request.resource.data.id == resource.data.id
-          && request.resource.data.id == versionId
-          && request.resource.data.name is string
-          && request.resource.data.name.size() > 0
-          && request.resource.data.name.size() <= 64
-          && request.resource.data.storageKey == resource.data.storageKey
-          && request.resource.data.createdAt == resource.data.createdAt;
-        allow delete: if ownsBot();
+      // Skills someone wrote or imported, so their own judgement follows them
+      // to another machine. Only their own: a skill is instructions the agent
+      // will act on, which makes writing into someone else's skills the most
+      // dangerous thing this database could allow.
+      match /skills/{skillId} {
+        allow read, write: if isOwner(uid);
       }
+
+      // Anything added under a user later inherits the same ownership test
+      // rather than defaulting to open.
+      match /{document=**} {
+        allow read, write: if isOwner(uid);
+      }
+    }
+
+    // Nothing else is readable or writable by a client, ever.
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
