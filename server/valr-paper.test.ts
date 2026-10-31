@@ -12,6 +12,7 @@ it('queues signals for the next candle and sizes a spot paper order within alloc
   const queued=processPaperCandle(init(),candle(60),buy,spec,risk);
   expect(queued.position).toBeNull();
   expect(queued.pending).toEqual({stopLoss:90,takeProfit:120});
+  expect(queued.lastSignal).toMatchObject({action:'BUY',candleTime:60});
   const filled=processPaperCandle(queued,candle(120),wait,spec,risk);
   expect(filled.position?.quantity).toBe(1);
   expect(filled.balance).toBe(900);

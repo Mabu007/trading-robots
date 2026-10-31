@@ -14,6 +14,7 @@ import { brokerRoutes,gatewayRequest,gatewayHealth } from './broker-routes.ts';
 import { BrokerTokenStore } from './broker-tokens.ts';
 import { ValrMarketData } from './valr-market-data.ts';
 import { valrAccountRoutes } from './valr-routes.ts';
+import { valrPaperRoutes } from './valr-paper-routes.ts';
 
 const app = express();
 const valrMarketData = new ValrMarketData();
@@ -264,6 +265,12 @@ async function firebaseUidOrReply(req: express.Request, res: express.Response): 
 
 const economy=new BotEconomy(marketplace.store,{read:readR2Object,write:writeR2Object,root:userBotRoot},marketplace);
 valrAccountRoutes(app,{ uid:firebaseUidOrReply, read:readR2Object, write:writeR2Object, remove:deleteR2Object });
+valrPaperRoutes(app,{uid:firebaseUidOrReply,bot:async(uid,id)=>{
+  const [bot,raw]=await Promise.all([marketplace.store.get(`users/${uid}/bots/${id}`),readR2Object(`${userBotRoot(uid,id)}/current.json`)]);
+  if(!bot||!raw)return null;const saved=JSON.parse(raw);
+  if(saved.userId!==uid||saved.botId!==id||typeof saved.code!=='string'||typeof bot.asset!=='string')return null;
+  return {asset:bot.asset,code:saved.code};
+}});
 economyRoutes(app,economy,async(req,res)=>{const uid=await firebaseUidOrReply(req,res);return uid?res.locals.identity:null;});
 const publications = sharedBotRoutes(app, { read: readR2Object, write: writeR2Object, remove: deleteR2Object, uid: firebaseUidOrReply, root: userBotRoot,...(FirestoreStore.configured()?{onPublish:(bot:any)=>economy.legacyPublish(bot),onAcquire:async(uid:string,id:string,bot:any)=>{if(!await marketplace.store.get(`marketplaceBots/${id}`))await marketplace.publish(bot);return economy.legacyCopy(uid,bot)},onUnpublish:(uid:string,id:string)=>marketplace.unpublish(uid,id),onView:(bot:any,visitor:string)=>marketplace.view(bot,visitor)}:{}) });
 ctraderRoutes(app, { ...(process.env.CTRADER_GATEWAY_URL?{saveTokens:async(uid:string,tokens:any)=>{await gatewayRequest('authorizeTokens',{uid,tokens})}}:{}),read: readR2Object, write: writeR2Object, uid: firebaseUidOrReply,...(FirestoreStore.configured()?{onAuthorized:async(uid:string)=>{await marketplace.emergencyPause(uid,'Broker authorization changed');await marketplace.store.put(`brokerConnections/${Buffer.from(uid).toString('base64url')}`,{uid,connected:false,emergencyPaused:true,updatedAt:Date.now()})}}:{}) });

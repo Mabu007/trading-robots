@@ -1,13 +1,14 @@
 // Pure, deterministic spot-paper execution. A Durable Object must persist the
 // returned state atomically and serialize calls; this module places no orders.
 export type PaperCandle = { time:number; open:number; high:number; low:number; close:number; volume:number };
-export type PaperDecision = { action:'BUY'|'SELL'|'WAIT'; stopLoss?:number; takeProfit?:number };
+export type PaperDecision = { action:'BUY'|'SELL'|'WAIT'; stopLoss?:number; takeProfit?:number; reason?:string };
 export type PaperSpec = { baseDecimalPlaces:number; minBaseAmount:number; maxBaseAmount:number; minQuoteAmount:number; maxQuoteAmount:number };
 export type PaperRisk = { allocation:number; riskPercent:number; dailyLossPercent:number; timeframeSeconds:number };
 export type PaperState = {
   running:boolean; balance:number; lastCandle:number|null; day:string; dayStartBalance:number;
   pending:{stopLoss:number;takeProfit:number}|null;
   position:{quantity:number;entry:number;stopLoss:number;takeProfit:number}|null;
+  lastSignal?:{action:'BUY'|'SELL'|'WAIT';candleTime:number;reason:string};
   lastResult:string;
 };
 
@@ -19,6 +20,7 @@ export function processPaperCandle(previous:PaperState, candle:PaperCandle, deci
   if (!['BUY','SELL','WAIT'].includes(decision?.action)) throw Error('Invalid strategy decision');
   if (![previous.balance,risk.allocation,risk.riskPercent,risk.dailyLossPercent,spec.minBaseAmount,spec.maxBaseAmount,spec.minQuoteAmount,spec.maxQuoteAmount].every(Number.isFinite)||previous.balance<0||risk.allocation<=0||risk.riskPercent<=0||risk.riskPercent>2||risk.dailyLossPercent<=0||risk.dailyLossPercent>10||spec.minBaseAmount<=0||spec.maxBaseAmount<spec.minBaseAmount||spec.minQuoteAmount<=0||spec.maxQuoteAmount<spec.minQuoteAmount||!Number.isInteger(spec.baseDecimalPlaces)||spec.baseDecimalPlaces<0||spec.baseDecimalPlaces>8) throw Error('Invalid paper limits or market specification');
   const state:PaperState = {...previous,pending:previous.pending&&{...previous.pending},position:previous.position&&{...previous.position}};
+  if(state.running)state.lastSignal={action:decision.action,candleTime:candle.time,reason:typeof decision.reason==='string'?decision.reason.slice(0,300):''};
   const day=new Date(candle.time*1000).toISOString().slice(0,10);
   if(state.day!==day){state.day=day;state.dayStartBalance=state.balance+(state.position?state.position.quantity*candle.open:0)}
   let closed=false;

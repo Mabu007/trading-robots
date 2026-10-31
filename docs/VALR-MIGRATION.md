@@ -36,11 +36,18 @@ against VALR on 31 October 2026. This does not establish full historical depth.
 The backtest client waits one minute and retries rate-limited pages twice; a
 failure after those retries stops the run rather than returning partial data.
 
-The branch contains a standalone spot-only paper simulation and serialized
-durable-state runtime with mock tests for restarts, duplicate candles, stop,
-minimums and retries. They are not yet bound to a deployed Durable Object or
-the strategy evaluator. SELL short signals are rejected in spot paper mode;
-fees and slippage are not modelled by this initial paper simulator.
+The branch contains a spot-only paper Durable Object and workspace controls.
+Its customer-and-bot identity is derived server-side; it stores paper state,
+replays the pinned strategy in the sandbox, and receives no exchange keys. A
+separate paper-only Worker is deployed to the Cloudflare preview account; an
+ETHZAR WAIT strategy processed a real completed candle and was stopped. Local
+mock tests cover restarts, duplicate candles, stop, minimums and retries. This
+is not live execution. SELL short signals are rejected in spot paper mode;
+fees and slippage are not modelled by this initial paper simulator. It starts
+with 200 closed candles per timeframe, reports missing candles and refuses to
+process beyond 5,000 replay candles in total; the scheduler retries errors.
+Operators must review these limits before use.
+Paper account configuration is pinned for the instance's lifetime.
 
 The account's Workers Free plan rejects Cloudflare Dynamic Workers. This branch
 uses an isolated QuickJS WebAssembly VM instead, with no host APIs, a memory
@@ -60,8 +67,8 @@ gate disabled pending the complete runtime and end-to-end verification.
   provider, and add a separate OpenRouter key and model selection.
 - Implement isolated strategy evaluation and one shared risk-validation path
   for the backtest, paper, and VALR adapters.
-- Implement customer-isolated Durable Objects, paper mode, start/stop,
-  recovery, account/order monitoring, and execution reconciliation before
+- Verify the paper Durable Object and its account isolation end to end, and
+  implement real-account order monitoring and execution reconciliation before
   exposing explicitly authorized real trading. Verify exchange order types,
   stop/target handling, precision, and idempotency against VALR's API.
 - Disable legacy provider flows only when the replacement is ready, without

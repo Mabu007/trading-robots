@@ -4,7 +4,8 @@ import { getQuickJSWASMModule } from '@cf-wasm/quickjs/workerd';
 import { evaluateStrategyInSandbox } from './strategy-sandbox';
 import { TF_SECONDS } from '../shared/trading';
 import { parseStrategyConfig } from '../src/strategy';
-interface Env { STRATEGY_ISOLATION_VERIFIED:string; ROBOTS:DurableObjectNamespace;ACCOUNTS:DurableObjectNamespace;DATA:R2Bucket;SIGNALS:Queue<ExecutionJob>;TRADING_INTERNAL_SECRET:string;CONTROL_API_URL:string;CTRADER_GATEWAY_URL:string;DEMO_TRADING_ENABLED:string; }
+export { ValrPaper } from './valr-paper-object';
+interface Env { STRATEGY_ISOLATION_VERIFIED:string; ROBOTS:DurableObjectNamespace;ACCOUNTS:DurableObjectNamespace;PAPER:DurableObjectNamespace;DATA:R2Bucket;SIGNALS:Queue<ExecutionJob>;TRADING_INTERNAL_SECRET:string;CONTROL_API_URL:string;CTRADER_GATEWAY_URL:string;DEMO_TRADING_ENABLED:string; }
 const json=(v:unknown,status=200)=>Response.json(v,{status});
 async function rpc(env:Env,target:'control'|'gateway',action:string,body:any){const base=target==='control'?env.CONTROL_API_URL:env.CTRADER_GATEWAY_URL;if(!base||!env.TRADING_INTERNAL_SECRET)throw Error(`${target} is not configured`);const r=await fetch(new URL(target==='control'?`/api/internal/trading/${action}`:`/rpc/${action}`,base),{method:'POST',headers:{Authorization:`Bearer ${env.TRADING_INTERNAL_SECRET}`,'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(25000)});const d=await r.json<any>();if(!r.ok)throw Error(d.error||`${target} unavailable`);return d;}
 const storage=(ctx:DurableObjectState):DurableStore=>({get:key=>ctx.storage.get(key),put:(key,value)=>ctx.storage.put(key,value),putMany:entries=>ctx.storage.put(entries),setAlarm:time=>ctx.storage.setAlarm(time),deleteAlarm:()=>ctx.storage.deleteAlarm()});
@@ -51,6 +52,11 @@ export default {
   async fetch(request:Request,env:Env){
     if(!env.TRADING_INTERNAL_SECRET||request.headers.get('Authorization')!==`Bearer ${env.TRADING_INTERNAL_SECRET}`)return json({error:'Internal authorization required'},401);
     const url=new URL(request.url),parts=url.pathname.split('/').filter(Boolean);try{
+      if(parts[0]==='paper'&&id(parts[1])&&['deploy','start','stop','status'].includes(parts[2])){
+        if(parts[2]==='deploy'&&env.STRATEGY_ISOLATION_VERIFIED!=='true')throw Error('Paper deployment awaits strategy isolation verification.');
+        const body=request.method==='POST'?await request.text():undefined;if(body&&body.length>200000)throw Error('Paper request is too large');
+        return env.PAPER.get(env.PAPER.idFromName(parts[1])).fetch(new Request(`https://paper/${parts[2]}`,{method:request.method,...(body!==undefined?{body}:{})}));
+      }
       if(parts[0]==='bots'&&id(parts[1])&&parts[2]){
         if(['deploy','update'].includes(parts[2])){
           if(env.STRATEGY_ISOLATION_VERIFIED!=='true')throw Error('Strategy deployment awaits production isolation verification (CPU limits and blocked outbound access).');
