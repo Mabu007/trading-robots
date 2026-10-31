@@ -17,6 +17,7 @@ import { valrAccountRoutes } from './valr-routes.ts';
 import { valrPaperRoutes } from './valr-paper-routes.ts';
 import { legacyProviderGuard } from './legacy-provider-guard.ts';
 import { OpenRouterAccounts, openRouterRoutes } from './openrouter-account.ts';
+import { readOwnedBotAsset } from './firebase-owned-bot.ts';
 
 const app = express();
 const valrMarketData = new ValrMarketData();
@@ -270,8 +271,8 @@ const openRouterAccounts = new OpenRouterAccounts({read:readR2Object,write:write
 openRouterRoutes(app,openRouterAccounts,firebaseUidOrReply);
 const economy=new BotEconomy(marketplace.store,{read:readR2Object,write:writeR2Object,root:userBotRoot},marketplace);
 valrAccountRoutes(app,{ uid:firebaseUidOrReply, read:readR2Object, write:writeR2Object, remove:deleteR2Object });
-valrPaperRoutes(app,{uid:firebaseUidOrReply,bot:async(uid,id)=>{
-  const [bot,raw]=await Promise.all([marketplace.store.get(`users/${uid}/bots/${id}`),readR2Object(`${userBotRoot(uid,id)}/current.json`)]);
+valrPaperRoutes(app,{uid:firebaseUidOrReply,bot:async(uid,id,req)=>{
+  const [bot,raw]=await Promise.all([FirestoreStore.configured()?marketplace.store.get(`users/${uid}/bots/${id}`):readOwnedBotAsset(uid,id,req.header('authorization')),readR2Object(`${userBotRoot(uid,id)}/current.json`)]);
   if(!bot||!raw)return null;const saved=JSON.parse(raw);
   if(saved.userId!==uid||saved.botId!==id||typeof saved.code!=='string'||typeof bot.asset!=='string')return null;
   return {asset:bot.asset,code:saved.code};

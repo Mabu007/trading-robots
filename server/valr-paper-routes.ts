@@ -4,7 +4,7 @@ import { parseStrategyConfig } from '../src/strategy.ts';
 
 type Dependencies={
  uid:(req:Request,res:Response)=>Promise<string|null>;
- bot:(uid:string,id:string)=>Promise<{asset:string;code:string}|null>;
+ bot:(uid:string,id:string,req:Request)=>Promise<{asset:string;code:string}|null>;
  request?:typeof fetch;
  base?:()=>string|undefined;
  secret?:()=>string|undefined;
@@ -33,7 +33,7 @@ export function valrPaperRoutes(app:Express,deps:Dependencies){
  app.post('/api/valr/bots/:id/paper',handle(async(uid,id,req)=>{
   const action=req.body?.action;if(!['deploy','start','stop'].includes(action))throw Error('Invalid paper action.');
   if(action!=='deploy')return invoke(uid,id,action,{});
-  const bot=await deps.bot(uid,id);if(!bot)throw Error('Save your robot before deploying.');
+  const bot=await deps.bot(uid,id,req);if(!bot)throw Error('Save your robot before deploying.');
   const config=parseStrategyConfig(bot.code);
   const {balance,allocation,riskPercent,dailyLossPercent}=req.body??{};
   if(![balance,allocation,riskPercent,dailyLossPercent].every((v:unknown)=>typeof v==='number'&&Number.isFinite(v)))throw Error('Enter valid paper balance and risk limits.');

@@ -16,7 +16,8 @@ service cloud.firestore {
         return request.resource.data.keys().hasOnly(['name', 'asset', 'prompt', 'storage', 'code', 'lastBacktest', 'updatedAt'])
           && request.resource.data.name is string
           && request.resource.data.name.size() <= 64
-          && request.resource.data.asset in ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD']
+          && request.resource.data.asset is string
+          && request.resource.data.asset.matches('^[A-Z0-9]{3,30}$')
           && request.resource.data.prompt is string
           && request.resource.data.prompt.size() <= 12000
           && (!('code' in request.resource.data) || (request.resource.data.code is string && request.resource.data.code.size() <= 180000))

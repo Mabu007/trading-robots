@@ -1,7 +1,7 @@
 // Durable, per-customer order journal. This module is not wired to live trading.
 // It deliberately never retries an ambiguous submission: only reconciliation
 // can resolve it, because VALR's customer order IDs are unique among open orders.
-export type ValrIntent={customerOrderId:string;pair:string;side:'BUY'|'SELL';baseAmount:string;signalId:string};
+export type ValrIntent={customerOrderId:string;pair:string;side:'BUY'|'SELL';baseAmount:string;limitPrice:string;signalId:string};
 export type JournalRecord={intent:ValrIntent;state:'submitting'|'unknown'|'accepted'|'filled'|'failed'|'cancelled';exchangeOrderId?:string;updatedAt:number;error?:string};
 type Store={get<T>(key:string):Promise<T|undefined>;put(key:string,value:unknown):Promise<void>};
 type Exchange={submit:(intent:ValrIntent)=>Promise<{orderId:string}>;lookup:(intent:ValrIntent)=>Promise<{state:'open'|'filled'|'failed'|'cancelled';orderId:string}|null>};
@@ -13,9 +13,9 @@ export class ValrOrderJournal {
  private key(id:string){if(!/^[A-Za-z0-9-]{1,50}$/.test(id))throw Error('Invalid customer order ID');return `valr-order:${id}`}
  async submit(intent:ValrIntent){return this.serial(async()=>{
   const key=this.key(intent.customerOrderId);
-  if(!/^[A-Z0-9]{3,30}$/.test(intent.pair)||!['BUY','SELL'].includes(intent.side)||intent.baseAmount.length>50||!/^\d+(?:\.\d+)?$/.test(intent.baseAmount)||!Number.isFinite(Number(intent.baseAmount))||Number(intent.baseAmount)<=0||!intent.signalId||intent.signalId.length>200)throw Error('Invalid order intent');
+  if(!/^[A-Z0-9]{3,30}$/.test(intent.pair)||!['BUY','SELL'].includes(intent.side)||![intent.baseAmount,intent.limitPrice].every(v=>typeof v==='string'&&v.length<=50&&/^\d+(?:\.\d+)?$/.test(v)&&Number.isFinite(Number(v))&&Number(v)>0)||!intent.signalId||intent.signalId.length>200)throw Error('Invalid order intent');
   const old=await this.store.get<JournalRecord>(key);
-  if(old){if(old.intent.pair!==intent.pair||old.intent.side!==intent.side||old.intent.baseAmount!==intent.baseAmount||old.intent.signalId!==intent.signalId)throw Error('Order ID already belongs to a different intent');return old}
+  if(old){if(old.intent.pair!==intent.pair||old.intent.side!==intent.side||old.intent.baseAmount!==intent.baseAmount||old.intent.limitPrice!==intent.limitPrice||old.intent.signalId!==intent.signalId)throw Error('Order ID already belongs to a different intent');return old}
   const record:JournalRecord={intent,state:'submitting',updatedAt:this.now()};
   await this.store.put(key,record); // Commit before any network request.
   try{const result=await this.exchange.submit(intent);if(!result.orderId)throw Error('Missing order ID');record.state='accepted';record.exchangeOrderId=result.orderId}

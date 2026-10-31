@@ -2,7 +2,7 @@ import { expect,it,vi } from 'vitest';
 import { ValrOrderJournal,type ValrIntent } from '../workers/valr-order-journal';
 
 class Memory{data=new Map<string,unknown>();async get<T>(key:string){return structuredClone(this.data.get(key)) as T|undefined}async put(key:string,value:unknown){this.data.set(key,structuredClone(value))}}
-const intent:ValrIntent={customerOrderId:'robot-signal-123',pair:'ETHZAR',side:'BUY',baseAmount:'0.001',signalId:'signal-123'};
+const intent:ValrIntent={customerOrderId:'robot-signal-123',pair:'ETHZAR',side:'BUY',baseAmount:'0.001',limitPrice:'50000',signalId:'signal-123'};
 it('persists an intent before submission and never resubmits a lost acknowledgement',async()=>{
  const storage=new Memory(),submit=vi.fn(async()=>{expect(storage.data.has('valr-order:robot-signal-123')).toBe(true);throw Error('connection lost')});
  const lookup=vi.fn(async()=>({state:'filled' as const,orderId:'exchange-id'}));
@@ -21,4 +21,5 @@ it('serializes duplicate attempts and refuses to resend unresolved orders',async
  expect((await journal.reconcile(intent.customerOrderId)).state).toBe('unknown');
  expect((await journal.submit(intent)).state).toBe('unknown');expect(submit).toHaveBeenCalledTimes(1);
  await expect(journal.submit({...intent,baseAmount:'0.002'})).rejects.toThrow('different intent');
+ await expect(journal.submit({...intent,limitPrice:'60000'})).rejects.toThrow('different intent');
 });
