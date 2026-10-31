@@ -6,6 +6,8 @@ type OrderStatus={orderId:string;customerOrderId:string;orderStatusType:string;c
 const pairOk=(value:string)=>/^[A-Z0-9]{3,30}$/.test(value);
 const idOk=(value:string)=>/^[A-Za-z0-9-]{1,50}$/.test(value);
 const positive=(value:string)=>typeof value==='string'&&value.length<=50&&/^\d+(?:\.\d+)?$/.test(value)&&Number.isFinite(Number(value))&&Number(value)>0;
+type CachedPublic={expires:number;value?:unknown;pending?:Promise<unknown>};
+const publicCaches=new WeakMap<typeof fetch,Map<string,CachedPublic>>();
 
 // Provider adapter only. No HTTP route exposes this class and it does not
 // perform risk validation, grant user consent, or automatically retry orders.
@@ -21,11 +23,18 @@ export class ValrExchange {
   try{return await response.json()}catch{throw Error('VALR response was invalid; the order outcome may be unknown.')}
  }
  private async publicGet(path:string):Promise<unknown>{
-  let response:Response;try{response=await this.request(`https://api.valr.com${path}`,{signal:AbortSignal.timeout(12000)})}catch{throw Error('VALR public market request failed.')}
-  if(!response.ok)throw Error(`VALR public market request returned HTTP ${response.status}.`);
-  try{return await response.json()}catch{throw Error('VALR returned invalid public market data.')}
+  let cache=publicCaches.get(this.request);if(!cache){cache=new Map();publicCaches.set(this.request,cache)}
+  const existing=cache.get(path);if(existing?.pending)return structuredClone(await existing.pending);if(existing&&existing.expires>Date.now())return structuredClone(existing.value);
+  const slot:CachedPublic={expires:0};const pending=(async()=>{
+   let response:Response;try{response=await this.request(`https://api.valr.com${path}`,{signal:AbortSignal.timeout(12000)})}catch{throw Error('VALR public market request failed.')}
+   if(!response.ok)throw Error(`VALR public market request returned HTTP ${response.status}.`);
+   let value:unknown;try{value=await response.json()}catch{throw Error('VALR returned invalid public market data.')}
+   const control=response.headers.get('cache-control')||'',seconds=Number(control.match(/(?:^|,)\s*max-age=(\d+)/i)?.[1]??30);
+   slot.expires=Date.now()+(/no-store|no-cache/i.test(control)?0:Math.min(60,seconds)*1000);slot.value=value;delete slot.pending;return value;
+  })();slot.pending=pending;cache.set(path,slot);
+  try{return structuredClone(await pending)}catch(e){if(cache.get(path)===slot)cache.delete(path);throw e}
  }
- async snapshot(pair:string,ledger:{dayStartEquity:string;dailyLoss:string;reconciled:boolean}){
+ async snapshot(pair:string,ledger:{utcDay:string;dayStartEquity:string;dailyLoss:string;reconciled:boolean}){
   if(!pairOk(pair))throw Error('Invalid market');
   // Explicitly request zero balances: a missing base balance must not be
   // assumed flat. All account state is fetched using signed read-only calls.

@@ -3,7 +3,7 @@ import {reconcileSpotBuy,verifySpotProtection} from './valr-fill-reconciliation'
 
 type Config={pair:string;limits:Omit<Limits,'authorized'>};
 type Signal={id:string;candleClose:number;stopLoss:string;takeProfit:string};
-type Market={baseCurrency:string;quoteCurrency:string;spec:Specification;account:Snapshot;takerFeeBps:number;protectiveSlippageBps:number};
+type Market={baseCurrency:string;quoteCurrency:string;spec:Specification;account:Snapshot;takerFeeBps:number;protectiveSlippageBps:number;ledgerDay:string};
 type Phase='entry_pending'|'entry_unknown'|'unprotected'|'protection_pending'|'protection_unknown'|'protected';
 type Active={botId:string;signalId:string;pair:string;entryId:string;protectionId:string;entryOrderId?:string;protectionOrderId?:string;quantity:string;limitPrice:string;stopLoss:string;takeProfit:string;baseCurrency:string;quoteCurrency:string;baseDecimalPlaces:number;minBaseAmount:string;minQuoteAmount:string;slippageBps:number;phase:Phase;protectableQuantity?:string;lastError?:string};
 type State={bots:Record<string,{running:boolean;config:Config}>;active:Active|null};
@@ -35,9 +35,12 @@ export class ValrLiveCoordinator {
   if(await this.storage.get(seenKey)){if(state.active?.entryId===ids.entryId)return state;throw Error('Signal was already processed')}
   if(state.active)throw Error('Account has an unresolved order or position');
   const market=await this.provider.snapshot(bot.config.pair);
+  const checkedAt=this.now();
+  if(!Number.isSafeInteger(checkedAt)||signal.candleClose>checkedAt+1000||signal.candleClose<checkedAt-120000)throw Error('Signal became stale while checking the account');
+  if(market.ledgerDay!==new Date(checkedAt).toISOString().slice(0,10))throw Error('Daily account ledger is not current');
   if(!Number.isInteger(market.takerFeeBps)||market.takerFeeBps<0||market.takerFeeBps>1000||!Number.isInteger(market.protectiveSlippageBps)||market.protectiveSlippageBps<0||market.protectiveSlippageBps>500)throw Error('Verified fee or protective slippage is unavailable');
   const stopSlippage=Math.max(bot.config.limits.slippageBps,bot.config.limits.stopSlippageBps??0,market.protectiveSlippageBps);
-  const size=sizeValrSpotBuy(signal,market.account,market.spec,{...bot.config.limits,feeBps:Math.max(bot.config.limits.feeBps,market.takerFeeBps),stopSlippageBps:stopSlippage,authorized:true},now);
+  const size=sizeValrSpotBuy(signal,market.account,market.spec,{...bot.config.limits,feeBps:Math.max(bot.config.limits.feeBps,market.takerFeeBps),stopSlippageBps:stopSlippage,authorized:true},checkedAt);
   if(!market.baseCurrency||!market.quoteCurrency)throw Error('Market currencies are unavailable');
   const active:Active={botId,signalId:signal.id,pair:bot.config.pair,...ids,quantity:size.baseAmount,limitPrice:size.entryEstimate,stopLoss:size.stopLoss,takeProfit:size.takeProfit,baseCurrency:market.baseCurrency,quoteCurrency:market.quoteCurrency,baseDecimalPlaces:market.spec.baseDecimalPlaces,minBaseAmount:market.spec.minBaseAmount,minQuoteAmount:market.spec.minQuoteAmount,slippageBps:stopSlippage,phase:'entry_pending'};
   // The permanent marker precedes both the reservation and network submission.

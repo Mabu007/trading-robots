@@ -4,8 +4,8 @@ import type {Snapshot,Specification} from '../shared/valr-risk.ts';
 function decimal(value:unknown):bigint{if(typeof value!=='string'||value.length>40||!/^\d+(?:\.\d{1,18})?$/.test(value))throw Error('Invalid VALR decimal');const [whole,fraction='']=value.split('.');return BigInt(whole)*10n**18n+BigInt(fraction.padEnd(18,'0'))}
 function percentBps(value:unknown):number{const n=decimal(value);const bps=(n*100n+10n**18n-1n)/10n**18n;if(bps>1000n)throw Error('Exchange fee or slippage is too high');return Number(bps)}
 function one<T>(list:unknown,predicate:(v:any)=>boolean):T{if(!Array.isArray(list))throw Error('Invalid VALR response');const matches=list.filter(predicate);if(matches.length!==1)throw Error('VALR market or balance is missing or ambiguous');return matches[0] as T}
-export function parseValrSnapshot(input:{pair:string;pairs:unknown;balances:unknown;orders:unknown;conditionals:unknown;orderTypes:unknown;fees:unknown;slippage:unknown;orderbook:unknown;ledger:{dayStartEquity:string;dailyLoss:string;reconciled:boolean}}){
- if(!/^[A-Z0-9]{3,30}$/.test(input.pair)||!input.ledger||input.ledger.reconciled!==true)throw Error('Account ledger is not reconciled');
+export function parseValrSnapshot(input:{pair:string;pairs:unknown;balances:unknown;orders:unknown;conditionals:unknown;orderTypes:unknown;fees:unknown;slippage:unknown;orderbook:unknown;ledger:{utcDay:string;dayStartEquity:string;dailyLoss:string;reconciled:boolean}}){
+ if(!/^[A-Z0-9]{3,30}$/.test(input.pair)||!input.ledger||input.ledger.reconciled!==true||!/^\d{4}-\d{2}-\d{2}$/.test(input.ledger.utcDay))throw Error('Account ledger is not reconciled');
  const pair=one<any>(input.pairs,v=>v?.symbol===input.pair&&v.active===true&&v.currencyPairType==='SPOT');
  if(typeof pair.baseCurrency!=='string'||typeof pair.quoteCurrency!=='string'||pair.baseCurrency===pair.quoteCurrency)throw Error('Invalid spot market');
  const base=one<any>(input.balances,v=>v?.currency===pair.baseCurrency),quote=one<any>(input.balances,v=>v?.currency===pair.quoteCurrency);
@@ -23,5 +23,5 @@ export function parseValrSnapshot(input:{pair:string;pairs:unknown;balances:unkn
  const quoteTime=typeof book.LastChange==='number'?book.LastChange:Date.parse(book.LastChange);if(!Number.isSafeInteger(quoteTime))throw Error('VALR order book timestamp is unavailable');
  const spec:Specification={minBaseAmount:pair.minBaseAmount,maxBaseAmount:pair.maxBaseAmount,minQuoteAmount:pair.minQuoteAmount,maxQuoteAmount:pair.maxQuoteAmount,tickSize:pair.tickSize,baseDecimalPlaces:Number(pair.baseDecimalPlaces),orderTypes:input.orderTypes as string[]};
  const account:Snapshot={availableQuote:quote.available,bid,ask,quoteTime,dayStartEquity:input.ledger.dayStartEquity,dailyLoss:input.ledger.dailyLoss,openOrders:input.orders.length+input.conditionals.length,openPositions:baseTotal>0n?1:0,reconciled:true};
- return {baseCurrency:pair.baseCurrency as string,quoteCurrency:pair.quoteCurrency as string,spec,account,takerFeeBps,protectiveSlippageBps};
+ return {baseCurrency:pair.baseCurrency as string,quoteCurrency:pair.quoteCurrency as string,spec,account,takerFeeBps,protectiveSlippageBps,ledgerDay:input.ledger.utcDay};
 }
