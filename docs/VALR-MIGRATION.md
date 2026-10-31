@@ -1,9 +1,11 @@
 # VALR migration: initial market-data foundation
 
 This branch is a partial implementation. The workspace selects VALR markets
-and requests paginated VALR history for backtests; the existing cTrader
-deployment flow has not yet been replaced. Do not enable real-money trading on
-this basis. Existing running deployments are not stopped or modified by this code.
+and requests paginated VALR history for backtests. New cTrader starts,
+deployments and subscriptions are parked by default; stop and pause paths
+remain available. The old provider code and data remain in place. Do not
+enable real-money trading on this basis. Existing running deployments are not
+automatically stopped or modified by this code.
 
 The branch also contains unconnected account primitives for signed VALR
 account inspection and AES-256-GCM encrypted credential storage with
@@ -49,6 +51,14 @@ process beyond 5,000 replay candles in total; the scheduler retries errors.
 Operators must review these limits before use.
 Paper account configuration is pinned for the instance's lifetime.
 
+A separate unconnected order-journal primitive records an intent before
+submission and refuses to resend ambiguous orders until exchange status is
+resolved. An unconnected VALR adapter can construct market and OCO conditional
+requests; neither is exposed in an API or places orders in the application.
+They are tested with mocks only. Production execution still needs risk
+validation, fill and fee reconciliation, protection verification, explicit
+user consent, and durable account-level coordination.
+
 The account's Workers Free plan rejects Cloudflare Dynamic Workers. This branch
 uses an isolated QuickJS WebAssembly VM instead, with no host APIs, a memory
 ceiling and a count-based interruption limit. A temporary Worker deployed to
@@ -71,8 +81,9 @@ gate disabled pending the complete runtime and end-to-end verification.
   implement real-account order monitoring and execution reconciliation before
   exposing explicitly authorized real trading. Verify exchange order types,
   stop/target handling, precision, and idempotency against VALR's API.
-- Disable legacy provider flows only when the replacement is ready, without
-  deleting their code, credentials, data, or R2 marketplace-image support.
+- Verify that legacy provider pause/stop controls work for any previously
+  running instances without deleting their code, credentials, data, or R2
+  marketplace-image support.
 - Test the complete flow in a safe environment and document infrastructure,
   secrets, exchange permissions, supported markets, and known limitations.
 

@@ -17,7 +17,7 @@ export function valrPaperRoutes(app:Express,deps:Dependencies){
  const invoke=async(uid:string,id:string,action:string,body?:unknown)=>{
   const base=deps.base?.()??process.env.VALR_PAPER_RUNTIME_URL,secret=deps.secret?.()??process.env.VALR_PAPER_INTERNAL_SECRET;
   if(!base||!secret)throw Error('Paper runtime is not configured.');
-  const url=new URL(base);if(url.protocol!=='https:'&&url.hostname!=='127.0.0.1'&&url.hostname!=='localhost')throw Error('Paper runtime URL must use HTTPS.');
+  const url=new URL(base);if(url.protocol!=='https:'&&!(url.protocol==='http:'&&(url.hostname==='127.0.0.1'||url.hostname==='localhost')))throw Error('Paper runtime URL must use HTTPS.');
   const path=new URL(`/paper/${paperInstanceId(uid,id)}/${action}`,url);
   const response=await request(path,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${secret}`,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(25_000)});
   let result:any;try{result=await response.json()}catch{throw Error('Paper runtime returned an invalid response.')}

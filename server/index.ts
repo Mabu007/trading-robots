@@ -15,11 +15,13 @@ import { BrokerTokenStore } from './broker-tokens.ts';
 import { ValrMarketData } from './valr-market-data.ts';
 import { valrAccountRoutes } from './valr-routes.ts';
 import { valrPaperRoutes } from './valr-paper-routes.ts';
+import { legacyProviderGuard } from './legacy-provider-guard.ts';
 
 const app = express();
 const valrMarketData = new ValrMarketData();
 app.use(['/api/marketplace','/api/brokers','/api/economy','/api/valr'],requestLimit);
 app.use(express.json({ limit: '10mb' }));
+app.use(legacyProviderGuard);
 const assets = ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD'] as const;
 
 type StoredMarketDay = { schemaVersion: 1; asset: MarketAsset; timeframe: MarketTimeframe; date: string; source: 'manual'; priceType: 'unknown'; updatedAt: string; candles: MarketCandle[] };
@@ -273,9 +275,9 @@ valrPaperRoutes(app,{uid:firebaseUidOrReply,bot:async(uid,id)=>{
 }});
 economyRoutes(app,economy,async(req,res)=>{const uid=await firebaseUidOrReply(req,res);return uid?res.locals.identity:null;});
 const publications = sharedBotRoutes(app, { read: readR2Object, write: writeR2Object, remove: deleteR2Object, uid: firebaseUidOrReply, root: userBotRoot,...(FirestoreStore.configured()?{onPublish:(bot:any)=>economy.legacyPublish(bot),onAcquire:async(uid:string,id:string,bot:any)=>{if(!await marketplace.store.get(`marketplaceBots/${id}`))await marketplace.publish(bot);return economy.legacyCopy(uid,bot)},onUnpublish:(uid:string,id:string)=>marketplace.unpublish(uid,id),onView:(bot:any,visitor:string)=>marketplace.view(bot,visitor)}:{}) });
-ctraderRoutes(app, { ...(process.env.CTRADER_GATEWAY_URL?{saveTokens:async(uid:string,tokens:any)=>{await gatewayRequest('authorizeTokens',{uid,tokens})}}:{}),read: readR2Object, write: writeR2Object, uid: firebaseUidOrReply,...(FirestoreStore.configured()?{onAuthorized:async(uid:string)=>{await marketplace.emergencyPause(uid,'Broker authorization changed');await marketplace.store.put(`brokerConnections/${Buffer.from(uid).toString('base64url')}`,{uid,connected:false,emergencyPaused:true,updatedAt:Date.now()})}}:{}) });
+if(process.env.ENABLE_LEGACY_CTRADER==='true')ctraderRoutes(app, { ...(process.env.CTRADER_GATEWAY_URL?{saveTokens:async(uid:string,tokens:any)=>{await gatewayRequest('authorizeTokens',{uid,tokens})}}:{}),read: readR2Object, write: writeR2Object, uid: firebaseUidOrReply,...(FirestoreStore.configured()?{onAuthorized:async(uid:string)=>{await marketplace.emergencyPause(uid,'Broker authorization changed');await marketplace.store.put(`brokerConnections/${Buffer.from(uid).toString('base64url')}`,{uid,connected:false,emergencyPaused:true,updatedAt:Date.now()})}}:{}) });
 marketplaceRoutes(app,{uid:firebaseUidOrReply,read:readR2Object,write:writeR2Object,root:userBotRoot,gateway:gatewayRequest,gatewayHealth,checkLicense:(uid,botId,code)=>economy.checkDeployment(uid,botId,code),ensureMember:(uid,botId,req)=>economy.ensureMember((req as any).verifiedIdentity,botId),versionSource:(uid,versionId)=>economy.source(uid,versionId)});
-brokerRoutes(app,{uid:firebaseUidOrReply,tokens:new BrokerTokenStore({read:readR2Object,write:writeR2Object}),remove:deleteR2Object});
+if(process.env.ENABLE_LEGACY_CTRADER==='true')brokerRoutes(app,{uid:firebaseUidOrReply,tokens:new BrokerTokenStore({read:readR2Object,write:writeR2Object}),remove:deleteR2Object});
 
 app.put('/api/user-bots/:botId/current', async (req, res) => {
   const uid = await firebaseUidOrReply(req, res); if (!uid) return;
