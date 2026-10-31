@@ -12,9 +12,11 @@ import { marketplace,marketplaceRoutes,assertProjectEditable } from './marketpla
 import { FirestoreStore } from './firestore-store.ts';
 import { brokerRoutes,gatewayRequest,gatewayHealth } from './broker-routes.ts';
 import { BrokerTokenStore } from './broker-tokens.ts';
+import { ValrMarketData } from './valr-market-data.ts';
 
 const app = express();
-app.use(['/api/marketplace','/api/brokers','/api/economy'],requestLimit);
+const valrMarketData = new ValrMarketData();
+app.use(['/api/marketplace','/api/brokers','/api/economy','/api/valr'],requestLimit);
 app.use(express.json({ limit: '10mb' }));
 const assets = ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD'] as const;
 
@@ -218,6 +220,19 @@ function friendlyR2Error(error: unknown): string {
 }
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, aiConfigured: Boolean(process.env.OPENROUTER_API_KEY) }));
+// New provider endpoints are separate until the live runtime and workspace
+// are migrated together. No credentials are needed for these public calls.
+app.get('/api/valr/markets', async (_req, res) => {
+  try { return res.json({ markets: await valrMarketData.pairs() }); }
+  catch (error) { return res.status(502).json({ error: error instanceof Error ? error.message : 'VALR market data unavailable.' }); }
+});
+app.post('/api/valr/candles', async (req, res) => {
+  try { return res.json(await valrMarketData.candles(req.body ?? {})); }
+  catch (error) {
+    const message = error instanceof Error ? error.message : 'VALR market data unavailable.';
+    return res.status(/^Choose|^Unsupported|^Dates|^A page|^This market/.test(message) ? 400 : 502).json({ error: message });
+  }
+});
 app.get('/api/r2/status', async (_req, res) => {
   if (!getR2Config()) return res.json({ configured: false, connected: false, mode: 'private-s3-compatible' });
   try {
