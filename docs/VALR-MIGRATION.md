@@ -88,8 +88,7 @@ gate disabled pending the complete runtime and end-to-end verification.
   does not have them. Paper deployment can read an owned bot using the signed-in
   user’s token, subject to the deployed Firestore rules.
 
-- Verify the public VALR WebSocket workspace ticker against a live provider and
-  test the workspace and coverage UI in an actual signed-in deployment.
+- Verify the workspace and coverage UI in an actual signed-in deployment.
 - Verify the per-user VALR connection and disconnect flows against the real
   provider, and test the personal OpenRouter key and model selection with a real account.
 - Implement isolated strategy evaluation and one shared risk-validation path
@@ -107,6 +106,7 @@ gate disabled pending the complete runtime and end-to-end verification.
 The workspace subscribes directly to public VALR market-summary WebSocket updates,
 sends a 25-second keepalive, reconnects, and marks delayed quotes. This ticker
 is informational and is never used to authorize or size orders. Protocol and
-reconnection behavior have unit tests; a real-provider check is still pending.
+reconnection behavior have unit tests; an unauthenticated ETH/ZAR subscription
+was also verified against VALR on 31 October 2026.
 
 VALR reference: https://docs.valr.com/ (currency pairs, price buckets and WebSocket).

@@ -1,7 +1,7 @@
 export type LiveQuote={pair:string;last:number;bid:number;ask:number;receivedAt:number};
 export type LiveState={status:'connecting'|'live'|'reconnecting';quote:LiveQuote|null};
 export function parseValrQuote(raw:string,pair:string,now=Date.now()):LiveQuote|null{
- try{const msg=JSON.parse(raw);if(msg.type!=='MARKET_SUMMARY_UPDATE'||msg.currencyPairSymbol!==pair||msg.data?.currencyPair!==pair)return null;const last=Number(msg.data.lastTradedPrice),bid=Number(msg.data.bidPrice),ask=Number(msg.data.askPrice);if(![last,bid,ask].every(Number.isFinite)||last<=0||bid<=0||ask<bid)return null;return {pair,last,bid,ask,receivedAt:now}}catch{return null}
+ try{const msg=JSON.parse(raw);if(msg.type!=='MARKET_SUMMARY_UPDATE'||msg.currencyPairSymbol!==pair||(msg.data?.currencyPair!==undefined&&msg.data.currencyPair!==pair))return null;const last=Number(msg.data.lastTradedPrice),bid=Number(msg.data.bidPrice),ask=Number(msg.data.askPrice);if(![last,bid,ask].every(Number.isFinite)||last<=0||bid<=0||ask<bid)return null;return {pair,last,bid,ask,receivedAt:now}}catch{return null}
 }
 // Public trade stream only: no user credentials are sent to the browser or socket.
 export function subscribeValrQuote(pair:string,onChange:(value:LiveState)=>void,create:(url:string)=>WebSocket=url=>new WebSocket(url)){
