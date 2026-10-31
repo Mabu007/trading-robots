@@ -31,7 +31,7 @@ export class ValrAccounts {
     this.storage = storage; this.request = options.request ?? fetch; this.clock = options.clock ?? Date.now; this.key = options.key ?? (() => process.env.VALR_CREDENTIAL_ENCRYPTION_KEY);
   }
 
-  private async get(credentials: Credentials, path: '/v1/account/api-keys/current' | '/v1/account/balances') {
+  private async get(credentials: Credentials, path: '/v1/account/api-keys/current' | '/v1/account/balances' | '/v1/orders/open' | '/v1/account/tradehistory?skip=0&limit=20') {
     const timestamp = String(this.clock());
     let response: Response;
     try { response = await this.request(`https://api.valr.com${path}`, { headers: { 'Content-Type': 'application/json', 'X-VALR-API-KEY': credentials.apiKey, 'X-VALR-TIMESTAMP': timestamp, 'X-VALR-SIGNATURE': valrSignature(credentials.apiSecret, timestamp, 'GET', path) }, signal: AbortSignal.timeout(10000) }); }
@@ -76,4 +76,13 @@ export class ValrAccounts {
   }
 
   async disconnect(uid: string) { await this.storage.remove(storageKey(uid)); }
+
+  async activity(credentials:Credentials){
+    const [orders,trades]=await Promise.all([this.get(credentials,'/v1/orders/open'),this.get(credentials,'/v1/account/tradehistory?skip=0&limit=20')]);
+    if(!Array.isArray(orders)||!Array.isArray(trades))throw new Error('VALR returned invalid account activity.');
+    // Expose only the fields needed for display. These are account-wide VALR
+    // records, not necessarily orders placed by Trading Vibes.
+    const fields=(item:any,names:string[])=>Object.fromEntries(names.filter(name=>typeof item?.[name]==='string').map(name=>[name,item[name].slice(0,200)]));
+    return {orders:orders.slice(0,100).map(item=>fields(item,['orderId','customerOrderId','currencyPair','side','price','remainingQuantity','status','type','createdAt'])),trades:trades.slice(0,20).map(item=>fields(item,['id','currencyPair','side','price','quantity','tradedAt']))};
+  }
 }

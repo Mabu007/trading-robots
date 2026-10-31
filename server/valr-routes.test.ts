@@ -29,6 +29,9 @@ it('authenticates users, encrypts their keys, isolates accounts and removes only
   expect(responseText).not.toContain(creds.apiSecret);
   expect([...objects.values()].join('')).not.toContain(creds.apiSecret);
   expect(await (await fetch(`${base}/api/valr/account`, {headers:{'x-test-user':'bob'}})).json()).toEqual({connected:false});
+  expect((await fetch(`${base}/api/valr/account/activity`)).status).toBe(401);
+  expect((await fetch(`${base}/api/valr/account/activity`,{headers:{'x-test-user':'bob'}})).status).toBe(503);
+  expect((await fetch(`${base}/api/valr/account/activity`,{headers:{'x-test-user':'alice'}})).status).toBe(200);
   expect(((await (await fetch(`${base}/api/valr/account`, {headers:{'x-test-user':'alice'}})).json()) as {connected:boolean}).connected).toBe(true);
   const disconnected = await fetch(`${base}/api/valr/account/disconnect`, {method:'POST',headers:{'x-test-user':'alice'}});
   expect(await disconnected.json()).toEqual({connected:false,positionsClosed:false,revokeAtValr:true});

@@ -18,7 +18,7 @@ export function valrAccountRoutes(app: Express, dependencies: Dependencies) {
     try { return res.json(await run(uid, req)); }
     catch (error) {
       const raw = error instanceof Error ? error.message : '';
-      const known = /^(Enter a valid VALR API key and secret\.|Use a VALR key with View access and Trade only\. Disable all other permissions\.|VALR credential encryption is not configured\.|Could not reach VALR\. Retry the connection\.|VALR rate limit reached\. Wait and retry\.|VALR could not verify this account\. Check the key, permissions and IP restrictions\.|VALR returned an invalid account response\.|VALR did not return verifiable API permissions\.|VALR returned invalid balances\.|Unable to decrypt VALR credentials\. Reconnect your account\.)$/;
+      const known = /^(Enter a valid VALR API key and secret\.|Use a VALR key with View access and Trade only\. Disable all other permissions\.|VALR credential encryption is not configured\.|Could not reach VALR\. Retry the connection\.|VALR rate limit reached\. Wait and retry\.|VALR could not verify this account\. Check the key, permissions and IP restrictions\.|VALR returned an invalid account response\.|VALR did not return verifiable API permissions\.|VALR returned invalid balances\.|VALR returned invalid account activity\.|Unable to decrypt VALR credentials\. Reconnect your account\.)$/;
       const message = known.test(raw) ? raw : 'VALR account request failed. Retry later.';
       const clientError = /valid VALR API key|View access and Trade only/.test(message);
       return res.status(clientError ? 400 : 503).json({ error: message });
@@ -35,6 +35,10 @@ export function valrAccountRoutes(app: Express, dependencies: Dependencies) {
     const credentials = await accounts.load(uid);
     if (!credentials) return { connected: false };
     return { connected: true, ...await accounts.inspect(credentials) };
+  }));
+  app.get('/api/valr/account/activity', handle(async uid => {
+    const credentials=await accounts.load(uid);if(!credentials)throw new Error('VALR account request failed. Retry later.');
+    return accounts.activity(credentials);
   }));
   app.post('/api/valr/account/disconnect', handle(async uid => {
     await accounts.disconnect(uid);

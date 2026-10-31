@@ -33,3 +33,9 @@ describe('VALR account foundation', () => {
     expect(request).toHaveBeenCalledTimes(1);
   });
 });
+
+it('signs account activity requests and limits fields returned to the customer',async()=>{
+ const calls:string[]=[];const secret='b'.repeat(64),key='a'.repeat(64),timestamp='1558014486185';
+ const request=vi.fn(async(url:string|URL|Request,init?:RequestInit)=>{const path=String(url).replace('https://api.valr.com','');calls.push(path);expect((init?.headers as Record<string,string>)['X-VALR-SIGNATURE']).toBe(valrSignature(secret,timestamp,'GET',path));return Response.json(path==='/v1/orders/open'?[{orderId:'1',currencyPair:'ETHZAR',side:'buy',price:'10',privateField:'hidden'}]:[{id:'2',currencyPair:'ETHZAR',side:'buy',quantity:'1',price:'10',privateField:'hidden'}])});
+ const store={read:async()=>null,write:async()=>{},remove:async()=>{}};const accounts=new ValrAccounts(store,{request:request as typeof fetch,clock:()=>Number(timestamp)});const result=await accounts.activity({apiKey:key,apiSecret:secret});expect(calls).toContain('/v1/account/tradehistory?skip=0&limit=20');expect(result.orders[0]).toMatchObject({orderId:'1',currencyPair:'ETHZAR'});expect(JSON.stringify(result)).not.toContain('privateField');
+});
