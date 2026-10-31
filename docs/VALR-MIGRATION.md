@@ -65,7 +65,9 @@ set `ALLOW_SHARED_OPENROUTER_KEY=true` if they intend to pay for shared usage.
 A mock-tested, unconnected per-account coordinator serializes bots, persists
 intent before submission, reconciles fills and verifies protective orders. It
 locks the account when a submission is ambiguous and cannot yet reconcile a
-completed protective exit or maintain a verified daily loss ledger. It is not
+completed protective exit or maintain a verified daily loss ledger. A local
+Durable Object test verifies dropped acknowledgements and restart recovery with
+a mock exchange; it sends no orders. It is not
 exposed to users or connected to real-money execution. A separate unconnected
 order-journal primitive records an intent before
 submission and refuses to resend ambiguous orders until exchange status is
@@ -114,4 +116,10 @@ is informational and is never used to authorize or size orders. Protocol and
 reconnection behavior have unit tests; an unauthenticated ETH/ZAR subscription
 was also verified against VALR on 31 October 2026.
 
-VALR reference: https://docs.valr.com/ (currency pairs, price buckets and WebSocket).
+VALR describes spot OTOCO orders in its help center, but its REST order
+reference describes the documented `conditionalOrderData` field as futures-only.
+Confirm the supported spot API request and its order linkage before relying on
+that behavior. Conditional orders can fail or partially fill after triggering.
+
+VALR references: https://docs.valr.com/ and
+https://support.valr.com/hc/en-us/articles/360018792019-What-order-types-are-available-on-VALR.
