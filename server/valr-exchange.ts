@@ -19,9 +19,9 @@ export class ValrExchange {
   if(!response.ok)throw Error(`VALR request returned HTTP ${response.status}; reconcile order status before retrying.`);
   try{return await response.json()}catch{throw Error('VALR response was invalid; the order outcome may be unknown.')}
  }
- async marketBuy(pair:string,baseAmount:string,customerOrderId:string){
-  if(!pairOk(pair)||!positive(baseAmount)||!idOk(customerOrderId))throw Error('Invalid market order');
-  const result=await this.call('POST','/v1/orders/market',{side:'BUY',baseAmount,pair,customerOrderId,allowMargin:false,timeInForce:'FOK'}) as {id?:unknown};
+ async limitBuy(pair:string,quantity:string,price:string,customerOrderId:string){
+  if(!pairOk(pair)||!positive(quantity)||!positive(price)||!idOk(customerOrderId))throw Error('Invalid limit order');
+  const result=await this.call('POST','/v1/orders/limit',{side:'BUY',quantity,price,pair,customerOrderId,allowMargin:false,postOnly:false,timeInForce:'FOK'}) as {id?:unknown};
   if(typeof result?.id!=='string'||!result.id)throw Error('VALR did not acknowledge an order ID; reconcile before retrying.');
   return {orderId:result.id}; // Accepted is not proof of a fill.
  }

@@ -3,14 +3,14 @@ import { ValrExchange } from './valr-exchange';
 import { valrSignature } from './valr-account';
 
 const creds={apiKey:'a'.repeat(64),apiSecret:'b'.repeat(64)};
-it('signs a spot market buy and never treats acknowledgement as a fill',async()=>{
+it('signs a price-capped spot limit buy and never treats acknowledgement as a fill',async()=>{
  const request=vi.fn(async()=>Response.json({id:'exchange-order'},{status:202}));
  const client=new ValrExchange(creds,request as typeof fetch,()=>1558017528946);
- expect(await client.marketBuy('ETHZAR','0.01','bot-signal-1')).toEqual({orderId:'exchange-order'});
+ expect(await client.limitBuy('ETHZAR','0.01','200','bot-signal-1')).toEqual({orderId:'exchange-order'});
  const [url,init]=request.mock.calls[0] as unknown as [string,RequestInit];
- expect(url).toBe('https://api.valr.com/v1/orders/market');
- expect(JSON.parse(String(init.body))).toEqual({side:'BUY',baseAmount:'0.01',pair:'ETHZAR',customerOrderId:'bot-signal-1',allowMargin:false,timeInForce:'FOK'});
- expect((init.headers as Record<string,string>)['X-VALR-SIGNATURE']).toBe(valrSignature(creds.apiSecret,'1558017528946','POST','/v1/orders/market',String(init.body)));
+ expect(url).toBe('https://api.valr.com/v1/orders/limit');
+ expect(JSON.parse(String(init.body))).toEqual({side:'BUY',quantity:'0.01',price:'200',pair:'ETHZAR',customerOrderId:'bot-signal-1',allowMargin:false,postOnly:false,timeInForce:'FOK'});
+ expect((init.headers as Record<string,string>)['X-VALR-SIGNATURE']).toBe(valrSignature(creds.apiSecret,'1558017528946','POST','/v1/orders/limit',String(init.body)));
 });
 it('builds one OCO conditional with no margin and refuses invalid levels',async()=>{
  const request=vi.fn(async()=>Response.json({id:'protection-id'},{status:202}));

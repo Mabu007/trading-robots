@@ -7,7 +7,7 @@ remain available. The old provider code and data remain in place. Do not
 enable real-money trading on this basis. Existing running deployments are not
 automatically stopped or modified by this code.
 
-The branch also contains unconnected account primitives for signed VALR
+The branch also contains account primitives for signed VALR
 account inspection and AES-256-GCM encrypted credential storage with
 user-bound authentication. They reject keys with permissions beyond View and
 Trade. An authenticated account API and connection dialog are implemented on
@@ -51,9 +51,14 @@ process beyond 5,000 replay candles in total; the scheduler retries errors.
 Operators must review these limits before use.
 Paper account configuration is pinned for the instance's lifetime.
 
+Personal OpenRouter keys and selected models are encrypted separately with a
+user-bound AES-256-GCM key. Set an independent 32-byte base64
+`AI_CREDENTIAL_ENCRYPTION_KEY`; the provider model list is fetched dynamically.
+This connection has mock tests only and has not been validated with a real key.
+
 A separate unconnected order-journal primitive records an intent before
 submission and refuses to resend ambiguous orders until exchange status is
-resolved. An unconnected VALR adapter can construct market and OCO conditional
+resolved. An unconnected VALR adapter can construct price-capped FOK limit and OCO conditional
 requests; neither is exposed in an API or places orders in the application.
 They are tested with mocks only. Production execution still needs risk
 validation, fill and fee reconciliation, protection verification, explicit
@@ -74,7 +79,7 @@ gate disabled pending the complete runtime and end-to-end verification.
 - Add live WebSocket updates and verify the workspace and coverage UI in an
   actual deployment.
 - Verify the per-user VALR connection and disconnect flows against the real
-  provider, and add a separate OpenRouter key and model selection.
+  provider, and test the personal OpenRouter key and model selection with a real account.
 - Implement isolated strategy evaluation and one shared risk-validation path
   for the backtest, paper, and VALR adapters.
 - Verify the paper Durable Object and its account isolation end to end, and
