@@ -13,6 +13,11 @@ export type PaperState = {
   lastResult:string;
 };
 
+export function validatePaperReset(state:PaperState,acknowledgePosition:unknown){
+  if(state.running)throw Error('Stop the paper robot before resetting it');
+  if(state.position&&acknowledgePosition!==true)throw Error('Acknowledge the open simulated position before resetting');
+}
+
 export function processPaperCandle(previous:PaperState, candle:PaperCandle, decision:PaperDecision, spec:PaperSpec, risk:PaperRisk):PaperState {
   if (!Number.isSafeInteger(candle.time)||candle.time<=0||![candle.open,candle.high,candle.low,candle.close].every(v=>Number.isFinite(v)&&v>0)||!Number.isFinite(candle.volume)||candle.volume<0||candle.high<Math.max(candle.open,candle.close)||candle.low>Math.min(candle.open,candle.close)||candle.high<candle.low) throw Error('Invalid candle');
   if (!Number.isSafeInteger(risk.timeframeSeconds)||risk.timeframeSeconds<=0||candle.time%risk.timeframeSeconds!==0) throw Error('Invalid timeframe');

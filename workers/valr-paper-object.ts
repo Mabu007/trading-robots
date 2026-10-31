@@ -5,7 +5,7 @@ import { TF_SECONDS } from '../shared/trading';
 import { evaluateStrategyInSandbox } from './strategy-sandbox';
 import { fetchValrCandles } from './valr-candles';
 import { ValrPaperRuntime } from './valr-paper-runtime';
-import type { PaperCandle, PaperDecision, PaperRisk, PaperSpec, PaperState } from './valr-paper';
+import { validatePaperReset, type PaperCandle, type PaperDecision, type PaperRisk, type PaperSpec, type PaperState } from './valr-paper';
 
 type Deployment={pair:string;code:string;config:ReturnType<typeof parseStrategyConfig>};
 const reply=(value:unknown,status=200)=>Response.json(value,{status});
@@ -33,10 +33,26 @@ export class ValrPaper extends DurableObject<any> {
    if(action==='deploy')return reply(await this.deploy(await req.json()));
    if(action==='start')return reply(await this.runtime.start());
    if(action==='stop')return reply(await this.runtime.stop());
+   if(action==='reset')return reply(await this.reset(await req.json()));
    return reply({error:'Unknown paper action'},404);
   }catch(e){return reply({error:e instanceof Error?e.message:'Paper operation failed'},400)}
  })}
  async alarm(){return this.serial(()=>this.runtime.alarm())}
+ private async reset(input:unknown){
+  const data=await this.runtime.status();
+  validatePaperReset(data.state,(input as {acknowledgePosition?:unknown})?.acknowledgePosition);
+  const archive=`paper-archive:${Date.now()}:${crypto.randomUUID()}`;
+  // Archive every part before clearing the active instance, in one transaction.
+  // No VALR account or real position is touched by this paper-only operation.
+  await this.ctx.storage.transaction(async txn=>{
+   for(const key of ['paper','paper-deployment','paper-history']){
+    const value=await txn.get(key);if(value!==undefined)await txn.put(`${archive}:${key}`,value);
+   }
+   await txn.delete(['paper','paper-deployment','paper-history']);
+  });
+  await this.ctx.storage.deleteAlarm();
+  return {reset:true,archived:true};
+ }
  private async deploy(input:unknown){
   const data=input as {pair?:unknown;code?:unknown;balance?:unknown;allocation?:unknown;riskPercent?:unknown;dailyLossPercent?:unknown};
   if(!data||typeof data.pair!=='string'||!/^[A-Z0-9]{3,30}$/.test(data.pair)||typeof data.code!=='string'||data.code.length>180_000||!data.code.trim())throw Error('Invalid paper deployment');

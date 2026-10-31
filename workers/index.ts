@@ -52,7 +52,7 @@ export default {
   async fetch(request:Request,env:Env){
     if(!env.TRADING_INTERNAL_SECRET||request.headers.get('Authorization')!==`Bearer ${env.TRADING_INTERNAL_SECRET}`)return json({error:'Internal authorization required'},401);
     const url=new URL(request.url),parts=url.pathname.split('/').filter(Boolean);try{
-      if(parts[0]==='paper'&&id(parts[1])&&['deploy','start','stop','status'].includes(parts[2])){
+      if(parts[0]==='paper'&&id(parts[1])&&['deploy','start','stop','status','reset'].includes(parts[2])){
         if(parts[2]==='deploy'&&env.STRATEGY_ISOLATION_VERIFIED!=='true')throw Error('Paper deployment awaits strategy isolation verification.');
         const body=request.method==='POST'?await request.text():undefined;if(body&&body.length>200000)throw Error('Paper request is too large');
         return env.PAPER.get(env.PAPER.idFromName(parts[1])).fetch(new Request(`https://paper/${parts[2]}`,{method:request.method,...(body!==undefined?{body}:{})}));

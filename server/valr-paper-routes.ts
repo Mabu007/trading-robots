@@ -31,7 +31,8 @@ export function valrPaperRoutes(app:Express,deps:Dependencies){
  };
  app.get('/api/valr/bots/:id/paper',handle((uid,id)=>invoke(uid,id,'status')));
  app.post('/api/valr/bots/:id/paper',handle(async(uid,id,req)=>{
-  const action=req.body?.action;if(!['deploy','start','stop'].includes(action))throw Error('Invalid paper action.');
+  const action=req.body?.action;if(!['deploy','start','stop','reset'].includes(action))throw Error('Invalid paper action.');
+  if(action==='reset')return invoke(uid,id,action,{acknowledgePosition:req.body?.acknowledgePosition===true});
   if(action!=='deploy')return invoke(uid,id,action,{});
   const bot=await deps.bot(uid,id,req);if(!bot)throw Error('Save your robot before deploying.');
   const config=parseStrategyConfig(bot.code);

@@ -30,7 +30,9 @@ try{
  await call('deploy',{pair:'ETHZAR',code,balance:1000,allocation:1000,riskPercent:1,dailyLossPercent:3});await call('start',{});
  let status;const deadline=Date.now()+30000;while(Date.now()<deadline){status=await call('status');if(status.state.lastCandle||status.lastError)break;await new Promise(r=>setTimeout(r,500))}
  if(!status?.state.lastCandle||status.lastError)throw Error(`Paper alarm did not process a candle: ${status?.lastError||'timeout'}`);
+ const blocked=await fetch(`${base}/paper/fixture/reset`,{method:'POST',headers,body:'{}'});if(blocked.status!==400)throw Error('Reset accepted while running');
  await call('stop',{});await stopWorker();await boot();const recovered=await call('status');
  if(recovered.state.running||recovered.nextAlarm!==null||recovered.state.lastCandle!==status.state.lastCandle)throw Error('Paper stop or restart recovery failed');
+ const reset=await call('reset',{});if(!reset.archived)throw Error('Paper reset was not archived');await call('deploy',{pair:'ETHZAR',code,balance:1000,allocation:1000,riskPercent:1,dailyLossPercent:3});
  console.log(JSON.stringify({status:'passed',source:'mock VALR',paperOnly:true,candleProcessed:true,stopRecovered:true}));
 }catch(error){console.error(output.slice(-900));throw error}finally{await stopWorker();await new Promise(r=>mock.close(r));await rm(dir,{recursive:true,force:true})}

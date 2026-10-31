@@ -13,7 +13,7 @@ export default {
  async fetch(request:Request,env:Env){
   if(!await authorized(request.headers.get('Authorization'),env.VALR_PAPER_INTERNAL_SECRET))return json({error:'Internal authorization required'},401);
   const parts=new URL(request.url).pathname.split('/').filter(Boolean),id=parts[1],action=parts[2];
-  if(parts.length!==3||parts[0]!=='paper'||!/^[a-f0-9]{64}$/.test(id||'')||!['deploy','start','stop','status'].includes(action))return json({error:'Unknown paper route'},404);
+  if(parts.length!==3||parts[0]!=='paper'||!/^[a-f0-9]{64}$/.test(id||'')||!['deploy','start','stop','status','reset'].includes(action))return json({error:'Unknown paper route'},404);
   if((action==='status'&&request.method!=='GET')||(action!=='status'&&request.method!=='POST'))return json({error:'Invalid method'},405);
   if(action==='deploy'&&env.STRATEGY_ISOLATION_VERIFIED!=='true')return json({error:'Paper deployment awaits strategy isolation verification.'},503);
   const body=request.method==='POST'?await request.text():undefined;if(body&&body.length>200_000)return json({error:'Paper request is too large'},413);

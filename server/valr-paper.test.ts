@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { processPaperCandle, type PaperState } from '../workers/valr-paper';
+import { processPaperCandle, validatePaperReset, type PaperState } from '../workers/valr-paper';
 
 const risk = { allocation:1000, riskPercent:1, dailyLossPercent:3, timeframeSeconds:60 };
 const spec = { baseDecimalPlaces:3, minBaseAmount:0.01, maxBaseAmount:100, minQuoteAmount:10, maxQuoteAmount:10000 };
@@ -47,4 +47,11 @@ it('limits a queued trade to the remaining daily loss budget and blocks at the l
   expect(nearlyExhausted.position?.quantity).toBe(0.1);
   const exhausted=processPaperCandle({...queued,balance:970},candle(120),wait,spec,risk);
   expect(exhausted.position).toBeNull();expect(exhausted.lastResult).toContain('Daily paper loss limit');
+});
+
+it('requires a stopped robot and explicit acknowledgement of an open simulated position before reset',()=>{
+  const state=init();expect(()=>validatePaperReset(state,true)).toThrow('Stop');
+  const open={...state,running:false,position:{quantity:1,entry:100,stopLoss:90,takeProfit:120}};
+  expect(()=>validatePaperReset(open,false)).toThrow('Acknowledge');
+  expect(()=>validatePaperReset(open,true)).not.toThrow();
 });

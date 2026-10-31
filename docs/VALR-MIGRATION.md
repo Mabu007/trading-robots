@@ -48,7 +48,11 @@ is not live execution. SELL short signals are rejected in spot paper mode;
 fees and slippage are not modelled by this initial paper simulator. It starts
 with 200 closed candles per timeframe, reports missing candles and refuses to
 process beyond 5,000 replay candles in total; the scheduler retries errors.
-Operators must review these limits before use.
+A stopped paper instance can be reset from its deployment dialog. Reset
+archives its simulated state and candle history and starts a fresh simulation;
+an open simulated position requires explicit acknowledgement. It does not
+touch a VALR account or a real position. Operators must review these limits
+before use.
 Paper account configuration is pinned for the instance's lifetime.
 
 Personal OpenRouter keys and selected models are encrypted separately with a
