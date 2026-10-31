@@ -33,8 +33,8 @@ limiter. VALR's public rate limits, historical depth, and pagination behavior
 must be validated in the target deployment. Unit tests use mocked VALR responses;
 ETHZAR H1, H4 and two successive 100-row M1 pages were also queried successfully
 against VALR on 31 October 2026. This does not establish full historical depth.
-A 429 is surfaced
-as an error and is not retried automatically.
+The backtest client waits one minute and retries rate-limited pages twice; a
+failure after those retries stops the run rather than returning partial data.
 
 The branch contains a standalone spot-only paper simulation and serialized
 durable-state runtime with mock tests for restarts, duplicate candles, stop,

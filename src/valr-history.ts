@@ -3,10 +3,16 @@ import type { Candle } from './types';
 
 const periods:Record<string,number> = {m1:60,m5:300,m15:900,m30:1800,h1:3600,h4:14400,d1:86400};
 type Page = { candles:Candle[]; missingCandles:number; observedGaps:number };
+function waitForRetry(signal?:AbortSignal){return new Promise<void>((resolve,reject)=>{
+ if(signal?.aborted)return reject(new DOMException('Cancelled','AbortError'));
+ const timer=globalThis.setTimeout(()=>{signal?.removeEventListener('abort',abort);resolve()},60_000);
+ const abort=()=>{globalThis.clearTimeout(timer);signal?.removeEventListener('abort',abort);reject(new DOMException('Cancelled','AbortError'))};
+ signal?.addEventListener('abort',abort,{once:true});
+})}
 
 // Fetch successive bounded pages. A failure ends the run rather than silently
 // using an incomplete subset of the requested historical period.
-export async function valrHistory(body:{asset:string;timeframe:string;from:string;to:string},signal?:AbortSignal){
+export async function valrHistory(body:{asset:string;timeframe:string;from:string;to:string},signal?:AbortSignal,onRetry?:()=>void){
  const duration=periods[body.timeframe];
  const from=Date.parse(body.from)/1000,to=Date.parse(body.to)/1000;
  if(!duration||!Number.isFinite(from)||!Number.isFinite(to))throw Error('Choose a valid VALR market, timeframe and date range.');
@@ -20,7 +26,12 @@ export async function valrHistory(body:{asset:string;timeframe:string;from:strin
  for(let cursor=start;cursor<end;cursor+=pageSpan){
   if(signal?.aborted)throw new DOMException('Cancelled','AbortError');
   const pageEnd=Math.min(cursor+pageSpan,end);
-  const page=await postApiJson<Page>('/api/valr/candles',{asset:body.asset,timeframe:body.timeframe,from:new Date(cursor*1000).toISOString(),to:new Date(pageEnd*1000).toISOString()},'VALR market data',signal);
+  let page:Page|undefined;
+  for(let attempt=0;attempt<3;attempt++){
+   try{page=await postApiJson<Page>('/api/valr/candles',{asset:body.asset,timeframe:body.timeframe,from:new Date(cursor*1000).toISOString(),to:new Date(pageEnd*1000).toISOString()},'VALR market data',signal);break}
+   catch(error){if(!(error instanceof Error)||!/rate limit/i.test(error.message)||attempt===2)throw error;onRetry?.();await waitForRetry(signal)}
+  }
+  if(!page)throw Error('VALR market data is unavailable.');
   if(!Array.isArray(page.candles)||!Number.isFinite(page.missingCandles)||page.missingCandles<0)throw Error('VALR returned an invalid historical page.');
   candles.push(...page.candles);missingCandles+=page.missingCandles;
  }
