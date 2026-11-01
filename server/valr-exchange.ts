@@ -45,7 +45,7 @@ export class ValrExchange {
  }
  async limitBuy(pair:string,quantity:string,price:string,customerOrderId:string){
   if(!pairOk(pair)||!positive(quantity)||!positive(price)||!idOk(customerOrderId))throw Error('Invalid limit order');
-  const result=await this.call('POST','/v1/orders/limit',{side:'BUY',quantity,price,pair,customerOrderId,allowMargin:false,postOnly:false,timeInForce:'FOK'}) as {id?:unknown};
+  const result=await this.call('POST','/v2/orders/limit',{side:'BUY',quantity,price,pair,customerOrderId,allowMargin:false,postOnly:false,timeInForce:'FOK'}) as {id?:unknown};
   if(typeof result?.id!=='string'||!result.id)throw Error('VALR did not acknowledge an order ID; reconcile before retrying.');
   return {orderId:result.id}; // Accepted is not proof of a fill.
  }

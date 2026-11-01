@@ -1,4 +1,4 @@
-// Pure verification for an eventual live coordinator. Never makes network calls.
+// Pure exchange-fill verification for the live coordinator. Never makes network calls.
 // Values are fixed-decimal strings to avoid rounding the protected quantity up.
 const SCALE=10n**18n;
 function decimal(value:unknown):bigint {
@@ -30,4 +30,24 @@ export function verifySpotProtection(value:Record<string,unknown>,expected:{pair
  if(decimal(value.quantity)!==decimal(expected.quantity)||decimal(value.stopLossTriggerPrice)!==decimal(expected.stopLoss)||decimal(value.takeProfitTriggerPrice)!==decimal(expected.takeProfit))throw Error('Protection does not match the filled position');
  if(value.stopLossPlacePrice!=='-1'||value.takeProfitPlacePrice!=='-1')throw Error('Protection order settings differ from the approved order');
  return {orderId:value.orderId};
+}
+
+// Settlement requires exchange summaries linked by the server's unique client IDs.
+// A triggered conditional alone is never treated as a fill. All entry cost is
+// charged to the closed quantity (including any unsellable entry dust).
+export function reconcileSpotExit(entry:Record<string,unknown>,exit:Record<string,unknown>,expected:{pair:string;entryId:string;entryOrderId:string;protectionId:string;quantity:string;baseCurrency:string;quoteCurrency:string;now:number}){
+ if(entry.orderId!==expected.entryOrderId||entry.customerOrderId!==expected.entryId||entry.currencyPair!==expected.pair||String(entry.orderSide).toLowerCase()!=='buy')throw Error('Entry accounting identity mismatch');
+ if(exit.customerOrderId!==expected.protectionId||exit.currencyPair!==expected.pair||String(exit.orderSide).toLowerCase()!=='sell'||typeof exit.orderId!=='string'||!exit.orderId||exit.orderId===entry.orderId)throw Error('Exit is not linked to the protective client order ID');
+ if(exit.orderStatusType!=='Filled'||decimal(exit.remainingQuantity)!==0n||decimal(exit.totalExecutedQuantity)!==decimal(expected.quantity))throw Error('Protective exit is not fully filled');
+ if(!['Filled','Cancelled','Failed'].includes(String(entry.orderStatusType)))throw Error('Entry accounting is not terminal');
+ for(const record of [entry,exit])if(record.feeCurrency!==expected.baseCurrency&&record.feeCurrency!==expected.quoteCurrency)throw Error('Unknown settlement fee currency');
+ const entryFee=decimal(entry.totalFee),exitFee=decimal(exit.totalFee),entryQuantity=decimal(entry.totalExecutedQuantity),exitQuantity=decimal(exit.totalExecutedQuantity);
+ const owned=entryQuantity-(entry.feeCurrency===expected.baseCurrency?entryFee:0n);
+ if(owned<=0n||exitQuantity+(exit.feeCurrency===expected.baseCurrency?exitFee:0n)>owned)throw Error('Exit exceeds the acquired base balance');
+ const spent=decimal(entry.total)+(entry.feeCurrency===expected.quoteCurrency?entryFee:0n),received=decimal(exit.total)-(exit.feeCurrency===expected.quoteCurrency?exitFee:0n);
+ if(spent<=0n||decimal(exit.total)<=0n||received<0n)throw Error('Invalid exchange settlement totals');
+ const closedAt=typeof exit.orderUpdatedAt==='string'?Date.parse(exit.orderUpdatedAt):NaN;
+ const openedAt=Date.parse(String(entry.orderCreatedAt));
+ if(!Number.isSafeInteger(openedAt)||!Number.isSafeInteger(closedAt)||closedAt>expected.now+1000||closedAt<openedAt)throw Error('Invalid exchange settlement time');
+ return {eventId:exit.orderId,closedAt,utcDay:new Date(closedAt).toISOString().slice(0,10),loss:format(spent>received?spent-received:0n),cost:format(spent),proceeds:format(received)};
 }

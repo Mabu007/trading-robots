@@ -5,7 +5,7 @@ import {verifiedRevenue,type Payment} from '../shared/trading.ts';
 export const accessId=(botId:string,uid:string)=>`${botId}_${recordId(uid)}`;
 export class Marketplace {
   readonly store:RecordStore;
-  constructor(store:RecordStore,_unused?:unknown){this.store=store;}
+  constructor(store:RecordStore){this.store=store;}
   async publish(publication:any){
     const current=await this.store.get(`marketplaceBots/${publication.id}`);
     if(current&&current.creatorId!==publication.ownerUid)throw Error('Creator ownership mismatch');
@@ -25,6 +25,11 @@ export class Marketplace {
     return entitlement;
   }
   async view(bot:any,visitorKey:string){if(!await this.store.get(`marketplaceBots/${bot.id}`))await this.publish(bot);const day=new Date().toISOString().slice(0,10),id=createHash('sha256').update(`${bot.id}:${visitorKey}:${day}`).digest('hex');await this.store.create(`marketplaceEvents/view_${id}`,{id,type:'view',botId:bot.id,creatorId:bot.ownerUid,createdAt:Date.now()});}
+  async removeOrphanListing(uid:string,id:string){
+    const bot=await this.owned(uid,id);if(bot.published)throw Error('Make this listing private before deleting it');
+    if(await this.store.get(`users/${uid}/bots/${bot.privateBotId}`))throw Error('Delete the saved robot before removing its listing');
+    if(!this.store.remove)throw Error('Listing deletion is unavailable');await this.store.remove(`marketplaceBots/${id}`);return {deleted:true};
+  }
   async unpublish(uid:string,id:string){
     const bot=await this.store.get(`marketplaceBots/${id}`);if(!bot)return;
     await this.owned(uid,id);await this.store.put(`marketplaceBots/${id}`,{...bot,published:false,publicCreatorId:'',updatedAt:Date.now()});
@@ -33,7 +38,8 @@ export class Marketplace {
 export const marketplace=new Marketplace(new FirestoreStore());
 type Dependencies={uid:(req:Request,res:Response)=>Promise<string|null>;read:(key:string)=>Promise<string|null>;write:(key:string,body:string)=>Promise<void>;root:(uid:string,id:string)=>string};
 export function marketplaceRoutes(app:Express,deps:Dependencies,service=marketplace){
- const route=(method:'get'|'post',path:string,handler:(uid:string,req:Request)=>Promise<any>)=>app[method](path,async(req,res)=>{const uid=await deps.uid(req,res);if(!uid)return;res.setHeader('Cache-Control','private, no-store');try{if(!FirestoreStore.configured()&&service===marketplace)return res.status(503).json({error:'Marketplace server credentials are not configured yet.'});res.json(await handler(uid,req));}catch(e){res.status(400).json({error:e instanceof Error?e.message:'Marketplace request failed.'})}});
+ const route=(method:'get'|'post'|'delete',path:string,handler:(uid:string,req:Request)=>Promise<any>)=>app[method](path,async(req,res)=>{const uid=await deps.uid(req,res);if(!uid)return;res.setHeader('Cache-Control','private, no-store');try{if(!FirestoreStore.configured()&&service===marketplace)return res.status(503).json({error:'Marketplace server credentials are not configured yet.'});res.json(await handler(uid,req));}catch(e){res.status(400).json({error:e instanceof Error?e.message:'Marketplace request failed.'})}});
+ route('delete','/api/marketplace/bots/:id',async(uid,req)=>{const id=String(req.params.id);if(!/^[A-Za-z0-9_-]{1,100}$/.test(id))throw Error('Invalid listing ID');return service.removeOrphanListing(uid,id)});
  route('get','/api/marketplace/creator',async uid=>{const [bots,transactions]=await Promise.all([service.store.query('marketplaceBots','creatorId',uid),service.store.query('marketplaceTransactions','creatorId',uid)]);const revenue=verifiedRevenue(transactions.filter(t=>t.currency==='ZAR') as Payment[]);return {bots,revenue};});
  route('post','/api/marketplace/drafts/:id/register',async(uid,req)=>{
   const privateId=String(req.params.id);if(!/^[A-Za-z0-9_-]{1,100}$/.test(privateId))throw Error('Invalid private robot ID');const bot=await service.store.get(`users/${uid}/bots/${privateId}`);if(!bot)throw Error('Save your robot before publishing.');

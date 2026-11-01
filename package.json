@@ -13,7 +13,9 @@
     "check:runtime": "tsc -p workers/tsconfig.json",
     "test:valr-paper": "node scripts/test-valr-paper.mjs",
     "worker:valr:build": "wrangler deploy --dry-run --config workers/wrangler.valr-preview.jsonc",
-    "test:valr-live": "node scripts/test-valr-live.mjs"
+    "test:valr-live": "node scripts/test-valr-live.mjs",
+    "test:valr-live-runtime": "node scripts/test-valr-live-runtime.mjs",
+    "worker:valr:live:build": "wrangler deploy --dry-run --config workers/wrangler.valr-live.jsonc"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1156.0",

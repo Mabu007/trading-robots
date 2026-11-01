@@ -1,20 +1,19 @@
 import {sizeValrSpotBuy,type Snapshot,type Specification,type Limits} from '../shared/valr-risk';
-import {reconcileSpotBuy,verifySpotProtection} from './valr-fill-reconciliation';
+import {reconcileSpotBuy,verifySpotProtection,reconcileSpotExit} from './valr-fill-reconciliation';
 import {ValrLossLedger} from './valr-loss-ledger';
 
 type Config={pair:string;limits:Omit<Limits,'authorized'>};
 type Signal={id:string;candleClose:number;stopLoss:string;takeProfit:string};
 type Market={baseCurrency:string;quoteCurrency:string;spec:Specification;account:Omit<Snapshot,'dayStartEquity'|'dailyLoss'>;takerFeeBps:number;protectiveSlippageBps:number};
 type Phase='entry_pending'|'entry_unknown'|'unprotected'|'protection_pending'|'protection_unknown'|'protected';
-type Active={botId:string;signalId:string;pair:string;entryId:string;protectionId:string;entryOrderId?:string;protectionOrderId?:string;quantity:string;limitPrice:string;stopLoss:string;takeProfit:string;expiresAt:number;baseCurrency:string;quoteCurrency:string;baseDecimalPlaces:number;minBaseAmount:string;minQuoteAmount:string;slippageBps:number;phase:Phase;protectableQuantity?:string;lastError?:string};
-type State={bots:Record<string,{running:boolean;config:Config}>;active:Active|null};
+type Active={botId:string;signalId:string;pair:string;entryId:string;protectionId:string;entryOrderId?:string;protectionOrderId?:string;quantity:string;limitPrice:string;stopLoss:string;takeProfit:string;expiresAt:number;baseCurrency:string;quoteCurrency:string;baseDecimalPlaces:number;minBaseAmount:string;minQuoteAmount:string;slippageBps:number;phase:Phase;entrySummary?:Record<string,unknown>;protectableQuantity?:string;lastError?:string};
+type State={bots:Record<string,{running:boolean;config:Config}>;active:Active|null;lastSettlement?:{eventId:string;closedAt:number;utcDay:string;loss:string;cost:string;proceeds:string}};
 type Storage={get<T>(key:string):Promise<T|undefined>;put(key:string,value:unknown):Promise<void>};
-type Provider={snapshot:(pair:string)=>Promise<Market>;submitEntry:(order:Active)=>Promise<{orderId:string}>;entrySummary:(order:Active)=>Promise<Record<string,unknown>|null>;submitProtection:(order:Active)=>Promise<{orderId:string}>;protectionStatus:(order:Active)=>Promise<Record<string,unknown>|null>};
+type Provider={snapshot:(pair:string)=>Promise<Market>;submitEntry:(order:Active)=>Promise<{orderId:string}>;entrySummary:(order:Active)=>Promise<Record<string,unknown>|null>;submitProtection:(order:Active)=>Promise<{orderId:string}>;protectionStatus:(order:Active)=>Promise<Record<string,unknown>|null>;exitSummary?:(order:Active)=>Promise<Record<string,unknown>|null>};
 const safeId=(v:string)=>typeof v==='string'&&/^[A-Za-z0-9_-]{1,100}$/.test(v);
 async function orderIds(bot:string,signal:string){const bytes=new TextEncoder().encode(`valr-live-v1\0${bot}\0${signal}`);const hash=new Uint8Array(await crypto.subtle.digest('SHA-256',bytes));const hex=[...hash].map(x=>x.toString(16).padStart(2,'0')).join('').slice(0,44);return {entryId:`tv-${hex}`,protectionId:`tp-${hex}`}}
-// This coordinator is a testable safety component, not yet exposed by any
-// route. A separate Durable Object must own one instance per VALR customer;
-// all provider methods must use server-side credentials and verified data.
+// Owned by one serialized Durable Object per verified VALR connection.
+// Provider methods use server-side credentials and verified exchange data.
 export class ValrLiveCoordinator {
  private tail:Promise<unknown>=Promise.resolve();private storage:Storage;private provider:Provider;private now:()=>number;private ledger:ValrLossLedger;
  constructor(storage:Storage,provider:Provider,now=Date.now){this.storage=storage;this.provider=provider;this.now=now;this.ledger=new ValrLossLedger(storage)}
@@ -47,7 +46,7 @@ export class ValrLiveCoordinator {
   const stopSlippage=Math.max(bot.config.limits.slippageBps,bot.config.limits.stopSlippageBps??0,market.protectiveSlippageBps);
   const account={...market.account,dayStartEquity:ledger.dayStartEquity,dailyLoss:ledger.dailyLoss},limits={...bot.config.limits,feeBps:Math.max(bot.config.limits.feeBps,market.takerFeeBps),stopSlippageBps:stopSlippage,authorized:true};
   const size=sizeValrSpotBuy(signal,account,market.spec,limits,this.now());
-  // A future execution gateway must reject an entry that arrives after this
+  // The execution bridge rejects an entry that arrives after this
   // deadline; network transit must not turn a fresh quote into a stale trade.
   const expiresAt=Math.min(signal.candleClose+120000,market.account.quoteTime+limits.maxPriceAgeMs,Date.parse(`${utcDay}T00:00:00.000Z`)+86400000-1);
   const active:Active={botId,signalId:signal.id,pair:bot.config.pair,...ids,quantity:size.baseAmount,limitPrice:size.entryEstimate,stopLoss:size.stopLoss,takeProfit:size.takeProfit,expiresAt,baseCurrency:market.baseCurrency,quoteCurrency:market.quoteCurrency,baseDecimalPlaces:market.spec.baseDecimalPlaces,minBaseAmount:market.spec.minBaseAmount,minQuoteAmount:market.spec.minQuoteAmount,slippageBps:stopSlippage,phase:'entry_pending'};
@@ -68,10 +67,9 @@ export class ValrLiveCoordinator {
     if(active.entryOrderId && summary.orderId!==active.entryOrderId)throw Error('Entry summary does not match the acknowledged exchange order');
     const result=reconcileSpotBuy(summary,{pair:active.pair,customerOrderId:active.entryId,baseCurrency:active.baseCurrency,quoteCurrency:active.quoteCurrency,baseDecimalPlaces:active.baseDecimalPlaces,minBaseAmount:active.minBaseAmount,minQuoteAmount:active.minQuoteAmount,maxBaseAmount:active.quantity,limitPrice:active.limitPrice,stopLoss:active.stopLoss,slippageBps:active.slippageBps});
     if(!result.filled){state.active=null;await this.save(state);return state}
-    active.protectableQuantity=result.protectableQuantity;active.phase='unprotected';active.lastError='Fill verified; protection is not yet confirmed';await this.save(state);
+    active.entryOrderId=result.exchangeOrderId;active.entrySummary=summary;active.protectableQuantity=result.protectableQuantity;active.phase='unprotected';active.lastError='Fill verified; protection is not yet confirmed';await this.save(state);
    }
    if(active.phase==='unprotected'){
-    if(!state.bots[active.botId]?.running){active.lastError='Robot stopped with an unprotected fill; take action in VALR';await this.save(state);return state}
     active.phase='protection_pending';await this.save(state);
     try{const result=await this.provider.submitProtection(active);if(typeof result?.orderId!=='string'||!result.orderId)throw Error('Missing acknowledgement');active.protectionOrderId=result.orderId;active.phase='protection_unknown'}catch{active.phase='protection_unknown';active.lastError='Protection outcome is unknown; reconciling without resubmission'}
     await this.save(state);
@@ -83,10 +81,21 @@ export class ValrLiveCoordinator {
     const protection=await this.provider.protectionStatus(active);
     if(!protection){active.phase='protection_unknown';active.lastError='Protection has not been confirmed; inspect VALR';await this.save(state);return state}
     if(active.protectionOrderId && protection.orderId!==active.protectionOrderId)throw Error('Protection status does not match the acknowledged exchange order');
+    if(protection.orderStatusType==='Triggered'){
+     verifySpotProtection({...protection,orderStatusType:'Placed'},{pair:active.pair,customerOrderId:active.protectionId,quantity:active.protectableQuantity!,stopLoss:active.stopLoss,takeProfit:active.takeProfit});
+     const exit=await this.provider.exitSummary?.(active);if(!exit||!active.entrySummary||!active.entryOrderId)throw Error('Triggered protection awaits a linked exchange fill');
+     const settlement=reconcileSpotExit(active.entrySummary,exit,{pair:active.pair,entryId:active.entryId,entryOrderId:active.entryOrderId,protectionId:active.protectionId,quantity:active.protectableQuantity!,baseCurrency:active.baseCurrency,quoteCurrency:active.quoteCurrency,now:this.now()});
+     const flat=await this.provider.snapshot(active.pair);if(!flat.account.reconciled||flat.account.openOrders||flat.account.openPositions)throw Error('Exit filled; account is not reconciled flat');
+     await this.ledger.beginDay(settlement.utcDay,active.quoteCurrency,flat.account.availableQuote,true);
+     await this.ledger.recordVerifiedLoss(settlement.utcDay,active.quoteCurrency,settlement.eventId,settlement.loss);
+     // The ledger write is idempotent and precedes unlocking. A crash here
+     // replays the same verified exit without counting its loss twice.
+     state.lastSettlement=settlement;state.active=null;await this.save(state);return state;
+    }
     verifySpotProtection(protection,{pair:active.pair,customerOrderId:active.protectionId,quantity:active.protectableQuantity!,stopLoss:active.stopLoss,takeProfit:active.takeProfit});
     active.phase='protected';delete active.lastError;await this.save(state);
    }
-  }catch(error){active.lastError=error instanceof Error?error.message.slice(0,250):'Reconciliation failed';await this.save(state)}
+  }catch(error){state.active=active;active.lastError=error instanceof Error?error.message.slice(0,250):'Reconciliation failed';await this.save(state)}
   return state;
  })}
 }
