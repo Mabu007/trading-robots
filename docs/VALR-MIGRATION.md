@@ -1,4 +1,11 @@
-# VALR migration: initial market-data foundation
+# VALR migration: market-data and runtime status
+
+The workspace backtester calls only the VALR history adapter. The former
+R2 market-data and import HTTP endpoints, XAUUSD AI price context, and
+cTrader connection/account routes have been removed from this branch. R2
+continues to hold private robot files and encrypted credentials. Legacy
+runtime and stop controls remain until production instances are inventoried
+and stopped. No saved user bots have been deleted by this change.
 
 This branch is a partial implementation. The workspace selects VALR markets
 and requests paginated VALR history for backtests. New cTrader starts,
