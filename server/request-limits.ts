@@ -1,5 +1,5 @@
 import type {Request,Response,NextFunction} from 'express';
-// Per-instance application guard; cTrader's global gateway throttles are separate.
+// Per-instance application guard.
 // Enforce distributed ingress limits at the production edge as well.
 const windows=new Map<string,{until:number;count:number}>();
 export function requestLimit(req:Request,res:Response,next:NextFunction){

@@ -6,13 +6,11 @@ import { deleteR2Object, getR2Config, listR2Objects, readR2Object, writeR2Object
 import {recordAIUsage} from './usage.ts';
 import { BotEconomy, economyRoutes } from './bot-economy.ts';
 import { sharedBotRoutes } from './shared-bots.ts';
-import { marketplace,marketplaceRoutes,assertProjectEditable } from './marketplace.ts';
+import { marketplace,marketplaceRoutes } from './marketplace.ts';
 import { FirestoreStore } from './firestore-store.ts';
-import { gatewayRequest,gatewayHealth } from './broker-routes.ts';
 import { ValrMarketData } from './valr-market-data.ts';
 import { valrAccountRoutes } from './valr-routes.ts';
 import { valrPaperRoutes } from './valr-paper-routes.ts';
-import { legacyProviderGuard } from './legacy-provider-guard.ts';
 import { OpenRouterAccounts, openRouterRoutes } from './openrouter-account.ts';
 import { readOwnedBotAsset } from './firebase-owned-bot.ts';
 
@@ -20,7 +18,6 @@ const app = express();
 const valrMarketData = new ValrMarketData();
 app.use(['/api/marketplace','/api/brokers','/api/economy','/api/valr','/api/openrouter'],requestLimit);
 app.use(express.json({ limit: '10mb' }));
-app.use(legacyProviderGuard);
 
 
 type FirebaseClaims = { email?:string; email_verified?:boolean; name?:string; sub?: string; user_id?: string; aud?: string; iss?: string; exp?: number; iat?: number };
@@ -97,7 +94,7 @@ valrPaperRoutes(app,{uid:firebaseUidOrReply,bot:async(uid,id,req)=>{
 }});
 economyRoutes(app,economy,async(req,res)=>{const uid=await firebaseUidOrReply(req,res);return uid?res.locals.identity:null;});
 const publications = sharedBotRoutes(app, { read: readR2Object, write: writeR2Object, remove: deleteR2Object, uid: firebaseUidOrReply, root: userBotRoot,...(FirestoreStore.configured()?{onPublish:(bot:any)=>economy.legacyPublish(bot),onAcquire:async(uid:string,id:string,bot:any)=>{if(!await marketplace.store.get(`marketplaceBots/${id}`))await marketplace.publish(bot);return economy.legacyCopy(uid,bot)},onUnpublish:(uid:string,id:string)=>marketplace.unpublish(uid,id),onView:(bot:any,visitor:string)=>marketplace.view(bot,visitor)}:{}) });
-marketplaceRoutes(app,{uid:firebaseUidOrReply,read:readR2Object,write:writeR2Object,root:userBotRoot,gateway:gatewayRequest,gatewayHealth,checkLicense:(uid,botId,code)=>economy.checkDeployment(uid,botId,code),ensureMember:(uid,botId,req)=>economy.ensureMember((req as any).verifiedIdentity,botId),versionSource:(uid,versionId)=>economy.source(uid,versionId)});
+marketplaceRoutes(app,{uid:firebaseUidOrReply,read:readR2Object,write:writeR2Object,root:userBotRoot});
 
 app.put('/api/user-bots/:botId/current', async (req, res) => {
   const uid = await firebaseUidOrReply(req, res); if (!uid) return;
@@ -106,7 +103,6 @@ app.put('/api/user-bots/:botId/current', async (req, res) => {
   if (!validBotId(botId)) return res.status(400).json({ error: 'Robot ID is invalid.' });
   if (typeof code !== 'string' || !code.trim() || code.length > 180_000) return res.status(400).json({ error: 'Robot code must be between 1 and 180,000 characters.' });
   if (!getR2Config()) return res.status(503).json({ error: 'Robot storage is not configured on the server.' });
-  try { await assertProjectEditable(marketplace,readR2Object,userBotRoot,uid,botId); } catch(error) { return res.status(409).json({error:error instanceof Error?error.message:'Cannot verify robot state.'}); }
   const storageKey = `${userBotRoot(uid, botId)}/current.json`;
   try {
     await writeR2Object(storageKey, JSON.stringify({ schemaVersion: 1, userId: uid, botId, code, updatedAt: new Date().toISOString() }));
@@ -138,7 +134,6 @@ app.delete('/api/user-bots/:botId', async (req, res) => {
   const { botId } = req.params;
   if (!validBotId(botId)) return res.status(400).json({ error: 'Robot ID is invalid.' });
   if (!getR2Config()) return res.status(503).json({ error: 'Robot storage is not configured.' });
-  try { await assertProjectEditable(marketplace,readR2Object,userBotRoot,uid,botId); } catch(error) { return res.status(409).json({error:error instanceof Error?error.message:'Cannot verify robot state.'}); }
   try {
     const prefix = `${userBotRoot(uid, botId)}/`;
     const keys = await listR2Objects(prefix, 1001);
@@ -160,7 +155,6 @@ app.put('/api/user-bots/:botId/backtest', async (req, res) => {
   if (!state || typeof state !== 'object' || !state.result || !Array.isArray(state.result.candles) || !Array.isArray(state.result.trades) || !Array.isArray(state.logs)) {
     return res.status(400).json({ error: 'The completed backtest data is incomplete.' });
   }
-  try { await assertProjectEditable(marketplace,readR2Object,userBotRoot,uid,botId); } catch(error) { return res.status(409).json({error:error instanceof Error?error.message:'Cannot verify robot state.'}); }
   const serialized = JSON.stringify({ ...state, schemaVersion: 1, userId: uid, botId, savedAt: new Date().toISOString() });
   if (Buffer.byteLength(serialized, 'utf8') > 9_000_000) return res.status(413).json({ error: 'This backtest is too large to sync. Shorten the date range and run it again.' });
   try {
@@ -232,7 +226,6 @@ app.post('/api/user-bots/:botId/versions', async (req, res) => {
   if (!validBotId(botId)) return res.status(400).json({ error: 'Robot ID is invalid.' });
   if (typeof code !== 'string' || !code.trim() || code.length > 180_000) return res.status(400).json({ error: 'Robot code must be between 1 and 180,000 characters.' });
   if (!getR2Config()) return res.status(503).json({ error: 'Robot storage is not configured on the server.' });
-  try { await assertProjectEditable(marketplace,readR2Object,userBotRoot,uid,botId); } catch(error) { return res.status(409).json({error:error instanceof Error?error.message:'Cannot verify robot state.'}); }
   const id = `${Date.now()}-${randomUUID()}`;
   const createdAt = new Date().toISOString();
   const storageKey = `${userBotRoot(uid, botId)}/versions/${id}.json`;

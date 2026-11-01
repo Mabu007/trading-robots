@@ -168,10 +168,7 @@ export class BotEconomy {
   }
   async copyProject(who:Identity,botId:string){
     id(botId);const saved=await this.current(who.uid,botId),original=await this.store.get(`users/${who.uid}/bots/${botId}`);if(!original)throw Error('Robot unavailable.');
-    let code=saved.code;const pointerRaw=await this.storage.read(`${this.storage.root(who.uid,botId)}/publication.json`);
-    if(pointerRaw){const listingId=id(JSON.parse(pointerRaw).id),listing=await this.trading.owned(who.uid,listingId);if(listing.privateBotId!==botId)throw Error('Robot pointer mismatch.');const deployment=await this.store.get(`deployments/${listingId}`);
-      if(deployment){const observed=await this.trading.deploymentStatus(who.uid,listingId);if(observed.running){if(!/^[a-f0-9]{64}$/.test(String(observed.version)))throw Error('Running version is unavailable.');const pinned=await this.storage.read(`runtime-code/${listingId}/${observed.version}.js`);if(!pinned||hash(pinned)!==observed.version)throw Error('Running strategy snapshot is unavailable or failed integrity validation.');code=pinned;}}
-    }
+    const code=saved.code;
     const fork=await this.store.get(`botForks/${recordId(who.uid)}_${botId}`);if(botId.startsWith('shared-')&&!fork)throw Error('This shared copy has no verified license record.');
     const copyId=`copy-${randomUUID()}`,storageKey=`${this.storage.root(who.uid,copyId)}/current.json`,now=new Date().toISOString();
     if(fork)await this.store.create(`botForks/${recordId(who.uid)}_${copyId}`,{...fork,id:copyId,uid:who.uid,createdAt:Date.now()});
@@ -216,7 +213,7 @@ export class BotEconomy {
   }
   async memberList(who:Identity,after?:string){
     const page=await this.page('botMembers','creatorId',who.uid,after);
-    const items:RecordData[]=await Promise.all(page.items.map(async m=>{const [broker,sub,bot]=await Promise.all([this.store.get(`brokerConnections/${recordId(m.uid)}`),this.store.get(`botSubscribers/${m.id}`),this.store.get(`marketplaceBots/${m.botId}`)]);return {...m,botName:bot?.name||m.botId,status:m.expiresAt&&m.expiresAt<=Date.now()?'expired':m.status,brokerConnected:Boolean(broker?.connected),executionEnabled:m.status==='active'&&(!m.expiresAt||m.expiresAt>Date.now())&&sub?.status==='active'};}));return {...page,items};
+    const items:RecordData[]=await Promise.all(page.items.map(async m=>{const bot=await this.store.get(`marketplaceBots/${m.botId}`);return {...m,botName:bot?.name||m.botId,status:m.expiresAt&&m.expiresAt<=Date.now()?'expired':m.status,brokerConnected:null,executionEnabled:false};}));return {...page,items};
   }
   async summary(who:Identity){
     const profile=await this.profile(who);const [published,acquired,followers,members]=await Promise.all([this.count('marketplaceBots','publicCreatorId',who.uid),this.count('botAcquisitions','uid',who.uid),this.count('creatorFollows','activeCreatorId',who.uid),this.count('botMembers','creatorId',who.uid)]);
