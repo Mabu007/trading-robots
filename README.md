@@ -2,6 +2,8 @@
 
 Build and edit JavaScript strategies, backtest them using VALR market history, and deploy spot BUY strategies to the isolated VALR paper runtime. Connect a personal VALR account to inspect balances and account activity. Live execution code is implemented behind disabled operator gates and explicit per-strategy authorization. Production live orders remain disabled until the live Worker, shared internal secret, dedicated-account connection allowlist and real exchange verification are configured.
 
+Deploy offers **Demo (paper)** and **Live** in one window. Demo deploys and starts with one action. Live shows connection and Worker readiness checks, requires explicit limits and consent, and remains blocked until production verification passes. See [VALR operations](docs/VALR-OPERATIONS.md) for tested behavior and remaining enablement checks.
+
 ## Development
 
 Use Node 24, run `npm ci`, then `npm run dev`. `npm test`, `npm run build`, `npm run check:runtime`, and `npm run test:valr-paper` validate the app and paper worker. The Vercel production project runs the Vite build and the API in `api/index.ts`.

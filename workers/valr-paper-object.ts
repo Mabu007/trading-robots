@@ -76,6 +76,13 @@ export class ValrPaper extends DurableObject<any> {
   const saved=await this.ctx.storage.get<{state:PaperState}>('paper');
   const period=TF_SECONDS[deployment.config.executionTimeframe],latest=Math.floor((Date.now()/1000-5)/period)*period;
   const cutoff=last===null||saved?.state.resumeLatest?latest:last+2*period;if(cutoff>latest||last!==null&&cutoff<=last+period)return null;
+  // Position exits only need the next exchange candle. Continue monitoring
+  // after the strategy history limit or a strategy failure; never evaluate user
+  // code while an existing simulated position is waiting for its stop/target.
+  if(saved?.state.position){
+   const candles=await fetchValrCandles(deployment.pair,deployment.config.executionTimeframe,cutoff-period,cutoff,fetch,this.valrBase);
+   return {candle:candles[0],decision:{action:'WAIT'},discardPending:true};
+  }
   const stored=await this.ctx.storage.get<Record<string,PaperCandle[]>>('paper-history')||{};
   const datasets:Record<string,PaperCandle[]>={};let total=0;
   for(const tf of deployment.config.timeframes as string[]){

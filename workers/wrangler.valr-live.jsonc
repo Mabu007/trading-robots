@@ -5,6 +5,6 @@
  "workers_dev":true,
  "durable_objects":{"bindings":[{"name":"ACCOUNTS","class_name":"ValrLiveAccount"}]},
  "migrations":[{"tag":"v1","new_sqlite_classes":["ValrLiveAccount"]}],
- "vars":{"VALR_LIVE_ENABLED":"false","VALR_PROTECTION_LINKAGE_VERIFIED":"false","STRATEGY_ISOLATION_VERIFIED":"false"},
+ "vars":{"VALR_CONTROL_URL":"https://trading-robots.vercel.app","VALR_LIVE_ENABLED":"false","VALR_PROTECTION_LINKAGE_VERIFIED":"false","STRATEGY_ISOLATION_VERIFIED":"false"},
  "observability":{"enabled":true}
 }

@@ -11,6 +11,7 @@ import { FirestoreStore } from './firestore-store.ts';
 import { ValrMarketData } from './valr-market-data.ts';
 import { valrAccountRoutes } from './valr-routes.ts';
 import { valrPaperRoutes } from './valr-paper-routes.ts';
+import {ValrAccountLock} from './valr-account-lock.ts';
 import {valrLiveRoutes} from './valr-live-routes.ts';
 import { OpenRouterAccounts, openRouterRoutes } from './openrouter-account.ts';
 import { readOwnedBotAsset } from './firebase-owned-bot.ts';
@@ -89,8 +90,10 @@ const ownedValrBot=async(uid:string,id:string,req:express.Request)=>{
  const [bot,raw]=await Promise.all([FirestoreStore.configured()?marketplace.store.get(`users/${uid}/bots/${id}`):readOwnedBotAsset(uid,id,req.header('authorization')),readR2Object(`${userBotRoot(uid,id)}/current.json`)]);
  if(!bot||!raw)return null;const saved=JSON.parse(raw);if(saved.userId!==uid||saved.botId!==id||typeof saved.code!=='string'||typeof bot.asset!=='string')return null;return {asset:bot.asset,code:saved.code};
 };
-const liveService=valrLiveRoutes(app,{uid:firebaseUidOrReply,bot:ownedValrBot,read:readR2Object,write:writeR2Object,remove:deleteR2Object});
-valrAccountRoutes(app,{uid:firebaseUidOrReply,read:readR2Object,write:writeR2Object,remove:deleteR2Object,beforeChange:uid=>liveService.beforeKeyChange(uid)});
+const valrLock=new ValrAccountLock(marketplace.store);
+const valrExclusive=<T>(uid:string,task:()=>Promise<T>)=>FirestoreStore.configured()?valrLock.run(uid,task):task();
+const liveService=valrLiveRoutes(app,{lockReady:()=>FirestoreStore.configured(),exclusive:valrExclusive,uid:firebaseUidOrReply,bot:ownedValrBot,read:readR2Object,write:writeR2Object,remove:deleteR2Object});
+valrAccountRoutes(app,{uid:firebaseUidOrReply,read:readR2Object,write:writeR2Object,remove:deleteR2Object,beforeChange:uid=>liveService.beforeKeyChange(uid),mutate:valrExclusive});
 valrPaperRoutes(app,{uid:firebaseUidOrReply,bot:ownedValrBot});
 economyRoutes(app,economy,async(req,res)=>{const uid=await firebaseUidOrReply(req,res);return uid?res.locals.identity:null;});
 const publications = sharedBotRoutes(app, { read: readR2Object, write: writeR2Object, remove: deleteR2Object, uid: firebaseUidOrReply, root: userBotRoot,...(FirestoreStore.configured()?{onPublish:(bot:any)=>economy.publishSharedBot(bot),onAcquire:async(uid:string,id:string,bot:any)=>{if(!await marketplace.store.get(`marketplaceBots/${id}`))await marketplace.publish(bot);return economy.acquireSharedBot(uid,bot)},onUnpublish:(uid:string,id:string)=>marketplace.unpublish(uid,id),onView:(bot:any,visitor:string)=>marketplace.view(bot,visitor)}:{}) });
@@ -135,12 +138,14 @@ app.delete('/api/user-bots/:botId', async (req, res) => {
   if (!validBotId(botId)) return res.status(400).json({ error: 'Robot ID is invalid.' });
   if (!getR2Config()) return res.status(503).json({ error: 'Robot storage is not configured.' });
   try {
+    await valrExclusive(uid,async()=>{
     const grant=await liveService.grant(uid);if(grant?.botId===botId)await liveService.beforeKeyChange(uid);
     const prefix = `${userBotRoot(uid, botId)}/`;
     const keys = await listR2Objects(prefix, 1001);
-    if (keys.length > 1000) return res.status(409).json({ error: 'This robot has too many stored versions to delete safely. Contact support.' });
+    if (keys.length > 1000) throw Error('This robot has too many stored versions to delete safely. Contact support.');
     await publications.removePublication(uid, botId);
     for (let i = 0; i < keys.length; i += 10) await Promise.all(keys.slice(i, i + 10).map(deleteR2Object));
+    });
     return res.json({ deleted: true });
   } catch (error) {
     console.error('Robot deletion failed', { botId, error });
