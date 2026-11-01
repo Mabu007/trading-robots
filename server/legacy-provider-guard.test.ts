@@ -13,3 +13,8 @@ it('parks legacy start and deploy while preserving stop and pause',async()=>{
  expect(await post(deployment,'start')).toBe(409);expect(await post(deployment,'deploy')).toBe(409);expect(await post(deployment,'stop')).toBe(200);expect(await post(deployment,'undeploy')).toBe(200);
  expect(await post(subscription,'start')).toBe(409);expect(await post(subscription,'pause')).toBe(200);
 });
+it('keeps legacy starts parked even if an old environment flag is set',async()=>{
+ vi.stubEnv('ENABLE_LEGACY_CTRADER','true');
+ const result=await fetch(base+'/api/marketplace/bots/test/deployment',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'start'})});
+ expect(result.status).toBe(409);vi.stubEnv('ENABLE_LEGACY_CTRADER','false');
+});

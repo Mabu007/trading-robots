@@ -2,7 +2,7 @@
 
 This branch is a partial implementation. The workspace selects VALR markets
 and requests paginated VALR history for backtests. New cTrader starts,
-deployments and subscriptions are parked by default; stop and pause paths
+deployments and subscriptions are blocked even if the legacy flag is set; stop and pause paths
 remain available. The old provider code and data remain in place. Do not
 enable real-money trading on this basis. Existing running deployments are not
 automatically stopped or modified by this code.
@@ -66,7 +66,7 @@ set `ALLOW_SHARED_OPENROUTER_KEY=true` if they intend to pay for shared usage.
 
 A mock-tested, unconnected per-account coordinator serializes bots, persists
 intent before submission, reconciles fills and verifies protective orders. It
-locks the account when a submission is ambiguous and uses its own durable
+locks the account when a submission is ambiguous or the exchange order ID differs from its acknowledgement, and uses its own durable
 daily-loss ledger for sizing. It cannot yet reconcile a completed protective
 exit or populate that ledger from verified exchange fills. Live accounting
 currently restricts each account to one quote currency. A local
@@ -126,3 +126,8 @@ that behavior. Conditional orders can fail or partially fill after triggering.
 
 VALR references: https://docs.valr.com/ and
 https://support.valr.com/hc/en-us/articles/360018792019-What-order-types-are-available-on-VALR.
+
+Bundled example robots have been removed. This code change does not delete saved
+user bots, published listings, R2 objects, browser drafts, or stop old running
+instances. Their removal requires access to and reconciliation of production
+state; do not infer deletion from an empty example list.

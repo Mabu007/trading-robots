@@ -65,6 +65,7 @@ export class ValrLiveCoordinator {
   try{
    if(active.phase==='entry_pending'||active.phase==='entry_unknown'){
     const summary=await this.provider.entrySummary(active);if(!summary){active.lastError='Entry outcome is unknown; retrying reconciliation';await this.save(state);return state}
+    if(active.entryOrderId && summary.orderId!==active.entryOrderId)throw Error('Entry summary does not match the acknowledged exchange order');
     const result=reconcileSpotBuy(summary,{pair:active.pair,customerOrderId:active.entryId,baseCurrency:active.baseCurrency,quoteCurrency:active.quoteCurrency,baseDecimalPlaces:active.baseDecimalPlaces,minBaseAmount:active.minBaseAmount,minQuoteAmount:active.minQuoteAmount,maxBaseAmount:active.quantity,limitPrice:active.limitPrice,stopLoss:active.stopLoss,slippageBps:active.slippageBps});
     if(!result.filled){state.active=null;await this.save(state);return state}
     active.protectableQuantity=result.protectableQuantity;active.phase='unprotected';active.lastError='Fill verified; protection is not yet confirmed';await this.save(state);
@@ -81,6 +82,7 @@ export class ValrLiveCoordinator {
     active.phase='protection_unknown';
     const protection=await this.provider.protectionStatus(active);
     if(!protection){active.phase='protection_unknown';active.lastError='Protection has not been confirmed; inspect VALR';await this.save(state);return state}
+    if(active.protectionOrderId && protection.orderId!==active.protectionOrderId)throw Error('Protection status does not match the acknowledged exchange order');
     verifySpotProtection(protection,{pair:active.pair,customerOrderId:active.protectionId,quantity:active.protectableQuantity!,stopLoss:active.stopLoss,takeProfit:active.takeProfit});
     active.phase='protected';delete active.lastError;await this.save(state);
    }
