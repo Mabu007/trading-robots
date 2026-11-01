@@ -44,3 +44,6 @@ it('discards stale pending entries when catching up after an outage',async()=>{
  await runtime.deploy(state,spec,risk);await runtime.start();await runtime.alarm();await runtime.alarm();const result=await runtime.status();
  expect(result.state.position).toBeNull();expect(result.state.pending).toBeNull();expect(result.state.balance).toBe(1000);
 });
+it('stops new demo entries at the replay limit instead of retrying forever while reporting running',async()=>{
+ const storage=new Memory(),runtime=new ValrPaperRuntime(storage,{now:()=>100000,next:async()=>{throw Error('Paper replay history limit reached; stop and redeploy after reviewing the strategy')}});await runtime.deploy(state,spec,risk);await runtime.start();await runtime.alarm();const status=await runtime.status();expect(status.state.running).toBe(false);expect(status.state.pending).toBeNull();expect(status.lastError).toContain('history limit');expect(storage.alarm).toBeNull();
+});

@@ -20,8 +20,7 @@ function storageKey(uid: string): string {
 }
 function associatedData(uid: string): Buffer { return Buffer.from(`trading-vibes:valr:v1:${uid}`); }
 
-// Only account inspection is implemented here. Order routes are deliberately
-// absent until runtime isolation, reconciliation and risk checks are ready.
+// Credentials stay encrypted on the server. Trading uses the live provider bridge.
 export class ValrAccounts {
   private storage: Storage;
   private request: typeof fetch;
@@ -41,14 +40,24 @@ export class ValrAccounts {
   }
 
   async inspect(credentials: Credentials) {
-    if (!credentials || !/^[a-zA-Z0-9]{64}$/.test(credentials.apiKey) || !/^[a-zA-Z0-9]{64}$/.test(credentials.apiSecret)) throw new Error('Enter a valid VALR API key and secret.');
+    if (!credentials || typeof credentials.apiKey!=='string'||typeof credentials.apiSecret!=='string'|| !/^[a-zA-Z0-9]{64}$/.test(credentials.apiKey) || !/^[a-zA-Z0-9]{64}$/.test(credentials.apiSecret)) throw new Error('Enter a valid VALR API key and secret.');
     const info = await this.get(credentials, '/v1/account/api-keys/current') as { permissions?: unknown; label?: unknown };
     if (!Array.isArray(info?.permissions) || !info.permissions.every((p: unknown) => typeof p === 'string')) throw new Error('VALR did not return verifiable API permissions.');
     const permissions = info.permissions.map((p: string) => p.toLowerCase().replace(/\s+/g, ' ').trim());
     if (!permissions.includes('view access') || !permissions.includes('trade') || permissions.some((p: string) => p !== 'view access' && p !== 'trade')) throw new Error('Use a VALR key with View access and Trade only. Disable all other permissions.');
     const balances = await this.get(credentials, '/v1/account/balances');
-    if (!Array.isArray(balances)) throw new Error('VALR returned invalid balances.');
-    return { label: typeof info.label === 'string' ? info.label.slice(0, 100) : '', permissions: ['View access', 'Trade'], balances };
+    if (!Array.isArray(balances)||balances.length>5000) throw new Error('VALR returned invalid balances.');
+    const seen=new Set<string>();
+    const safeBalances=balances.map((row:any)=>{
+      if(!row||typeof row.currency!=='string'||!/^[A-Z0-9]{2,20}$/.test(row.currency)||seen.has(row.currency))throw Error('VALR returned invalid balances.');
+      seen.add(row.currency);const result:Record<string,string>={currency:row.currency};
+      for(const field of ['available','total','reserved','borrowedAmount']){
+        const value=row[field];if(value===undefined&&field!=='available')continue;
+        if(typeof value!=='string'||value.length>40||! /^-?\d+(?:\.\d{1,18})?$/.test(value))throw Error('VALR returned invalid balances.');
+        result[field]=value;
+      }return result;
+    });
+    return { label: typeof info.label === 'string' ? info.label.slice(0, 100) : '', permissions: ['View access', 'Trade'], balances:safeBalances };
   }
 
   async connect(uid: string, credentials: Credentials) {
@@ -83,6 +92,6 @@ export class ValrAccounts {
     // Expose only the fields needed for display. These are account-wide VALR
     // records, not necessarily orders placed by Trading Vibes.
     const fields=(item:any,names:string[])=>Object.fromEntries(names.filter(name=>typeof item?.[name]==='string').map(name=>[name,item[name].slice(0,200)]));
-    return {orders:orders.slice(0,100).map(item=>fields(item,['orderId','customerOrderId','currencyPair','side','price','remainingQuantity','status','type','createdAt'])),trades:trades.slice(0,20).map(item=>fields(item,['id','currencyPair','side','price','quantity','tradedAt']))};
+    return {orders:orders.slice(0,100).map(item=>fields(item,['orderId','customerOrderId','currencyPair','side','price','remainingQuantity','status','type','createdAt','orderStatusType','orderSide'])),trades:trades.slice(0,20).map(item=>fields(item,['id','currencyPair','side','price','quantity','tradedAt']))};
   }
 }

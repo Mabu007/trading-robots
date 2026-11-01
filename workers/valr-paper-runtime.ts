@@ -38,7 +38,7 @@ export class ValrPaperRuntime {
    if(next){if(next.discardPending)data.state.pending=null;data.state=processPaperCandle(data.state,next.candle,next.decision,data.spec,data.risk);}
    data.lastError='';data.attempts=0;
   }catch(error){
-   data.lastError=(error instanceof Error?error.message:'Paper evaluation failed').slice(0,300);data.attempts=Math.min(data.attempts+1,10);
+   data.lastError=(error instanceof Error?error.message:'Paper evaluation failed').slice(0,300);if(data.lastError.startsWith('Paper replay history limit reached')&&!data.state.position){data.state.running=false;data.state.pending=null;}data.attempts=Math.min(data.attempts+1,10);
    data.nextAlarm=this.deps.now()+Math.min(300000,5000*2**Math.min(data.attempts-1,6));await this.storage.setAlarm(data.nextAlarm);
   }
   if(!data.state.running&&!data.state.position){data.nextAlarm=null;await this.storage.deleteAlarm()}
