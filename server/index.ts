@@ -3,22 +3,25 @@ import {requestLimit} from './request-limits.ts';
 import express from 'express';
 import { createPublicKey, randomUUID, verify as verifySignature } from 'node:crypto';
 import { deleteR2Object, getR2Config, listR2Objects, readR2Object, writeR2Object } from './r2.ts';
-import { candleObjectKey, countObservedGaps, intervalMs, isAsset, isTimeframe, mapConcurrent, normalizeCandles, parseCandleCsv, utcDateKey, type MarketAsset, type MarketCandle, type MarketTimeframe } from './market-data.ts';
 import {recordAIUsage} from './usage.ts';
 import { BotEconomy, economyRoutes } from './bot-economy.ts';
 import { sharedBotRoutes } from './shared-bots.ts';
-import { ctraderRoutes } from './ctrader.ts';
 import { marketplace,marketplaceRoutes,assertProjectEditable } from './marketplace.ts';
 import { FirestoreStore } from './firestore-store.ts';
-import { brokerRoutes,gatewayRequest,gatewayHealth } from './broker-routes.ts';
-import { BrokerTokenStore } from './broker-tokens.ts';
+import { gatewayRequest,gatewayHealth } from './broker-routes.ts';
+import { ValrMarketData } from './valr-market-data.ts';
+import { valrAccountRoutes } from './valr-routes.ts';
+import { valrPaperRoutes } from './valr-paper-routes.ts';
+import { legacyProviderGuard } from './legacy-provider-guard.ts';
+import { OpenRouterAccounts, openRouterRoutes } from './openrouter-account.ts';
+import { readOwnedBotAsset } from './firebase-owned-bot.ts';
 
 const app = express();
-app.use(['/api/marketplace','/api/brokers','/api/economy'],requestLimit);
+const valrMarketData = new ValrMarketData();
+app.use(['/api/marketplace','/api/brokers','/api/economy','/api/valr','/api/openrouter'],requestLimit);
 app.use(express.json({ limit: '10mb' }));
-const assets = ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD'] as const;
+app.use(legacyProviderGuard);
 
-type StoredMarketDay = { schemaVersion: 1; asset: MarketAsset; timeframe: MarketTimeframe; date: string; source: 'manual'; priceType: 'unknown'; updatedAt: string; candles: MarketCandle[] };
 
 type FirebaseClaims = { email?:string; email_verified?:boolean; name?:string; sub?: string; user_id?: string; aud?: string; iss?: string; exp?: number; iat?: number };
 let secureTokenJwks: { keys: any[]; expiresAt: number } | undefined;
@@ -56,184 +59,20 @@ async function verifyFirebaseUser(authorization: string | undefined): Promise<{u
   return {uid,email:claims.email,emailVerified:claims.email_verified===true,name:claims.name};
 }
 
-function sameOhlc(left: MarketCandle, right: MarketCandle): boolean {
-  return left.open === right.open && left.high === right.high && left.low === right.low && left.close === right.close;
-}
-
-async function readMarketDay(asset: MarketAsset, timeframe: MarketTimeframe, date: string): Promise<MarketCandle[] | null> {
-  const body = await readR2Object(candleObjectKey(asset, timeframe, date));
-  if (body === null) return null;
-  let stored: StoredMarketDay;
-  try { stored = JSON.parse(body) as StoredMarketDay; }
-  catch { throw new Error(`R2 market data for ${asset} ${timeframe} ${date} is not valid JSON. Re-import this day.`); }
-  if (stored.schemaVersion !== 1 || stored.asset !== asset || stored.timeframe !== timeframe || stored.date !== date || !Array.isArray(stored.candles)) {
-    throw new Error(`R2 market data for ${asset} ${timeframe} ${date} has an unsupported or mismatched format.`);
-  }
-  const { candles, invalidRows } = normalizeCandles(stored.candles);
-  if (invalidRows || candles.length !== stored.candles.length || candles.some(candle => utcDateKey(candle.time) !== date)) throw new Error(`R2 market data for ${asset} ${timeframe} ${date} contains invalid, duplicate, or misplaced candles. Re-import this day.`);
-  return candles;
-}
-
-function storedDay(asset: MarketAsset, timeframe: MarketTimeframe, date: string, candles: MarketCandle[]): StoredMarketDay {
-  return { schemaVersion: 1, asset, timeframe, date, source: 'manual', priceType: 'unknown', updatedAt: new Date().toISOString(), candles };
-}
-
-function parseR2CandleFile(key: string, body: string): MarketCandle[] {
-  if (/\.(csv|txt)$/i.test(key)) return parseCandleCsv(body);
-  const parsed: any = JSON.parse(body);
-  const rows = Array.isArray(parsed) ? parsed : Array.isArray(parsed.candles) ? parsed.candles : Array.isArray(parsed.data) ? parsed.data : null;
-  if (!rows) throw new Error(`R2 file ${key} must contain an array of OHLC candles.`);
-  const { candles, invalidRows } = normalizeCandles(rows);
-  if (invalidRows) throw new Error(`R2 file ${key} contains invalid OHLC candles.`);
-  return candles;
-}
-
-function keyTimeframe(key: string): MarketTimeframe | null {
-  const match = key.toLowerCase().match(/(?:^|[._/-])(m1|m5|m15|m30|h1|h4|d1|1m|5m|15m|30m|1h|4h|1d)(?=$|[._/-])/);
-  if (!match) return null;
-  const token = match[1];
-  return ({ '1m': 'm1', '5m': 'm5', '15m': 'm15', '30m': 'm30', '1h': 'h1', '4h': 'h4', '1d': 'd1' } as Record<string, MarketTimeframe>)[token] ?? token as MarketTimeframe;
-}
-
-function medianCandleSpacing(candles: MarketCandle[]): number | null {
-  if (candles.length < 5) return null;
-  const deltas: number[] = [];
-  const stride = Math.max(1, Math.floor((candles.length - 1) / 2048));
-  for (let index = 1; index < candles.length; index += stride) {
-    const delta = candles[index].time - candles[index - 1].time;
-    if (delta > 0) deltas.push(delta);
-  }
-  if (!deltas.length) return null;
-  deltas.sort((a, b) => a - b);
-  return deltas[Math.floor(deltas.length / 2)];
-}
-
-async function readXauusdFiles(timeframe: MarketTimeframe): Promise<MarketCandle[]> {
-  const keys = (await listR2Objects('xauusd/', 5000)).filter(key => /\.(csv|json|txt)$/i.test(key));
-  const tagged = keys.flatMap(key => {
-    const sourceTimeframe = keyTimeframe(key);
-    return sourceTimeframe ? [{ key, sourceTimeframe }] : [];
-  });
-  const exact = tagged.filter(item => item.sourceTimeframe === timeframe);
-  const finer = tagged.filter(item => intervalMs[item.sourceTimeframe] < intervalMs[timeframe]);
-  // Untagged data is accepted only when it is already at the requested interval.
-  // Never turn M1 observations into apparent H1 bars: backtest results must use
-  // the actual stored timeframe and must not silently invent aggregate candles.
-  const untagged = keys.filter(key => keyTimeframe(key) === null);
-  const candidates = [...exact.map(item => item.key), ...untagged];
-  if (!candidates.length && finer.length) {
-    throw new Error(`XAUUSD R2 history is available at ${[...new Set(finer.map(item => item.sourceTimeframe))].join(', ')} only; choose one of those stored timeframes. The app will not aggregate candles.`);
-  }
-  if (!candidates.length) return [];
-  const all: MarketCandle[] = [];
-  let totalBytes = 0;
-  const targetSeconds = intervalMs[timeframe] / 1000;
-  for (const key of candidates) {
-    const body = await readR2Object(key);
-    if (!body) continue;
-    totalBytes += Buffer.byteLength(body);
-    if (totalBytes > 50_000_000) throw new Error('XAUUSD R2 data exceeds the 50 MB backtest read limit. Split the history into smaller timeframe files.');
-    try {
-      const parsed = parseR2CandleFile(key, body);
-      const observedSeconds = medianCandleSpacing(parsed);
-      if (observedSeconds !== null && (observedSeconds < targetSeconds * 0.75 || observedSeconds > targetSeconds * 1.5)) {
-        if (keyTimeframe(key)) throw new Error(`R2 file ${key} is tagged ${timeframe}, but its candle spacing does not match.`);
-        continue;
-      }
-      for (const candle of parsed) all.push(candle);
-    }
-    catch (error) {
-      if (keyTimeframe(key)) throw error;
-      // Ignore sibling metadata and unsupported files when the folder also has valid price data.
-    }
-  }
-  const byTime = new Map<number, MarketCandle>();
-  for (const candle of all) {
-    const previous = byTime.get(candle.time);
-    if (previous && !sameOhlc(previous, candle)) throw new Error(`XAUUSD R2 files contain conflicting prices at ${new Date(candle.time * 1000).toISOString()}. Separate or correct the overlapping files.`);
-    byTime.set(candle.time, candle);
-  }
-  const unique = [...byTime.values()].sort((a, b) => a.time - b.time);
-  if (unique.length < 2) return unique;
-  const medianSeconds = medianCandleSpacing(unique);
-  if (medianSeconds === null) return unique;
-  if (medianSeconds > targetSeconds * 1.5) {
-    throw new Error(`XAUUSD R2 history is coarser than ${timeframe}; the app will not fabricate candles.`);
-  }
-  if (medianSeconds < targetSeconds * 0.75) {
-    throw new Error(`XAUUSD R2 history is finer than ${timeframe}; choose the stored ${finer[0]?.sourceTimeframe ?? 'source'} timeframe instead. The app will not aggregate candles.`);
-  }
-  return unique;
-}
-
-type AvailableMarket = { asset: MarketAsset; timeframes: MarketTimeframe[]; dates: string[] };
-async function getR2Availability(): Promise<AvailableMarket[]> {
-  const byAsset = new Map<MarketAsset, Map<MarketTimeframe, Set<string>>>();
-  const add = (asset: MarketAsset, timeframe: MarketTimeframe, date: string) => {
-    const byTimeframe = byAsset.get(asset) ?? new Map<MarketTimeframe, Set<string>>();
-    const dates = byTimeframe.get(timeframe) ?? new Set<string>();
-    dates.add(date);
-    byTimeframe.set(timeframe, dates);
-    byAsset.set(asset, byTimeframe);
-  };
-  const keys = await listR2Objects('market-data/v1/', 5000);
-  for (const key of keys) {
-    const match = key.match(/^market-data\/v1\/([A-Z]+)\/(m1|m5|m15|m30|h1|h4|d1)\/(\d{4}-\d{2}-\d{2})\.json$/);
-    if (match && isAsset(match[1]) && isTimeframe(match[2])) add(match[1], match[2], match[3]);
-  }
-  const xauusdKeys = (await listR2Objects('xauusd/', 5000)).filter(key => /\.(csv|json|txt)$/i.test(key));
-  const taggedXauusd = xauusdKeys.flatMap(key => {
-    const timeframe = keyTimeframe(key);
-    return timeframe ? [{ key, timeframe }] : [];
-  });
-  const xauusdTimeframes = [...new Set(taggedXauusd.map(item => item.timeframe))];
-  // Keep the current untagged M1 files visible when newer tagged timeframes
-  // are added to the folder later.
-  if (xauusdKeys.some(key => keyTimeframe(key) === null) && !xauusdTimeframes.includes('m1')) {
-    try {
-      const m1Candles = await readXauusdFiles('m1');
-      if (m1Candles.length) for (const candle of m1Candles) add('XAUUSD', 'm1', utcDateKey(candle.time));
-    } catch (error) {
-      if (!xauusdTimeframes.length) throw error;
-    }
-  }
-  for (const timeframe of xauusdTimeframes) {
-    const candles = await readXauusdFiles(timeframe);
-    for (const candle of candles) add('XAUUSD', timeframe, utcDateKey(candle.time));
-  }
-  return [...byAsset.entries()].map(([asset, timeframes]) => {
-    const datesByTimeframe = Object.fromEntries([...timeframes.entries()].map(([timeframe, values]) => [timeframe, [...values].sort()]));
-    const dates = [...new Set(Object.values(datesByTimeframe).flat())].sort();
-    return { asset, timeframes: [...timeframes.keys()], dates, datesByTimeframe };
-  }).filter(market => market.dates.length > 0).sort((a, b) => a.asset.localeCompare(b.asset));
-}
-
-function friendlyR2Error(error: unknown): string {
-  const describe = (value: any): string => [value?.name, value?.message, value?.code, ...(Array.isArray(value?.errors) ? value.errors.map(describe) : []), value?.cause ? describe(value.cause) : ''].filter(Boolean).join(' ');
-  const message = describe(error) || String(error);
-  if (/TimeoutError|ETIMEDOUT|ENETUNREACH|ECONNRESET|ECONNREFUSED/i.test(message)) {
-    return 'Cannot reach Cloudflare R2 over HTTPS (port 443). Check this computer’s internet connection, firewall, or network restrictions, then retry.';
-  }
-  return error instanceof Error ? error.message : 'Unknown R2 error.';
-}
-
 app.get('/api/health', (_req, res) => res.json({ ok: true, aiConfigured: Boolean(process.env.OPENROUTER_API_KEY) }));
-app.get('/api/r2/status', async (_req, res) => {
-  if (!getR2Config()) return res.json({ configured: false, connected: false, mode: 'private-s3-compatible' });
-  try {
-    const markets = await getR2Availability();
-    return res.json({ configured: true, connected: true, mode: 'private-s3-compatible', markets });
-  } catch (error) {
-    return res.status(502).json({ configured: true, connected: false, mode: 'private-s3-compatible', error: friendlyR2Error(error) });
+// New provider endpoints are separate until the live runtime and workspace
+// are migrated together. No credentials are needed for these public calls.
+app.get('/api/valr/markets', async (_req, res) => {
+  try { return res.json({ markets: await valrMarketData.pairs() }); }
+  catch (error) { return res.status(502).json({ error: error instanceof Error ? error.message : 'VALR market data unavailable.' }); }
+});
+app.post('/api/valr/candles', async (req, res) => {
+  try { return res.json(await valrMarketData.candles(req.body ?? {})); }
+  catch (error) {
+    const message = error instanceof Error ? error.message : 'VALR market data unavailable.';
+    return res.status(/^Choose|^Unsupported|^Dates|^A page|^This market/.test(message) ? 400 : 502).json({ error: message });
   }
 });
-app.get('/api/market-data/availability', async (_req, res) => {
-  if (!getR2Config()) return res.status(503).json({ error: 'R2 is not configured. Add the R2 credentials and bucket to .env.' });
-  try { return res.json({ markets: await getR2Availability() }); }
-  catch (error) { return res.status(502).json({ error: friendlyR2Error(error) }); }
-});
-app.get('/api/assets', (_req, res) => res.json([...assets]));
-
 function validBotId(value: string): boolean { return /^[A-Za-z0-9_-]{1,100}$/.test(value); }
 function userBotRoot(uid: string, botId: string): string { return `user-bots/${Buffer.from(uid).toString('base64url')}/${botId}`; }
 async function firebaseUidOrReply(req: express.Request, res: express.Response): Promise<string | null> {
@@ -246,12 +85,19 @@ async function firebaseUidOrReply(req: express.Request, res: express.Response): 
   }
 }
 
+const openRouterAccounts = new OpenRouterAccounts({read:readR2Object,write:writeR2Object,remove:deleteR2Object});
+openRouterRoutes(app,openRouterAccounts,firebaseUidOrReply);
 const economy=new BotEconomy(marketplace.store,{read:readR2Object,write:writeR2Object,root:userBotRoot},marketplace);
+valrAccountRoutes(app,{ uid:firebaseUidOrReply, read:readR2Object, write:writeR2Object, remove:deleteR2Object });
+valrPaperRoutes(app,{uid:firebaseUidOrReply,bot:async(uid,id,req)=>{
+  const [bot,raw]=await Promise.all([FirestoreStore.configured()?marketplace.store.get(`users/${uid}/bots/${id}`):readOwnedBotAsset(uid,id,req.header('authorization')),readR2Object(`${userBotRoot(uid,id)}/current.json`)]);
+  if(!bot||!raw)return null;const saved=JSON.parse(raw);
+  if(saved.userId!==uid||saved.botId!==id||typeof saved.code!=='string'||typeof bot.asset!=='string')return null;
+  return {asset:bot.asset,code:saved.code};
+}});
 economyRoutes(app,economy,async(req,res)=>{const uid=await firebaseUidOrReply(req,res);return uid?res.locals.identity:null;});
 const publications = sharedBotRoutes(app, { read: readR2Object, write: writeR2Object, remove: deleteR2Object, uid: firebaseUidOrReply, root: userBotRoot,...(FirestoreStore.configured()?{onPublish:(bot:any)=>economy.legacyPublish(bot),onAcquire:async(uid:string,id:string,bot:any)=>{if(!await marketplace.store.get(`marketplaceBots/${id}`))await marketplace.publish(bot);return economy.legacyCopy(uid,bot)},onUnpublish:(uid:string,id:string)=>marketplace.unpublish(uid,id),onView:(bot:any,visitor:string)=>marketplace.view(bot,visitor)}:{}) });
-ctraderRoutes(app, { ...(process.env.CTRADER_GATEWAY_URL?{saveTokens:async(uid:string,tokens:any)=>{await gatewayRequest('authorizeTokens',{uid,tokens})}}:{}),read: readR2Object, write: writeR2Object, uid: firebaseUidOrReply,...(FirestoreStore.configured()?{onAuthorized:async(uid:string)=>{await marketplace.emergencyPause(uid,'Broker authorization changed');await marketplace.store.put(`brokerConnections/${Buffer.from(uid).toString('base64url')}`,{uid,connected:false,emergencyPaused:true,updatedAt:Date.now()})}}:{}) });
 marketplaceRoutes(app,{uid:firebaseUidOrReply,read:readR2Object,write:writeR2Object,root:userBotRoot,gateway:gatewayRequest,gatewayHealth,checkLicense:(uid,botId,code)=>economy.checkDeployment(uid,botId,code),ensureMember:(uid,botId,req)=>economy.ensureMember((req as any).verifiedIdentity,botId),versionSource:(uid,versionId)=>economy.source(uid,versionId)});
-brokerRoutes(app,{uid:firebaseUidOrReply,tokens:new BrokerTokenStore({read:readR2Object,write:writeR2Object}),remove:deleteR2Object});
 
 app.put('/api/user-bots/:botId/current', async (req, res) => {
   const uid = await firebaseUidOrReply(req, res); if (!uid) return;
@@ -453,151 +299,6 @@ app.delete('/api/user-bots/:botId/versions/:versionId', async (req, res) => {
   }
 });
 
-async function xauusdAiContext(): Promise<string> {
-  if (!getR2Config()) return 'XAUUSD R2 price context: R2 is not configured; no bucket prices were supplied.';
-  try {
-    const keys = await listR2Objects('xauusd/', 1000);
-    const dataKeys = keys.filter(key => /\.(csv|json|txt)$/i.test(key)).slice(-12);
-    if (!dataKeys.length) return 'XAUUSD R2 price context: no CSV, JSON, or TXT data files were found under xauusd/. Do not invent or imply you used those prices.';
-    const all = [] as MarketCandle[];
-    const files: string[] = [];
-    let bytes = 0;
-    for (const key of dataKeys) {
-      if (bytes >= 6_000_000) break;
-      const body = await readR2Object(key);
-      if (!body) continue;
-      bytes += body.length;
-      try {
-        let rows: unknown[];
-        if (/\.csv$/i.test(key) || /\.txt$/i.test(key)) rows = parseCandleCsv(body);
-        else {
-          const parsed: any = JSON.parse(body);
-          const raw = Array.isArray(parsed) ? parsed : Array.isArray(parsed.candles) ? parsed.candles : Array.isArray(parsed.data) ? parsed.data : null;
-          if (!raw) continue;
-          rows = normalizeCandles(raw).candles;
-        }
-        const candles = normalizeCandles(rows).candles;
-        if (candles.length) { for (const candle of candles) all.push(candle); files.push(`${key} (${candles.length} candles)`); }
-      } catch { /* A malformed sibling file should not hide valid market data. */ }
-    }
-    const byTime = new Map<number, MarketCandle>();
-    for (const candle of all) {
-      const previous = byTime.get(candle.time);
-      if (previous && !sameOhlc(previous, candle)) throw new Error(`conflicting prices at ${new Date(candle.time * 1000).toISOString()}`);
-      byTime.set(candle.time, candle);
-    }
-    const candles = [...byTime.values()].sort((a, b) => a.time - b.time);
-    if (!candles.length) return `XAUUSD R2 price context: found ${dataKeys.length} data files under xauusd/, but none had readable OHLC candles. Do not invent or imply you used those prices.`;
-    const sample = candles.slice(-160).map(c => `${new Date(c.time * 1000).toISOString()},${c.open},${c.high},${c.low},${c.close},${c.volume}`).join('\n');
-    return `XAUUSD R2 price context (actual stored prices; use these to ground XAUUSD price levels, and never substitute example/current prices):\nFiles: ${files.join('; ')}\nCoverage: ${new Date(candles[0].time * 1000).toISOString()} through ${new Date(candles.at(-1)!.time * 1000).toISOString()} (${candles.length} unique candles).\nLast ${Math.min(160, candles.length)} candles, CSV columns time,open,high,low,close,volume:\n${sample}`;
-  } catch (error) {
-    return `XAUUSD R2 price context unavailable: ${error instanceof Error ? error.message : 'R2 listing/read failed'}. Do not invent or imply you used those prices.`;
-  }
-}
-
-app.post('/api/market-data/import', async (req, res) => {
-  try {
-    // Imports overwrite shared historical prices. Only explicitly approved accounts may write them.
-    const allowed = (process.env.MARKET_DATA_IMPORT_UIDS || '').split(',').map(uid => uid.trim()).filter(Boolean);
-    if (!allowed.length) return res.status(503).json({ error: 'Market data imports are disabled. Configure MARKET_DATA_IMPORT_UIDS on the API server.' });
-    const uid = await firebaseUidOrReply(req, res); if (!uid) return;
-    if (!allowed.includes(uid)) return res.status(403).json({ error: 'This account cannot import shared market data.' });
-    const { asset, timeframe, csv } = req.body ?? {};
-    if (!isAsset(asset)) return res.status(400).json({ error: 'Choose a supported instrument before importing.' });
-    if (!isTimeframe(timeframe)) return res.status(400).json({ error: 'Choose a supported timeframe before importing.' });
-    if (typeof csv !== 'string' || !csv.trim()) return res.status(400).json({ error: 'Choose a non-empty CSV file.' });
-    if (!getR2Config()) return res.status(503).json({ error: 'R2 credentials are incomplete. Add the account ID, access key, secret key, and bucket to .env.' });
-
-    const candles = parseCandleCsv(csv);
-    if (candles.length > 100_000) return res.status(413).json({ error: 'Import is limited to 100,000 candles per file.' });
-    if (candles.at(-1)!.time > Math.floor(Date.now() / 1000)) return res.status(400).json({ error: 'CSV contains future candle timestamps. Check that the source times are UTC.' });
-    const grouped = new Map<string, MarketCandle[]>();
-    for (const candle of candles) {
-      const date = utcDateKey(candle.time);
-      const day = grouped.get(date) ?? [];
-      day.push(candle);
-      grouped.set(date, day);
-    }
-    const days = [...grouped.entries()].sort(([a], [b]) => a.localeCompare(b));
-    for (const [date, rows] of days) {
-      const body = JSON.stringify(storedDay(asset, timeframe, date, rows));
-      await writeR2Object(candleObjectKey(asset, timeframe, date), body);
-      const check = await readMarketDay(asset, timeframe, date);
-      if (!check || JSON.stringify(check) !== JSON.stringify(rows)) {
-        throw new Error(`R2 read-back verification failed for ${asset} ${timeframe} ${date}.`);
-      }
-    }
-    return res.json({ asset, timeframe, source: 'R2', verified: true, candles: candles.length, days: days.map(([date, rows]) => ({ date, candles: rows.length })), from: utcDateKey(candles[0].time), to: utcDateKey(candles.at(-1)!.time) });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown R2 import error.';
-    console.error('R2 market-data import failed', message);
-    return res.status(502).json({ error: `Market data was not imported: ${message}` });
-  }
-});
-
-app.post('/api/market-data', async (req, res) => {
-  try {
-    const { asset, timeframe, from, to } = req.body ?? {};
-    if (!isAsset(asset)) return res.status(400).json({ error: 'Unsupported instrument.' });
-    if (!isTimeframe(timeframe)) return res.status(400).json({ error: 'Unsupported timeframe.' });
-    if (!getR2Config()) return res.status(503).json({ error: 'R2 is not configured. Add the R2 credentials and bucket to .env.' });
-
-    const start = new Date(from);
-    let end = new Date(to);
-    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) {
-      return res.status(400).json({ error: 'Choose a valid UTC date range.' });
-    }
-    const now = Date.now();
-    if (end.getTime() > now) end = new Date(now); // The UI sends an inclusive end-of-day timestamp for today.
-    if (start >= end) return res.status(400).json({ error: 'The start date must be before the latest available data.' });
-    if (end.getTime() - start.getTime() > 366 * 86_400_000) {
-      return res.status(400).json({ error: 'Date range is limited to one year per request.' });
-    }
-    const interval = intervalMs[timeframe];
-    const estimatedCandles = Math.ceil((end.getTime() - start.getTime()) / interval) + 500;
-    if (estimatedCandles > 50_000) {
-      return res.status(413).json({ error: 'This date range may exceed 50,000 candles. Choose a shorter range or slower timeframe.' });
-    }
-
-    const storedPrefix = `market-data/v1/${asset}/${timeframe}/`;
-    const fromDate = start.toISOString().slice(0, 10);
-    const toDate = end.toISOString().slice(0, 10);
-    const dates = (await listR2Objects(storedPrefix, 10_000))
-      .map(key => key.match(/^market-data\/v1\/[A-Z]+\/(?:m1|m5|m15|m30|h1|h4|d1)\/(\d{4}-\d{2}-\d{2})\.json$/)?.[1])
-      .filter((date): date is string => Boolean(date && date >= fromDate && date <= toDate));
-    const dayRows = await mapConcurrent(dates, 4, async date => [date, await readMarketDay(asset, timeframe, date)] as const);
-    const stored = dayRows.flatMap(([, rows]) => rows ?? []);
-    const folderCandles = asset === 'XAUUSD' ? await readXauusdFiles(timeframe) : [];
-    const candleMap = new Map<number, MarketCandle>();
-    for (const group of [stored, folderCandles]) {
-      for (const candle of group) {
-        const previous = candleMap.get(candle.time);
-        if (previous && !sameOhlc(previous, candle)) throw new Error(`${asset} ${timeframe} has conflicting R2 prices at ${new Date(candle.time * 1000).toISOString()}. Check overlapping stored files.`);
-        candleMap.set(candle.time, candle);
-      }
-    }
-    const candles = [...candleMap.values()].filter(c => c.time * 1000 >= start.getTime() && c.time * 1000 <= end.getTime()).sort((a, b) => a.time - b.time);
-    if (candles.length > 50_000) return res.status(413).json({ error: 'R2 returned more than 50,000 candles. Choose a shorter range or slower timeframe.' });
-    if (!candles.length) {
-      const available = asset === 'XAUUSD' ? 'XAUUSD source files must contain CSV, JSON, or TXT OHLC candles under the bucket’s xauusd/ prefix.' : 'Import the requested instrument and timeframe in the Chart view first.';
-      return res.status(404).json({ error: `No ${asset} ${timeframe} candles were found in R2 for ${start.toISOString().slice(0, 10)} through ${end.toISOString().slice(0, 10)}. ${available}` });
-    }
-    const observedGaps = countObservedGaps(candles, timeframe);
-
-    return res.json({
-      candles,
-      source: 'R2',
-      invalidRows: 0,
-      duplicateRows: 0,
-      observedGaps,
-      requested: { from: start.toISOString(), to: end.toISOString() },
-    });
-  } catch (error) {
-    console.error('R2 market-data request failed', error);
-    return res.status(502).json({ error: `R2 market-data request failed: ${friendlyR2Error(error)}` });
-  }
-});
-
 const aiHits = new Map<string, { started: number; count: number }>();
 async function requestOpenRouter(body: string, apiKey: string, signal: AbortSignal): Promise<Response> {
   try {
@@ -623,8 +324,10 @@ async function requestOpenRouter(body: string, apiKey: string, signal: AbortSign
 
 app.post('/api/ai', async (req, res) => {
   const uid = await firebaseUidOrReply(req, res); if (!uid) return;
-  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
-  if (!apiKey) return res.status(503).json({ error: 'Set OPENROUTER_API_KEY in .env to enable AI generation.' });
+  let personalAI: Awaited<ReturnType<typeof openRouterAccounts.load>>;
+  try { personalAI = await openRouterAccounts.load(uid); } catch { return res.status(503).json({ error: 'Unable to access AI credentials. Reconnect your key.' }); }
+  const apiKey = personalAI?.apiKey || (process.env.ALLOW_SHARED_OPENROUTER_KEY === 'true' ? process.env.OPENROUTER_API_KEY?.trim() : undefined);
+  if (!apiKey) return res.status(503).json({ error: 'Connect your OpenRouter API key to enable AI.' });
   const messages = req.body?.messages;
   if (!Array.isArray(messages) || messages.length < 1 || messages.length > 24
     || messages.some((m: any) => !m || !['system', 'user', 'assistant'].includes(m.role)
@@ -632,7 +335,7 @@ app.post('/api/ai', async (req, res) => {
     return res.status(400).json({ error: 'Send 1–24 chat messages with supported roles and text content under 80 KB each.' });
   }
   const selectedAsset = req.body?.asset;
-  if (selectedAsset !== undefined && !isAsset(selectedAsset)) return res.status(400).json({ error: 'Choose a supported instrument for AI context.' });
+  if (selectedAsset !== undefined && (typeof selectedAsset !== 'string' || !/^[A-Z0-9]{3,30}$/.test(selectedAsset))) return res.status(400).json({ error: 'Choose a supported instrument for AI context.' });
   const requestedTokens = Number(req.body?.maxTokens);
   const maxTokens = Number.isInteger(requestedTokens) ? Math.max(200, Math.min(6000, requestedTokens)) : 1600;
 
@@ -645,7 +348,7 @@ app.post('/api/ai', async (req, res) => {
   aiHits.set(clientId, current);
   for (const [id, entry] of aiHits) if (now - entry.started > 120_000) aiHits.delete(id);
 
-  const model = process.env.OPENROUTER_MODEL?.trim() || 'minimax/minimax-m3:free';
+  const model = personalAI?.model || process.env.OPENROUTER_MODEL?.trim() || 'minimax/minimax-m3:free';
   const meteredModel=model;
   let usageStatus:'completed'|'failed'|'interrupted'='failed',measuredUsage:any=null,usageBuffer='',finishReason:string|null=null,sawDone=false,providerError=false;const usageDecoder=new TextDecoder();
   let upstreamReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
@@ -660,20 +363,8 @@ app.post('/api/ai', async (req, res) => {
   const heartbeat = setInterval(() => { if (!res.destroyed) res.write(': keep-alive\n\n'); }, 10_000);
   res.on('close', () => { if (!res.writableEnded) { clientAbort.abort(); void upstreamReader?.cancel().catch(() => undefined); } });
   try {
-    let marketContext = '';
-    if (selectedAsset === 'XAUUSD' && req.body?.includeMarketContext === true) {
-      let contextTimer: ReturnType<typeof setTimeout> | undefined;
-      marketContext = await Promise.race([
-        xauusdAiContext(),
-        new Promise<string>(resolve => { contextTimer = setTimeout(() => resolve('Historical XAUUSD prices could not be loaded in time. Do not invent or imply you used those prices.'), 5_000); }),
-      ]);
-      if (contextTimer) clearTimeout(contextTimer);
-    }
-    const enrichedMessages = selectedAsset === 'XAUUSD' && req.body?.includeMarketContext === true
-      ? [{ role: 'system', content: `Use the following available historical price data when writing XAUUSD code. Treat it as historical reference; code must still operate on runtime ctx candles, never hard-code a guessed live price.\n\n${marketContext}` }, ...messages]
-      : messages;
     const requestModel = (targetModel: string) => requestOpenRouter(
-      JSON.stringify({ model: targetModel, messages: enrichedMessages, temperature: 0.2, max_tokens: maxTokens, stream: true,stream_options:{include_usage:true} }),
+      JSON.stringify({ model: targetModel, messages, temperature: 0.2, max_tokens: maxTokens, stream: true,stream_options:{include_usage:true} }),
       apiKey,
       AbortSignal.any([clientAbort.signal, AbortSignal.timeout(45_000)]),
     );
@@ -681,12 +372,12 @@ app.post('/api/ai', async (req, res) => {
     if (!response.ok) {
       await response.body?.cancel().catch(() => undefined);
       console.warn('OpenRouter rejected request', { model, status: response.status });
-      const friendly = response.status === 401 ? 'OpenRouter rejected the API key. Check OPENROUTER_API_KEY in .env and restart the server.'
+      const friendly = response.status === 401 ? 'OpenRouter rejected the API key. Check your connection and key settings.'
         : response.status === 402 ? 'OpenRouter needs available credits or billing before it can generate a response.'
-          : response.status === 404 ? 'The configured OpenRouter model was not found. Check OPENROUTER_MODEL in .env.'
+          : response.status === 404 ? 'The selected OpenRouter model was not found. Choose another model.'
             : response.status === 429 ? 'OpenRouter rate limit reached. Wait briefly and retry.'
               : response.status === 400 ? 'The request is too long or invalid for this model. Shorten the request or configure another model.'
-                : response.status === 403 ? 'The configured model is unavailable to this account. Update OPENROUTER_MODEL to another permitted model.'
+                : response.status === 403 ? 'The selected model is unavailable to this account. Choose another model.'
                   : response.status >= 500 ? 'The model provider is temporarily unavailable. Retry later.'
                     : `OpenRouter request failed (HTTP ${response.status}).`;
       throw new Error(friendly);

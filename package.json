@@ -15,10 +15,14 @@
     "worker:dev": "wrangler dev --config workers/wrangler.local.jsonc",
     "worker:build": "wrangler deploy --dry-run --config workers/wrangler.local.jsonc",
     "worker:configure": "node scripts/configure-cloudflare.mjs",
-    "test:cloudflare": "node scripts/test-cloudflare-runtime.mjs"
+    "test:cloudflare": "node scripts/test-cloudflare-runtime.mjs",
+    "test:valr-paper": "node scripts/test-valr-paper.mjs",
+    "worker:valr:build": "wrangler deploy --dry-run --config workers/wrangler.valr-preview.jsonc",
+    "test:valr-live": "node scripts/test-valr-live.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1156.0",
+    "@cf-wasm/quickjs": "0.3.0",
     "@monaco-editor/react": "^4.7.0",
     "@tailwindcss/vite": "^4.1.14",
     "dotenv": "^17.4.2",

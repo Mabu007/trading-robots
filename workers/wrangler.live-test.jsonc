@@ -1,0 +1,1 @@
+{"name":"valr-live-local-fixture","main":"valr-live-test-worker.ts","compatibility_date":"2026-10-01","durable_objects":{"bindings":[{"name":"FIXTURE","class_name":"LiveFixture"}]},"migrations":[{"tag":"v1","new_sqlite_classes":["LiveFixture"]}]}
