@@ -8,9 +8,9 @@ it('signs a price-capped spot limit buy and never treats acknowledgement as a fi
  const client=new ValrExchange(creds,request as typeof fetch,()=>1558017528946);
  expect(await client.limitBuy('ETHZAR','0.01','200','bot-signal-1')).toEqual({orderId:'exchange-order'});
  const [url,init]=request.mock.calls[0] as unknown as [string,RequestInit];
- expect(url).toBe('https://api.valr.com/v1/orders/limit');
+ expect(url).toBe('https://api.valr.com/v2/orders/limit');
  expect(JSON.parse(String(init.body))).toEqual({side:'BUY',quantity:'0.01',price:'200',pair:'ETHZAR',customerOrderId:'bot-signal-1',allowMargin:false,postOnly:false,timeInForce:'FOK'});
- expect((init.headers as Record<string,string>)['X-VALR-SIGNATURE']).toBe(valrSignature(creds.apiSecret,'1558017528946','POST','/v1/orders/limit',String(init.body)));
+ expect((init.headers as Record<string,string>)['X-VALR-SIGNATURE']).toBe(valrSignature(creds.apiSecret,'1558017528946','POST','/v2/orders/limit',String(init.body)));
 });
 it('builds one OCO conditional with no margin and refuses invalid levels',async()=>{
  const request=vi.fn(async()=>Response.json({id:'protection-id'},{status:202}));

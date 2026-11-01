@@ -101,7 +101,7 @@ export class BotEconomy {
     const path=`marketplaceBots/${listingId}`,now=Date.now();
     await this.atomic([path],([current])=>{
       if(current&&(current.creatorId!==who.uid||current.privateBotId!==botId))throw Error('Publication ownership mismatch.');
-      // Restoring a legacy link or a source package could grant access the creator
+      // Restoring a sharing link or a source package could grant access the creator
       // did not intend when making a profile-only listing public.
       if(current&&!current.published&&(current.packageId||(current.managedAccess&&!current.livePublic)))throw Error('Use sharing or releases to republish this existing bot and its access settings.');
       if(current?.published&&(current.packageId||(current.managedAccess&&!current.livePublic)))return {};
@@ -110,12 +110,11 @@ export class BotEconomy {
     return {id:listingId,username:profile.username};
   }
   async version(uid:string,botId:string,input:RecordData={}){
-    const current=await this.current(uid,botId);let code=current.code;
-    if(input.legacyVersionId){const raw=await this.storage.read(`${this.storage.root(uid,botId)}/versions/${id(input.legacyVersionId)}.json`);const old=raw?JSON.parse(raw):null;if(!old||old.userId!==uid||old.botId!==botId)throw Error('Saved version unavailable.');code=old.code;}
+    const current=await this.current(uid,botId);const code=current.code;
     if(!code.trim()||code.length>180000)throw Error('Strategy must contain 1–180,000 characters.');
     const config=parseStrategyConfig(code),key=randomUUID(),createdAt=Date.now(),codeKey=`bot-economy/versions/${key}.json`;
     const fork=await this.store.get(`botForks/${recordId(uid)}_${botId}`);
-    const v={id:key,creatorId:uid,privateBotId:botId,projectKey:`${recordId(uid)}_${botId}`,label:text(input.label||`Version ${new Date(createdAt).toISOString()}`,64,true),description:text(input.description||'',2000),releaseNotes:text(input.releaseNotes||'',2000),asset:typeof input.asset==='string'&&/^[A-Z0-9]{3,30}$/.test(input.asset)?input.asset:'XAUUSD',config,hash:hash(code),codeKey,createdAt,provenance:fork?.provenance||null};
+    const v={id:key,creatorId:uid,privateBotId:botId,projectKey:`${recordId(uid)}_${botId}`,label:text(input.label||`Version ${new Date(createdAt).toISOString()}`,64,true),description:text(input.description||'',2000),releaseNotes:text(input.releaseNotes||'',2000),asset:typeof input.asset==='string'&&/^[A-Z0-9]{3,30}$/.test(input.asset)?input.asset:'ETHZAR',config,hash:hash(code),codeKey,createdAt,provenance:fork?.provenance||null};
     await this.storage.write(codeKey,JSON.stringify({code}));if(!await this.store.create(`sourceVersions/${key}`,v))throw Error('Version collision. Please retry.');
     await this.activity(uid,'version.saved',botId,v.label);return versionView(v);
   }
@@ -163,7 +162,7 @@ export class BotEconomy {
     // Provenance lives outside editable user documents and survives deletion/recreation of a draft.
     await this.store.create(`botForks/${recordId(who.uid)}_${botId}`,{id:botId,uid:who.uid,creatorId:a.creatorId,botId:a.botId,provenance,createdAt:Date.now()});
     await this.storage.write(storageKey,JSON.stringify({schemaVersion:1,userId:who.uid,botId,code,updatedAt:new Date().toISOString()}));
-    const v=await this.store.get(`sourceVersions/${versionId}`),bot={id:botId,name:`${a.name} · My copy`.slice(0,64),asset:v?.asset||'XAUUSD',prompt:'Licensed private copy',storage:{provider:'r2',key:storageKey},updatedAt:new Date().toISOString()};
+    const v=await this.store.get(`sourceVersions/${versionId}`),bot={id:botId,name:`${a.name} · My copy`.slice(0,64),asset:v?.asset||'ETHZAR',prompt:'Licensed private copy',storage:{provider:'r2',key:storageKey},updatedAt:new Date().toISOString()};
     await this.store.create(`users/${who.uid}/bots/${botId}`,bot);await this.atomic([`marketplaceBots/${a.botId}`],([listing])=>listing?{[`marketplaceBots/${a.botId}`]:{...listing,remixCount:(listing.remixCount||0)+1}}:{});await this.activity(who.uid,'bot.remixed',a.botId,a.name);return {...bot,storageKey,code};
   }
   async copyProject(who:Identity,botId:string){
@@ -235,11 +234,11 @@ export class BotEconomy {
     const listing=listings.items.find(b=>b.privateBotId===privateBotId);
     if(listing?.published)await this.checkLicense(uid,privateBotId,code);
   }
-  async legacyPublish(bot:RecordData){const fork=await this.store.get(`botForks/${recordId(bot.ownerUid)}_${bot.botId}`);if(fork?.provenance?.license==='commercial')throw Error('Publish Commercial Remix copies through a licensed source package in Releases.');await this.checkLicense(bot.ownerUid,bot.botId,bot.code);const coverImage=await this.image(bot.coverImage||'');await this.trading.publish(bot);const profile=await this.profile({uid:bot.ownerUid,name:bot.creator});const saved=await this.store.get(`marketplaceBots/${bot.id}`);await this.store.put(`marketplaceBots/${bot.id}`,{...saved,coverImage,managedAccess:true,publicCreatorId:bot.ownerUid,username:profile.username});await this.store.put(`botCovers/${recordId(bot.ownerUid)}_${bot.botId}`,{uid:bot.ownerUid,botId:bot.botId,coverImage});}
-  async legacyCopy(uid:string,bot:RecordData){
+  async publishSharedBot(bot:RecordData){const fork=await this.store.get(`botForks/${recordId(bot.ownerUid)}_${bot.botId}`);if(fork?.provenance?.license==='commercial')throw Error('Publish Commercial Remix copies through a licensed source package in Releases.');await this.checkLicense(bot.ownerUid,bot.botId,bot.code);const coverImage=await this.image(bot.coverImage||'');await this.trading.publish(bot);const profile=await this.profile({uid:bot.ownerUid,name:bot.creator});const saved=await this.store.get(`marketplaceBots/${bot.id}`);await this.store.put(`marketplaceBots/${bot.id}`,{...saved,coverImage,managedAccess:true,publicCreatorId:bot.ownerUid,username:profile.username});await this.store.put(`botCovers/${recordId(bot.ownerUid)}_${bot.botId}`,{uid:bot.ownerUid,botId:bot.botId,coverImage});}
+  async acquireSharedBot(uid:string,bot:RecordData){
     await this.trading.acquire(uid,bot.id);
     const privateId=`shared-${bot.id}`,path=`botForks/${recordId(uid)}_${privateId}`;
-    await this.store.create(path,{uid,botId:bot.id,creatorId:bot.ownerUid,provenance:{originalCreatorId:bot.ownerUid,originalCreator:bot.creator||'Bot creator',botId:bot.id,license:'personal',licenseRevision:LICENSE_REVISION,legacy:true},createdAt:Date.now()});
+    await this.store.create(path,{uid,botId:bot.id,creatorId:bot.ownerUid,provenance:{originalCreatorId:bot.ownerUid,originalCreator:bot.creator||'Bot creator',botId:bot.id,license:'personal',licenseRevision:LICENSE_REVISION},createdAt:Date.now()});
   }
 }
 

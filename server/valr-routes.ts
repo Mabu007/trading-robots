@@ -8,6 +8,7 @@ type Dependencies = {
   remove: (key: string) => Promise<void>;
   request?: typeof fetch;
   key?: () => string | undefined;
+  beforeChange?:(uid:string)=>Promise<void>;
 };
 
 export function valrAccountRoutes(app: Express, dependencies: Dependencies) {
@@ -18,7 +19,7 @@ export function valrAccountRoutes(app: Express, dependencies: Dependencies) {
     try { return res.json(await run(uid, req)); }
     catch (error) {
       const raw = error instanceof Error ? error.message : '';
-      const known = /^(Enter a valid VALR API key and secret\.|Use a VALR key with View access and Trade only\. Disable all other permissions\.|VALR credential encryption is not configured\.|Could not reach VALR\. Retry the connection\.|VALR rate limit reached\. Wait and retry\.|VALR could not verify this account\. Check the key, permissions and IP restrictions\.|VALR returned an invalid account response\.|VALR did not return verifiable API permissions\.|VALR returned invalid balances\.|VALR returned invalid account activity\.|Unable to decrypt VALR credentials\. Reconnect your account\.)$/;
+      const known = /^(Stop and reconcile live trading before changing VALR credentials|Live runtime is not configured|Enter a valid VALR API key and secret\.|Use a VALR key with View access and Trade only\. Disable all other permissions\.|VALR credential encryption is not configured\.|Could not reach VALR\. Retry the connection\.|VALR rate limit reached\. Wait and retry\.|VALR could not verify this account\. Check the key, permissions and IP restrictions\.|VALR returned an invalid account response\.|VALR did not return verifiable API permissions\.|VALR returned invalid balances\.|VALR returned invalid account activity\.|Unable to decrypt VALR credentials\. Reconnect your account\.)$/;
       const message = known.test(raw) ? raw : 'VALR account request failed. Retry later.';
       const clientError = /valid VALR API key|View access and Trade only/.test(message);
       return res.status(clientError ? 400 : 503).json({ error: message });
@@ -26,8 +27,8 @@ export function valrAccountRoutes(app: Express, dependencies: Dependencies) {
   };
   app.post('/api/valr/account/connect', handle(async (uid, req) => {
     const { apiKey, apiSecret } = req.body ?? {};
-    // Existing VALR execution is not enabled yet. Any later integration must
-    // first pause and reconcile all of this user's runtimes on key changes.
+    // A live authorization must be stopped and reconciled before key changes.
+    await dependencies.beforeChange?.(uid);
     const account = await accounts.connect(uid, { apiKey, apiSecret });
     return { connected: true, ...account };
   }));
@@ -41,6 +42,7 @@ export function valrAccountRoutes(app: Express, dependencies: Dependencies) {
     return accounts.activity(credentials);
   }));
   app.post('/api/valr/account/disconnect', handle(async uid => {
+    await dependencies.beforeChange?.(uid);
     await accounts.disconnect(uid);
     return { connected: false, positionsClosed: false, revokeAtValr: true };
   }));

@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom';
 import { Activity, AlertTriangle, Check, ChevronDown, ChevronRight, Copy, GripHorizontal, History, ListChecks, Pencil, Sparkles, Terminal as TerminalIcon, Trash2, X } from 'lucide-react';
 import type { Result, Trade } from '../types';
 import type { MonetaryResult, MonetaryTrade } from '../monetary-backtest';
-import type {LiveExecution,LiveReadiness} from '../live-status';
 import { MonetaryResults } from './MonetaryResults';
 import type { BotVersion } from '../firebase';
 
@@ -11,8 +10,6 @@ export type OutputTab = 'terminal' | 'results' | 'trades' | 'versions';
 
 type Props = {
   monetary: MonetaryResult | null;
-  liveStatus?: LiveReadiness | null;
-  liveExecutions?: LiveExecution[];
   asset: string;
   timeframe?: string;
   from: string;
@@ -52,9 +49,8 @@ function formatTime(time: number) {
   return new Date(time * 1000).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-function displayPrice(value: number, asset: string) {
-  const digits = asset === 'USDJPY' ? 3 : asset === 'XAUUSD' ? 2 : 5;
-  return value.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+function displayPrice(value: number, _asset: string) {
+  return value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 8 });
 }
 
 function duration(entry: number, exit: number) {
@@ -105,7 +101,6 @@ function TradesPanel({ props }: { props: Props }) {
     catch { setCopied(''); }
   };
 
-  if(props.liveStatus?.runtime.running)return <div className="live-executions"><p>{props.liveStatus.live?'Demo order activity':'Instance running · demo execution not confirmed'} · These are order intents and acknowledgements, not a statement of realized profit.</p>{props.liveExecutions?.length?props.liveExecutions.map(row=><article key={row.id}><strong>{row.action||'ORDER'} · {row.state.toUpperCase()}</strong><small>{row.updatedAt?new Date(row.updatedAt).toLocaleString():'Time unavailable'}{row.entryPrice!=null?` · requested price ${row.entryPrice}`:''}{row.volume!=null?` · ${row.volume/100} units`:''}</small>{row.error&&<span>{row.error}</span>}</article>):<div className="output-empty"><ListChecks size={18}/><strong>No recorded demo orders yet</strong><span>New broker acknowledgements will appear here.</span></div>}</div>;
   if (!props.result) return <div className="output-empty"><ListChecks size={18}/><strong>No trades to inspect</strong><span>Run a backtest and each trade will be available here.</span></div>;
   return <>
     <div className="output-trade-list" role="list" aria-label="Backtest trades">
@@ -180,7 +175,7 @@ export function OutputDock(props: Props) {
   const tabs: { id: OutputTab; label: string; count?: number; icon: typeof TerminalIcon }[] = [
     { id: 'terminal', label: 'Terminal', count: props.logs.length, icon: TerminalIcon },
     { id: 'results', label: 'Results', count: props.result ? 1 : 0, icon: Activity },
-    { id: 'trades', label: 'Trades', count: props.liveStatus?.runtime.running?(props.liveExecutions?.length||0):(props.monetary?.trades.length ?? props.result?.trades.length ?? 0), icon: ListChecks },
+    { id: 'trades', label: 'Trades', count: (props.monetary?.trades.length ?? props.result?.trades.length ?? 0), icon: ListChecks },
     { id: 'versions', label: 'Versions', count: props.versions.length, icon: History },
   ];
   const beginRename = (version: BotVersion) => { setRenameTarget(version); setRenameValue(version.name); setVersionActionError(''); };
@@ -190,7 +185,7 @@ export function OutputDock(props: Props) {
     {!props.compact && !props.collapsed && <div className={`output-resize-handle${dragging ? ' dragging' : ''}`} role="separator" aria-label="Resize output panel" aria-orientation="horizontal" aria-valuenow={height} aria-valuemin={96} aria-valuemax={Math.round(window.innerHeight * .72)} tabIndex={0} onPointerDown={event => { event.preventDefault(); dragRef.current = { y: event.clientY, height }; setDragging(true); }} onKeyDown={event => { if (event.key === 'ArrowUp') { event.preventDefault(); setHeight(value => Math.min(Math.round(window.innerHeight * .72), value + 24)); } if (event.key === 'ArrowDown') { event.preventDefault(); setHeight(value => Math.max(96, value - 24)); } if (event.key === 'Home') setHeight(96); if (event.key === 'End') setHeight(Math.round(window.innerHeight * .72)); }}><GripHorizontal size={18}/></div>}
     <header className="output-dock-head">
       <div className="output-tab-list" role="tablist" aria-label="Backtest output">
-        {tabs.map(({ id, label, count, icon: Icon }) => <button key={id} type="button" role="tab" aria-selected={props.active === id} aria-controls={`output-panel-${id}`} className={`output-tab${props.active === id ? ' selected' : ''}`} onClick={() => { props.onTabChange(id); if (props.collapsed) props.onCollapse(); }}><Icon size={14}/><span>{label}</span>{id==='trades'&&props.liveStatus?.live&&<span className="live-trades-label"><i/> (LIVE · DEMO)</span>}{count !== undefined && <small>{count}</small>}</button>)}
+        {tabs.map(({ id, label, count, icon: Icon }) => <button key={id} type="button" role="tab" aria-selected={props.active === id} aria-controls={`output-panel-${id}`} className={`output-tab${props.active === id ? ' selected' : ''}`} onClick={() => { props.onTabChange(id); if (props.collapsed) props.onCollapse(); }}><Icon size={14}/><span>{label}</span>{count !== undefined && <small>{count}</small>}</button>)}
       </div>
       <div className="output-dock-actions">{props.busy === 'backtest' && <span className="running-label"><i/> RUNNING</span>}{props.busy === 'backtest' && <button type="button" className="output-stop" onClick={props.onStop}>Stop</button>}{props.active === 'terminal' && <button type="button" className="output-clear" aria-label="Clear terminal" title="Clear terminal" onClick={()=>setClearConfirm(true)}><Trash2 size={15}/></button>}{props.result&&['results','trades'].includes(props.active)&&<button type="button" className="output-clear" aria-label="Delete saved backtest" title="Delete saved backtest" onClick={()=>setDeleteBacktestConfirm(true)}><Trash2 size={15}/></button>}<button type="button" className="shadcn-icon-button output-collapse" aria-label={props.collapsed ? 'Expand output dock' : 'Collapse output dock'} onClick={props.onCollapse}>{props.collapsed ? <ChevronRight size={16}/> : <ChevronDown size={16}/>}</button></div>
     </header>
