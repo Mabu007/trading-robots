@@ -97,7 +97,7 @@ function App(){
   let active=true,timer:number|undefined;
   const poll=async()=>{
    try{const market=await sharingRequest<any>(cloudClient,`/api/venues/propdao/bots/${encodeURIComponent(draftId)}/live/market`);if(active)setPropMarket(market)}
-   catch(e){if(active)setPropMarket({error:err(e),fresh:false,candles:[]})}
+   catch(e){if(active)setPropMarket((current:any)=>({...current,error:err(e),fresh:false,candles:current?.candles||[]}))}
    finally{if(active)timer=window.setTimeout(poll,4000)}
   };void poll();return()=>{active=false;if(timer)window.clearTimeout(timer)}
  },[propLiveMode,cloudClient,screen,draftId]);
