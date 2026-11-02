@@ -68,7 +68,7 @@ export class PropDAOLiveService{
  }
  async market(uid:string,botId:string){
   const grant=await this.grant(uid,botId);
-  if(!grant||grant.revokedAt||Date.now()>=grant.expiresAt)throw Error('No active PropDAO authorization for this bot');
+  if(!grant||Date.now()>=grant.expiresAt)throw Error('No PropDAO deployment available for this bot');
   const config=parseStrategyConfig(grant.code),tf=config.executionTimeframe;
   const interval:Record<string,string>={m1:'1m',m5:'5m',m15:'15m',m30:'30m',h1:'1h',h4:'4h'};
   const seconds:Record<string,number>={m1:60,m5:300,m15:900,m30:1800,h1:3600,h4:14400};
