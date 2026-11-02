@@ -1,3 +1,4 @@
+import { validatePropDAORisk } from '../shared/propdao-risk.ts';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import type { Express, Request, Response as ExpressResponse } from 'express';
 
@@ -19,6 +20,48 @@ export class PropDAOAccounts {
  async connect(uid:string,apiKey:unknown){if(!validKey(apiKey))throw Error('Enter a valid PropDAO API key.');const encryptionKey=secret(this.key()),accounts=await this.accounts(apiKey);const iv=randomBytes(12),cipher=createCipheriv('aes-256-gcm',encryptionKey,iv);cipher.setAAD(Buffer.from(`trading-vibes:propdao:v1:${uid}`));const ciphertext=Buffer.concat([cipher.update(apiKey,'utf8'),cipher.final()]);await this.storage.write(path(uid),JSON.stringify({version:1,iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64'),ciphertext:ciphertext.toString('base64')}));return {connected:true,simulated:true,accounts};}
  async list(uid:string){const key=await this.load(uid);return key?{connected:true,simulated:true,accounts:await this.accounts(key)}:{connected:false,simulated:true,accounts:[]};}
  async snapshot(uid:string,id:unknown){if(!validId(id))throw Error('Choose a valid PropDAO account.');const key=await this.load(uid);if(!key)throw Error('Connect a PropDAO API key first.');const owned=(await this.accounts(key)).find((a:any)=>a.accountId===id);if(!owned)throw Error('PropDAO account not found.');const encoded=encodeURIComponent(id);const [state,risk,positions,orders]=await Promise.all([this.get(key,`/accounts/${encoded}`),this.get(key,`/accounts/${encoded}/risk`),this.get(key,`/accounts/${encoded}/positions`),this.get(key,`/accounts/${encoded}/orders`)]);if(!state||typeof state!=='object'||!risk||typeof risk.breached!=='boolean'||!['equity','floor','roomUsd'].every(f=>typeof risk[f]==='number'&&Number.isFinite(risk[f]))||!Array.isArray(positions?.data)||!Array.isArray(orders?.data))throw Error('PropDAO returned invalid account data.');return {simulated:true,account:owned,state,risk,positions:positions.data,orders:orders.data,executionEnabled:false};}
+ async accountRisk(uid:string,id:string){
+  if(!validId(id))throw Error('Invalid PropDAO account');
+  const key=await this.load(uid);if(!key)throw Error('Connect your PropDAO key first');
+  const account=(await this.accounts(key)).find((a:any)=>a.accountId===id);
+  if(!account)throw Error('PropDAO account not found');
+  const suffix=`/accounts/${encodeURIComponent(id)}`;
+  const [risk,positions,orders]=await Promise.all([this.get(key,suffix+'/risk'),this.get(key,suffix+'/positions'),this.get(key,suffix+'/orders')]);
+  if(typeof risk?.equity!=='number'||!Number.isFinite(risk.equity)||!Number.isFinite(risk.roomUsd)||typeof risk.breached!=='boolean'||!Array.isArray(positions?.data)||!Array.isArray(orders?.data))throw Error('PropDAO live account state is invalid');
+  return {account,risk,positions:positions.data,orders:orders.data};
+ }
+ async executeOrder(uid:string,id:string,input:{symbol:string;side:'BUY'|'SELL';price:number;stop:number;target:number;leverage:number;riskUsd:number;intentId:string;quoteTime:number}){
+  if(!validId(id)||!/^[A-Z0-9]{2,40}$/.test(input.symbol)||!['BUY','SELL'].includes(input.side)||!/^[a-zA-Z0-9_-]{10,128}$/.test(input.intentId))throw Error('Invalid live order intent');
+  if(!Number.isFinite(input.quoteTime)||Math.abs(Date.now()-input.quoteTime)>25000)throw Error('Market quote is stale');
+  const [live,markets]=await Promise.all([this.accountRisk(uid,id),this.getPublicMarkets()]);
+  if(live.positions.length||live.orders.length)throw Error('Account has open positions or resting orders. Reconcile before a new entry');
+  const market=markets.data.find((m:any)=>m.symbol===input.symbol);
+  if(!market||!Number.isFinite(market.lotStep)||!Number.isFinite(market.maxLeverage))throw Error('Unsupported PropDAO trading market');
+  const fee=Number(markets.fees?.taker);
+  const risk=Math.min(Number(input.riskUsd),live.risk.roomUsd*0.2);
+  if(!Number.isFinite(risk)||risk<=0||risk>10)throw Error('Invalid live trade risk budget');
+  if(!Number.isFinite(input.price)||!Number.isFinite(input.stop)||!Number.isFinite(input.target)||input.price<=0||input.stop<=0||input.target<=0||!Number.isFinite(input.leverage))throw Error('Invalid live order prices');
+  if(input.side==='BUY'?input.target<=input.price:input.target>=input.price)throw Error('Target must be on profitable side');
+  const lossPerUnit=Math.abs(input.price-input.stop)+(input.price+input.stop)*fee;
+  const marginPerUnit=input.price/input.leverage;
+  if(!Number.isFinite(lossPerUnit)||lossPerUnit<=0||!Number.isFinite(marginPerUnit)||marginPerUnit<=0)throw Error('Invalid market size');
+  const maxQty=Math.min(risk/lossPerUnit,live.risk.equity/marginPerUnit);
+  const qty=Number((Math.floor(maxQty/market.lotStep+1e-9)*market.lotStep).toPrecision(12));
+  const verdict=validatePropDAORisk({status:live.account.status,breached:live.risk.breached,roomUsd:live.risk.roomUsd,availableMargin:live.risk.equity,side:input.side,entry:input.price,stop:input.stop,quantity:qty,lotStep:market.lotStep,leverage:input.leverage,maxLeverage:market.maxLeverage,takerFeeRate:fee,userRiskLimitUsd:risk});
+  if(!verdict.ok)throw Error(verdict.reason);
+  const apiKey=await this.load(uid);if(!apiKey)throw Error('Credentials unavailable');
+  const response=await this.request(`https://app.propdao.finance/api/v1/accounts/${encodeURIComponent(id)}/orders`,{method:'POST',headers:{Authorization:`Bearer ${apiKey}`,'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({symbol:input.symbol,side:input.side,qty,leverage:input.leverage,orderType:'market',sl:input.stop,tp:input.target,intentId:input.intentId}),signal:AbortSignal.timeout(15000)});
+  let body:any;try{body=await response.json()}catch{throw Error('PropDAO order response is ambiguous; reconcile by intentId before retrying')};
+  if(!response.ok)throw Error(typeof body?.error==='string'?body.error:'PropDAO rejected live order');
+  return {intentId:input.intentId,quantity:qty,plannedLoss:verdict.plannedLoss,provider:body};
+ }
+ async getPublicMarkets(){
+  let response:Response;try{response=await this.request('https://app.propdao.finance/api/v1/markets',{signal:AbortSignal.timeout(10000)})}catch{throw Error('Could not load PropDAO market metadata')};
+  if(!response.ok)throw Error('PropDAO markets unavailable');
+  const body=await response.json() as any;
+  if(!Array.isArray(body?.data)||!Number.isFinite(body?.fees?.taker))throw Error('Invalid PropDAO market metadata');
+  return body;
+ }
  async disconnect(uid:string){await this.storage.remove(path(uid));return {connected:false};}
 }
 export function propDAORoutes(app:Express,accounts:PropDAOAccounts,uid:(req:Request,res:ExpressResponse)=>Promise<string|null>){
