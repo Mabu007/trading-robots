@@ -75,4 +75,24 @@ describe('PropDAO live execution authorization',()=>{
   expect(await svc.status('alice','bot-1')).toMatchObject({running:false,uncertain:true,connected:false});
  });
 
+ it('requires a saved owner authorization before reading live market candles',async()=>{
+  const {svc}=setup();
+  await expect(svc.market('alice','bot-1')).rejects.toThrow(/No PropDAO deployment/);
+ });
+ it('serves validated fresh Hyperliquid candles for an authorized PropDAO workspace',async()=>{
+  vi.stubEnv('VERCEL_ENV','development');vi.stubEnv('PROPDAO_LIVE_ENABLED','true');
+  vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');
+  vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','x'.repeat(40));
+  const {svc,fetcher}=setup();
+  await svc.deploy('alice','bot-1',{body:{accountId:'prop-1',riskUsd:1,leverage:1,confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'}} as any);
+  const candleStart=Math.floor(Date.now()/60000)*60000;
+  fetcher.mockImplementation(async(url:string)=>String(url)==='https://api.hyperliquid.xyz/info'
+   ?Response.json([{t:candleStart,o:'100',h:'102',l:'99',c:'101',v:'1000'}])
+   :Response.json({ready:true}));
+  const market=await svc.market('alice','bot-1');
+  expect(market).toMatchObject({source:'Hyperliquid',symbol:'BTCUSDC',timeframe:'m1',fresh:true});
+  expect(market.candles).toHaveLength(1);
+  expect(market.candles[0].close).toBe(101);
+  await expect(svc.market('bob','bot-1')).rejects.toThrow(/No PropDAO deployment/);
+ });
 });

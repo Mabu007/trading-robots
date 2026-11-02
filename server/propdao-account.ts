@@ -112,6 +112,18 @@ export class PropDAOAccounts {
   if(!Array.isArray(body?.data)||!Number.isFinite(body?.fees?.taker))throw Error('Invalid PropDAO market metadata');
   return body;
  }
+ async recentTrades(uid:string,id:string){
+  if(!validId(id))throw Error('Invalid PropDAO account');
+  const apiKey=await this.load(uid);if(!apiKey)throw Error('Connect your PropDAO key first');
+  const body=await this.get(apiKey,`/accounts/${encodeURIComponent(id)}/trades?limit=50`);
+  if(!Array.isArray(body?.data))throw Error('Invalid PropDAO trade history');
+  return body.data.slice(0,50).map((t:any)=>({
+   id:String(t.id||''),symbol:String(t.symbol||''),side:t.side,qty:Number(t.qty),entry:Number(t.entry),
+   exit:Number(t.exit),pnl:Number(t.pnl),openedAt:Number(t.openedAt),closedAt:Number(t.closedAt),
+   reason:String(t.reason||''),fee:Number(t.fee||0)
+  })).filter((t:any)=>t.id&&t.symbol&&['BUY','SELL'].includes(t.side)&&
+   [t.qty,t.entry,t.exit,t.pnl,t.openedAt,t.closedAt,t.fee].every(Number.isFinite));
+ }
  async disconnect(uid:string){await this.storage.remove(path(uid));return {connected:false};}
 }
 export function propDAORoutes(app:Express,accounts:PropDAOAccounts,uid:(req:Request,res:ExpressResponse)=>Promise<string|null>,beforeChange?:(uid:string)=>Promise<void>){
