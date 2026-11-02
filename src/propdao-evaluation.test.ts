@@ -42,6 +42,16 @@ describe('Iron $1K evaluation replay',()=>{
   expect(s.completedTrades).toBe(1);expect(s.trades[0].pnlUsd).toBeCloseTo(-2.75);
   expect(s.balance).toBeCloseTo(997.25);
  });
+ it('uses highest closed balance, not opening equity, for daily loss floor',()=>{
+  const target2={action:'BUY',stopLoss:99,takeProfit:102};
+  const candles=[candle(0),candle(1,100,102,102),candle(2),candle(3,99,100,99),candle(4),candle(5,99,100,99)];
+  const s=simulatePropDAO(candles,[target2,undefined,buy,undefined,buy,undefined],1);
+  // +$20 banked, followed by -$20: daily high-water loss is $20,
+  // even though balance returns to the original $1,000.
+  expect(s.status).toBe('failed-daily');
+  expect(s.balance).toBe(1000);
+  expect(s.maxObservedDailyLoss).toBeCloseTo(20);
+ });
  it('defines the agreed challenge limits',()=>{
   expect(IRON_1K).toEqual({startingBalance:1000,targetProfit:100,maxStaticLoss:50,maxDailyLoss:20});
  });
