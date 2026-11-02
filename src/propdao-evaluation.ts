@@ -8,7 +8,7 @@ export type EvaluationPoint={time:number;equity:number;balance:number;dailyLossU
 export type PropDAOSimulation={
  status:EvaluationStatus; reason:string; startingBalance:number; equity:number; balance:number;
  available:number; profit:number; profitTargetUsed:number; profitTargetRemaining:number;
- dailyLossUsed:number; drawdownUsed:number; maxObservedDrawdown:number; maxObservedDailyLoss:number;
+ dailyLossUsed:number; dailyAllowance:number; drawdownUsed:number; maxObservedDrawdown:number; maxObservedDailyLoss:number;
  riskPercent:number; trades:EvaluationTrade[]; equityCurve:EvaluationPoint[];
  endedAt:number|null; endLabel:string; completedTrades:number;
 };
@@ -20,31 +20,32 @@ export function simulatePropDAO(candles:Candle[],decisions:any[],riskPercent=0.2
  if(!Number.isFinite(riskPercent)||riskPercent<=0||riskPercent>2)throw Error('Evaluation risk must be between 0 and 2%.');
  if(!Object.values(costs).every(x=>Number.isFinite(x)&&x>=0))throw Error('Evaluation costs must be non-negative.');
  const initial=IRON_1K.startingBalance, riskUsd=initial*riskPercent/100;
- let balance:number=initial,equity:number=initial,dailyStart:number=initial,day='',maxDaily=0,maxTotal=0;
+ let balance:number=initial,equity:number=initial,dailyStart:number=initial,dayAllowance:number=IRON_1K.maxDailyLoss,highClosed:number=initial,day='',maxDaily=0,maxTotal=0;
  let status:EvaluationStatus='not-passed',reason='Profit target not reached in selected historical period.';
  let endedAt:number|null=null,position:({side:Side;entryTime:number;entry:number;stop:number;target:number;riskDistance:number;entryFeeR:number})|null=null;
  const trades:EvaluationTrade[]=[],equityCurve:EvaluationPoint[]=[];
  const limit=(value:number)=>Math.max(0,value);
  const assess=(time:number,probe:number)=>{
   equity=probe;
-  const total=limit(initial-equity),daily=limit(dailyStart-equity);
+  const total=limit(initial-equity),daily=limit(highClosed-equity);
   maxTotal=Math.max(maxTotal,total);maxDaily=Math.max(maxDaily,daily);
   if(equity<=initial-IRON_1K.maxStaticLoss+1e-8){status='failed-total';reason='Static 5% drawdown limit was reached or exceeded.';}
-  else if(equity<=dailyStart-IRON_1K.maxDailyLoss+1e-8){status='failed-daily';reason='Daily 2% loss limit was reached or exceeded.';}
+  else if(equity<=highClosed-dayAllowance+1e-8){status='failed-daily';reason='Daily 2% loss limit was reached or exceeded.';}
   if(status!=='not-passed')endedAt=time;
  };
  const mark=(time:number)=>{
-  equityCurve.push({time,equity,balance,dailyLossUsed:limit(dailyStart-equity),drawdownUsed:limit(initial-equity)});
+  equityCurve.push({time,equity,balance,dailyLossUsed:limit(highClosed-equity),drawdownUsed:limit(initial-equity)});
  };
  const pnlR=(p:NonNullable<typeof position>,price:number)=>((price-p.entry)*(p.side==='LONG'?1:-1)-costs.spread-2*costs.slippage)/p.riskDistance-costs.commissionR;
  const close=(p:NonNullable<typeof position>,c:Candle,price:number,why:Trade['reason'])=>{
   const r=pnlR(p,price),pnlUsd=r*riskUsd;balance+=pnlUsd;
+  highClosed=Math.max(highClosed,balance);
   trades.push({id:trades.length+1,side:p.side,entryTime:p.entryTime,exitTime:c.time,entry:p.entry,exit:price,stop:p.stop,target:p.target,reason:why,pnl:r,pnlUsd,balanceAfter:balance,riskUsd});
   equity=balance;
  };
  for(let i=0;i<candles.length;i++){
   const c=candles[i];const today=new Date(c.time*1000).toISOString().slice(0,10);
-  if(today!==day){day=today;dailyStart=equity;}
+  if(today!==day){day=today;dailyStart=equity;dayAllowance=Math.max(0,dailyStart*0.02);highClosed=balance;}
   let closed=false;
   if(position){
    const p=position;
@@ -100,7 +101,7 @@ export function simulatePropDAO(candles:Candle[],decisions:any[],riskPercent=0.2
   status,reason,startingBalance:initial,equity,balance,available:equity,
   profit:balance-initial,profitTargetUsed:Math.max(0,(balance-initial)/initial*100),
   profitTargetRemaining:Math.max(0,initial+IRON_1K.targetProfit-balance),
-  dailyLossUsed:last?.dailyLossUsed??0,drawdownUsed:last?.drawdownUsed??0,
+  dailyLossUsed:last?.dailyLossUsed??0,dailyAllowance:dayAllowance,drawdownUsed:last?.drawdownUsed??0,
   maxObservedDrawdown:maxTotal,maxObservedDailyLoss:maxDaily,
   riskPercent,trades,equityCurve,endedAt,
   endLabel:endedAt?new Date(endedAt*1000).toISOString():'Historical period ended',completedTrades:trades.length
