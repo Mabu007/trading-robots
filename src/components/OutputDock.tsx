@@ -8,11 +8,12 @@ import {PropDAOEvaluationPanel} from './PropDAOEvaluationPanel';
 import type {PropDAOSimulation} from '../propdao-evaluation';
 import type { BotVersion } from '../firebase';
 
-export type OutputTab = 'terminal' | 'results' | 'trades' | 'versions';
+export type OutputTab = 'terminal' | 'results' | 'prop-results' | 'trades' | 'versions';
 
 type Props = {
   monetary: MonetaryResult | null;
   propEvaluation: PropDAOSimulation | null;
+  isPropDAO: boolean;
   asset: string;
   timeframe?: string;
   from: string;
@@ -82,7 +83,7 @@ function ResultPanel({ result, from, to, asset, monetary, propEvaluation }: { re
   const metrics = result.metrics;
   return <div className="output-result-panel">
     <div className="output-result-heading"><div><span className="output-eyebrow">{propEvaluation?'PROPDAO · IRON $1K EVALUATION':monetary?'MONEY BACKTEST · SIMULATION':'BACKTEST RESULTS · R ONLY'}</span><strong>{asset} <i>·</i> {result.timeframe?.toUpperCase() || '—'}</strong><small>{from} <span>→</span> {to} · {result.candles.length.toLocaleString()} candles</small></div><span className="output-result-mark"><Check size={15}/></span></div>
-    {propEvaluation?<PropDAOEvaluationPanel simulation={propEvaluation}/>:<MonetaryResults result={monetary}/>}
+    {propEvaluation?<p className="output-disclaimer">See the <strong>Prop Results</strong> tab for the $1,000 evaluation account, drawdown limits and pass/fail outcome.</p>:<MonetaryResults result={monetary}/>}
     <details className="theoretical-results"><summary>View theoretical R results</summary><div className="output-metrics">
       <div className="output-metric featured"><span>NET RESULT</span><strong className={metrics.netReturn >= 0 ? 'green' : 'red'}>{metrics.netReturn >= 0 ? '+' : ''}{metrics.netReturn.toFixed(2)}R</strong></div>
       <div className="output-metric"><span>PROFIT FACTOR</span><strong>{metrics.profitFactor === Infinity ? '∞' : metrics.profitFactor.toFixed(2)}</strong></div>
@@ -178,6 +179,7 @@ export function OutputDock(props: Props) {
   const tabs: { id: OutputTab; label: string; count?: number; icon: typeof TerminalIcon }[] = [
     { id: 'terminal', label: 'Terminal', count: props.logs.length, icon: TerminalIcon },
     { id: 'results', label: 'Results', count: props.result ? 1 : 0, icon: Activity },
+    ...(props.isPropDAO ? [{ id: 'prop-results' as const, label: 'Prop Results', count: props.propEvaluation ? 1 : 0, icon: Activity }] : []),
     { id: 'trades', label: 'Trades', count: (props.propEvaluation?.trades.length ?? props.monetary?.trades.length ?? props.result?.trades.length ?? 0), icon: ListChecks },
     { id: 'versions', label: 'Versions', count: props.versions.length, icon: History },
   ];
@@ -190,11 +192,12 @@ export function OutputDock(props: Props) {
       <div className="output-tab-list" role="tablist" aria-label="Backtest output">
         {tabs.map(({ id, label, count, icon: Icon }) => <button key={id} type="button" role="tab" aria-selected={props.active === id} aria-controls={`output-panel-${id}`} className={`output-tab${props.active === id ? ' selected' : ''}`} onClick={() => { props.onTabChange(id); if (props.collapsed) props.onCollapse(); }}><Icon size={14}/><span>{label}</span>{count !== undefined && <small>{count}</small>}</button>)}
       </div>
-      <div className="output-dock-actions">{props.busy === 'backtest' && <span className="running-label"><i/> RUNNING</span>}{props.busy === 'backtest' && <button type="button" className="output-stop" onClick={props.onStop}>Stop</button>}{props.active === 'terminal' && <button type="button" className="output-clear" aria-label="Clear terminal" title="Clear terminal" onClick={()=>setClearConfirm(true)}><Trash2 size={15}/></button>}{props.result&&['results','trades'].includes(props.active)&&<button type="button" className="output-clear" aria-label="Delete saved backtest" title="Delete saved backtest" onClick={()=>setDeleteBacktestConfirm(true)}><Trash2 size={15}/></button>}<button type="button" className="shadcn-icon-button output-collapse" aria-label={props.collapsed ? 'Expand output dock' : 'Collapse output dock'} onClick={props.onCollapse}>{props.collapsed ? <ChevronRight size={16}/> : <ChevronDown size={16}/>}</button></div>
+      <div className="output-dock-actions">{props.busy === 'backtest' && <span className="running-label"><i/> RUNNING</span>}{props.busy === 'backtest' && <button type="button" className="output-stop" onClick={props.onStop}>Stop</button>}{props.active === 'terminal' && <button type="button" className="output-clear" aria-label="Clear terminal" title="Clear terminal" onClick={()=>setClearConfirm(true)}><Trash2 size={15}/></button>}{props.result&&['results','prop-results','trades'].includes(props.active)&&<button type="button" className="output-clear" aria-label="Delete saved backtest" title="Delete saved backtest" onClick={()=>setDeleteBacktestConfirm(true)}><Trash2 size={15}/></button>}<button type="button" className="shadcn-icon-button output-collapse" aria-label={props.collapsed ? 'Expand output dock' : 'Collapse output dock'} onClick={props.onCollapse}>{props.collapsed ? <ChevronRight size={16}/> : <ChevronDown size={16}/>}</button></div>
     </header>
     {!props.collapsed && <div className="output-dock-body" role="tabpanel" id={`output-panel-${props.active}`}>
       {props.active === 'terminal' && <div className="terminal-content">{props.logs.length ? props.logs.map((line, index) => <div className={`log-line ${line.includes('failed')||line.includes('stopped')?'error':''}`} key={`${index}-${line}`}><span className="log-prompt">›</span>{line}</div>) : <div className="terminal-placeholder"><span>›</span> Backtest activity, market data, and errors appear here.</div>}</div>}
       {props.active === 'results' && <ResultPanel result={props.result} from={props.from} to={props.to} asset={props.asset} monetary={props.monetary} propEvaluation={props.propEvaluation}/>}
+      {props.active === 'prop-results' && props.isPropDAO && <div className="output-prop-results"><PropDAOEvaluationPanel simulation={props.propEvaluation}/></div>}
       {props.active === 'trades' && <TradesPanel props={props}/>}
       {props.active === 'versions' && <VersionsPanel props={props} onRename={beginRename} onDelete={version=>{setDeleteTarget(version);setVersionActionError('')}}/>}
     </div>}
