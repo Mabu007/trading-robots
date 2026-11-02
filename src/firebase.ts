@@ -1,8 +1,10 @@
+import {venueOf,type Venue} from '../shared/venues';
 import {cloudBotFromRecord} from './cloud-bot';
 export type CloudBot = {
   id: string;
   name: string;
   asset: string;
+  venue?: Venue;
   prompt: string;
   code?: string;
   storageKey?: string;
@@ -85,6 +87,7 @@ export function connectFirebase(): Promise<CloudClient | null> {
         const payload = {
           name: bot.name.slice(0, 64),
           asset: bot.asset,
+          venue: venueOf(bot.venue),
           prompt: bot.prompt.slice(0, 12_000),
           storage: { provider: 'r2', key: storageKey },
           lastBacktest: bot.lastBacktest ?? null,

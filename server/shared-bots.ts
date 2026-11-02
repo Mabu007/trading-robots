@@ -95,6 +95,7 @@ export function sharedBotRoutes(app: Express, storage: Storage) {
     try {
       const current = await storage.read(`${storage.root(uid, botId)}/current.json`);
       const saved = current ? JSON.parse(current) : null;
+      if(saved?.venue && saved.venue!=='valr')return res.status(409).json({error:'Sharing for this venue is not available yet.'});
       if (!saved || saved.userId !== uid || saved.botId !== botId || typeof saved.code !== 'string' || !saved.code.trim()) {
         return res.status(409).json({ error: 'Save the robot’s strategy before sharing it.' });
       }
