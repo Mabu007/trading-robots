@@ -53,7 +53,7 @@ export class PropDAOLiveBot extends DurableObject<any>{
   if(action==='deploy'){
    if(this.env.PROPDAO_LIVE_ENABLED!=='true'||!this.env.PROPDAO_LIVE_INTERNAL_SECRET)throw Error('Live runtime is disabled');
    const grant=input as Grant;
-   if(!grant?.uid||grant.uid!==req.headers.get('X-TV-UID')||!grant.id||!grant.botId||!grant.code||!Number.isFinite(grant.issuedAt)||!Number.isFinite(grant.expiresAt)||grant.issuedAt>Date.now()+5000||grant.expiresAt>grant.issuedAt+24*3600_000||Date.now()>grant.issuedAt+60000||Date.now()>=grant.expiresAt)throw Error('Invalid or expired deployment');
+   if(!grant?.uid||grant.uid!==req.headers.get('X-TV-UID')||!grant.id||!grant.botId||!grant.code||!Number.isFinite(grant.issuedAt)||!Number.isFinite(grant.expiresAt)||grant.issuedAt>Date.now()+5000||grant.expiresAt>grant.issuedAt+7*24*3600_000||Date.now()>grant.issuedAt+60000||Date.now()>=grant.expiresAt)throw Error('Invalid or expired deployment');
    if(await hash(grant.code)!==grant.codeHash)throw Error('Strategy identity mismatch');
    if(existing?.uid&&existing.uid!==grant.uid)throw Error('This account belongs to another identity');
    if(existing&&(await this.ctx.storage.get<boolean>('running')))throw Error('Account already has a running robot');
@@ -89,6 +89,7 @@ export class PropDAOLiveBot extends DurableObject<any>{
    const decision=decisions.at(-1);
    await this.ctx.storage.put(marker,close);
    await this.ctx.storage.put('lastEvaluation',{time:Date.now(),candleClose:close,action:decision?.action||'WAIT'});
+   await this.record(`Candle ${config.executionTimeframe.toUpperCase()} · ${new Date(close*1000).toISOString()} · signal ${decision?.action||'WAIT'}`);
    if(decision?.action!=='BUY'&&decision?.action!=='SELL'){await this.ctx.storage.delete('lastError');return;}
    const last=execution.at(-1);
    if(!last||last.time+period!==close||Date.now()-close*1000>25000)throw Error('Live candle too old for order entry');
@@ -103,6 +104,17 @@ export class PropDAOLiveBot extends DurableObject<any>{
    await this.ctx.storage.delete('pendingIntent');
    await this.record(order.filled?`Protected fill ${decision.action} ${grant.symbol} · ${intentId}`:`Unfilled entry cancelled ${grant.symbol} · ${intentId}`);
    await this.ctx.storage.delete('lastError');
-  }catch(e){const error=e instanceof Error?e.message:'Live evaluation failed';await this.ctx.storage.put('running',false);await this.ctx.storage.put('lastError',error);await this.record(`Evaluation error: ${error}`);}finally{await this.schedule()}
+  }catch(e){const error=e instanceof Error?e.message:'Live evaluation failed';
+   const transient=!(await this.ctx.storage.get('pendingIntent')) &&
+    /Latest closed market candle missing|Recent live candles contain gaps|Hyperliquid live market data unavailable|Invalid Hyperliquid candles/.test(error);
+   if(transient){
+    const previous=await this.ctx.storage.get<string>('lastError');
+    await this.ctx.storage.put('lastError','Market data paused · '+error);
+    if(previous!=='Market data paused · '+error)await this.record('Awaiting valid market data · '+error);
+   }else{
+    await this.ctx.storage.put('running',false);await this.ctx.storage.put('lastError',error);
+    await this.record('Execution halted · '+error);
+   }
+  }finally{await this.schedule()}
  })}
 }
