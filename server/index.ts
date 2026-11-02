@@ -11,6 +11,7 @@ import { marketplace,marketplaceRoutes } from './marketplace.ts';
 import { FirestoreStore } from './firestore-store.ts';
 import { ValrMarketData } from './valr-market-data.ts';
 import { VenueMarketData } from './venue-market-data.ts';
+import { DwellirHistory } from './dwellir-history.ts';
 import { PropDAOAccounts, propDAORoutes } from './propdao-account.ts';
 import { valrAccountRoutes } from './valr-routes.ts';
 import { valrPaperRoutes } from './valr-paper-routes.ts';
@@ -22,6 +23,7 @@ import { readOwnedBotAsset } from './firebase-owned-bot.ts';
 const app = express();
 const valrMarketData = new ValrMarketData();
 const venueMarketData = new VenueMarketData();
+const dwellirHistory = new DwellirHistory();
 app.use(['/api/marketplace','/api/economy','/api/valr','/api/venues','/api/openrouter'],requestLimit);
 app.use(express.json({ limit: '10mb' }));
 
@@ -88,9 +90,13 @@ app.post('/api/venues/propdao/candles', async (req,res) => {
   const coin=market.dex?(market.coin.includes(':')?market.coin:`${market.dex}:${market.coin}`):market.coin;
   const discovered=(await venueMarketData.hyperliquidMarkets()).markets.some((m:any)=>m.symbol===coin);
   if(!discovered)return res.status(422).json({error:'No verified matching Hyperliquid market is available.'});
-  const data=await venueMarketData.hyperliquidCandles({...req.body,asset:coin});
-  return res.json({...data,asset:market.symbol,source:`Hyperliquid reference (${coin}) for PropDAO; simulated fills may differ`});
- }catch {return res.status(502).json({error:'PropDAO reference history is unavailable. Hyperliquid retains the latest 5,000 candles per interval.'})}
+  const data=await dwellirHistory.candles({...req.body,asset:coin});
+  return res.json({...data,asset:market.symbol,source:`Dwellir / Hyperliquid reference (${coin}) for PropDAO; fills may differ`});
+ }catch(error){
+  const message=error instanceof Error?error.message:'PropDAO historical data is unavailable.';
+  const invalid=/^(Choose|Select)/.test(message);
+  return res.status(invalid?400:502).json({error:message});
+ }
 });
 app.post('/api/venues/hyperliquid/candles', async (req,res) => {
   try { res.json(await venueMarketData.hyperliquidCandles(req.body ?? {})); } catch (error) {
