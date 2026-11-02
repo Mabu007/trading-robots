@@ -62,3 +62,46 @@
  .economy-home>.economy-edit:not(.economy-release){order:4}
 }
 .access-code-layout{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));align-items:start;gap:16px}.access-code-layout>section{min-width:0}.access-code-layout input{max-width:100%}.access-code-layout small{overflow-wrap:anywhere}
+
+/* The library shares the shell's width instead of inheriting the standalone
+   library's 1120px cap. All primary workspace edges now align. */
+.economy-shell{min-width:0}
+.creator-home .economy-library,.economy-library>.bot-library{width:100%;min-width:0;overflow:visible}
+.economy-library .library-content{width:100%;max-width:none;margin:0;padding:0;min-width:0}
+.economy-section-heading h1{font-size:clamp(24px,3vw,32px);line-height:1.2;letter-spacing:-.8px;margin:8px 0 10px}
+.economy-section-heading{align-items:center;padding-top:34px}
+.economy-section-heading p{margin-bottom:0;max-width:680px}
+.creator-home .economy-nav{margin-top:0}
+.creator-home .economy-nav button,.creator-home .economy-nav a{min-height:48px;font-size:12px}
+.economy-library .robot-empty{width:100%;min-height:250px;margin:0;padding:32px 20px}
+.economy-library .robot-grid{min-width:0}
+.economy-library .robot-name,.economy-event>div{overflow-wrap:anywhere;min-width:0}
+.economy-library .library-search{min-height:60px;gap:16px}
+.economy-library .library-search input{min-width:0;min-height:40px;font-size:14px}
+.economy-library .library-search select{min-height:40px;flex:none}
+.library-sync-notice{display:flex;align-items:center;justify-content:space-between;gap:16px;border:1px solid #d8946b66;background:#2a2018;padding:16px;border-radius:10px;margin-bottom:18px;color:#f3c69d}
+.library-sync-notice strong{font-size:13px}.library-sync-notice p{font-size:12px;line-height:1.6;margin:5px 0 0}.library-sync-notice button{flex:none}
+.library-loading{padding:20px 0;color:#a7b4ab;font-size:13px}
+.mobile-section-picker{display:none!important}
+.economy-event{flex-wrap:wrap}.economy-event>div{flex:1 1 240px}
+.economy-shell button:focus-visible,.economy-shell a:focus-visible,.economy-shell select:focus-visible,.economy-shell input:focus-visible{outline:2px solid #cfda9a;outline-offset:3px}
+@media(max-width:640px){
+ .economy-home>.creator-nav-primary{display:block;order:2}
+ .creator-nav-primary>.economy-nav{display:none}
+ .creator-nav-primary>.mobile-section-picker{display:flex!important;gap:7px;margin:8px 0 18px;font-size:11px}
+ .mobile-section-picker select{width:100%;min-height:44px;font-size:16px}
+ .economy-home>.economy-library{order:3}
+ .economy-home>.economy-project-tools{order:4}
+ .economy-home>.mobile-home-hero{padding-bottom:12px}
+ .economy-brand{height:auto;min-height:80px;align-items:stretch;gap:14px;padding:16px 0}
+ .economy-brand nav{align-items:center;justify-content:space-between;gap:14px;font-size:12px;min-width:0}
+ .economy-brand nav>a{min-height:38px;display:inline-flex;align-items:center}
+ .economy-library .library-search{gap:10px;flex-wrap:wrap;padding:10px 12px}
+ .economy-library .library-search input{flex:1 1 140px;font-size:16px}
+ .economy-library .library-search select{font-size:13px;flex:0 1 auto;max-width:100%}
+ .economy-library .robot-empty{min-height:260px;padding:28px 16px}
+ .library-sync-notice{align-items:stretch;flex-direction:column}
+ .economy-library .robot-card-actions button{min-width:44px;min-height:44px}
+ .access-code-layout{grid-template-columns:minmax(0,1fr)}
+}
+.economy-home>.share-error,.economy-home>.economy-notice,.economy-home>.workspace-retry{order:2}
