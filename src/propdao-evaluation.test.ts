@@ -25,14 +25,14 @@ describe('Iron $1K evaluation replay',()=>{
   expect(s.balance).toBe(980);expect(s.endedAt).toBe(origin+180);
  });
  it('fails the static floor when a gap is large, even if daily loss limit also breaches',()=>{
-  const candles=[candle(0),candle(1,100,101,100),candle(2,96,100,97)];
+  const candles=[candle(0),candle(1,100,101,100),{...candle(2,96,100,97),open:96}];
   const s=simulatePropDAO(candles,[buy,undefined,undefined],2);
   expect(s.status).toBe('failed-total');expect(s.maxObservedDrawdown).toBeGreaterThanOrEqual(50);
   expect(s.endedAt).toBe(origin+120);
  });
  it('checks worst intrabar equity conservatively even if candle recovers',()=>{
   const signal={action:'BUY',stopLoss:99,takeProfit:110};
-  const candles=[candle(0),candle(1,100,101,100),candle(2,97,110,110)];
+  const candles=[candle(0),candle(1,100,101,100),{...candle(2,97,110,110),open:97}];
   const s=simulatePropDAO(candles,[signal,undefined,undefined],1);
   expect(s.status).toBe('failed-daily');
   expect(s.maxObservedDailyLoss).toBeGreaterThanOrEqual(20);
