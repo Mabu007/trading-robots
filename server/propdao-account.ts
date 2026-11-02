@@ -53,7 +53,26 @@ export class PropDAOAccounts {
   const response=await this.request(`https://app.propdao.finance/api/v1/accounts/${encodeURIComponent(id)}/orders`,{method:'POST',headers:{Authorization:`Bearer ${apiKey}`,'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({symbol:input.symbol,side:input.side,qty,leverage:input.leverage,orderType:'market',sl:input.stop,tp:input.target,intentId:input.intentId}),signal:AbortSignal.timeout(15000)});
   let body:any;try{body=await response.json()}catch{throw Error('PropDAO order response is ambiguous; reconcile by intentId before retrying')};
   if(!response.ok)throw Error(typeof body?.error==='string'?body.error:'PropDAO rejected live order');
-  return {intentId:input.intentId,quantity:qty,plannedLoss:verdict.plannedLoss,provider:body};
+  const base=`https://app.propdao.finance/api/v1/accounts/${encodeURIComponent(id)}`;
+  const fetchPositions=async()=>{
+   const positions=await this.get(apiKey,`/accounts/${encodeURIComponent(id)}/positions`);
+   if(!Array.isArray(positions?.data))throw Error('Unable to reconcile PropDAO order protection');
+   return positions.data;
+  };
+  const protectedPrice=(actual:unknown,expected:number)=>typeof actual==='number'&&Number.isFinite(actual)&&Math.abs(actual-expected)<=Math.max(0.01,Math.abs(expected)*0.000001);
+  const isProtected=(position:any)=>protectedPrice(position.slPrice,input.stop)&&protectedPrice(position.tpPrice,input.target);
+  const matching=(await fetchPositions()).filter((p:any)=>p.symbol===input.symbol&&p.side===input.side&&Number(p.qty)>0);
+  if(matching.length!==1)throw Error('Live entry needs reconciliation; no further entries permitted while positions are unresolved');
+  let position=matching[0];
+  if(!isProtected(position)){
+   if(!validId(String(position.id||'')))throw Error('Protective position identity unavailable');
+   const patched=await this.request(`${base}/positions/${encodeURIComponent(position.id)}`,{method:'PATCH',headers:{Authorization:`Bearer ${apiKey}`,'Content-Type':'application/json'},body:JSON.stringify({sl:input.stop,tp:input.target}),signal:AbortSignal.timeout(12000)});
+   if(!patched.ok)throw Error('Protective orders unconfirmed. Inspect and close this position on PropDAO');
+   const revised=(await fetchPositions()).find((p:any)=>p.id===position.id);
+   if(!revised||!isProtected(revised))throw Error('Protective orders did not reconcile. Inspect your position immediately');
+   position=revised;
+  }
+  return {intentId:input.intentId,quantity:qty,plannedLoss:verdict.plannedLoss,protected:true,positionId:position.id,provider:body};
  }
  async getPublicMarkets(){
   let response:Response;try{response=await this.request('https://app.propdao.finance/api/v1/markets',{signal:AbortSignal.timeout(10000)})}catch{throw Error('Could not load PropDAO market metadata')};
