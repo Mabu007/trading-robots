@@ -20,6 +20,6 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run check:runtime
-      - run: npm run worker:build
-      - run: npm run test:cloudflare
-        # Local fixtures only. Production CPU/provider demo tests remain gates.
+      - run: npm run worker:valr:build
+      - run: npm run worker:valr:live:build
+        # Local fixtures only; live venue credentials are never required.
