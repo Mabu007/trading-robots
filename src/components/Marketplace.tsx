@@ -43,6 +43,36 @@ function PropDAOAccount({client,onClose,onVALR}:{client:CloudClient;onClose:()=>
   </>}
  </Modal>;
 }
+export function PropDAODeployDialog({client,botId,onClose,onLog}:{client:CloudClient;botId:string;onClose:()=>void;onLog:(line:string)=>void}){
+ const [accounts,setAccounts]=useState<{accountId:string;status:string}[]>([]);
+ const [accountId,setAccountId]=useState(''),[riskUsd,setRiskUsd]=useState('2'),[leverage,setLeverage]=useState('1'),[confirmed,setConfirmed]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[status,setStatus]=useState<any>(null);
+ const load=async()=>{setBusy(true);setError('');try{
+  const [accountsResult,live]=await Promise.all([sharingRequest<any>(client,'/api/venues/propdao/accounts'),sharingRequest<any>(client,`/api/venues/propdao/bots/${encodeURIComponent(botId)}/live`)]);
+  const list=accountsResult.accounts||[];setAccounts(list);setStatus(live);
+  let saved='';try{saved=localStorage.getItem('trading-vibes:propdao:selected-account')||''}catch{}
+  setAccountId(old=>list.some((a:any)=>a.accountId===old)?old:list.some((a:any)=>a.accountId===saved)?saved:live.accountId||'');
+ }catch(e){setError(message(e))}finally{setBusy(false)}};
+ useEffect(()=>{void load()},[client,botId]);
+ const deploy=async()=>{
+  if(!confirmed||!accountId)return;setBusy(true);setError('');
+  try{
+   const next=await sharingRequest<any>(client,`/api/venues/propdao/bots/${encodeURIComponent(botId)}/live`,'POST',{action:'deploy',accountId,riskUsd:Number(riskUsd),leverage:Number(leverage),confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'});
+   onLog(`PropDAO live · deployment accepted · ${accountId}`);setStatus(next);onClose();
+  }catch(e){setError(message(e))}finally{setBusy(false)}
+ };
+ const stop=async()=>{setBusy(true);setError('');try{await sharingRequest(client,`/api/venues/propdao/bots/${encodeURIComponent(botId)}/live`,'POST',{action:'stop'});onLog('PropDAO live · automatic entries stopped; check existing positions on PropDAO.');onClose()}catch(e){setError(message(e))}finally{setBusy(false)}};
+ const selected=accounts.find(a=>a.accountId===accountId);
+ return <Modal title="Deploy · PropDAO" close={onClose}>
+  <p>Run your strategy against a PropDAO simulated-capital account using live market prices. This can fail your evaluation. Your developer key stays on the server.</p>
+  {error&&<p className="share-error" role="alert">{error}</p>}
+  <div className="market-status"><strong>{status?.running?'Running · live evaluation':status?.configured?'Runtime connected · ready to authorize':'Runtime not configured'}</strong><span>{status?.error||'Strategy scheduling uses a Cloudflare Durable Object. Stop disables new entries, not existing positions.'}</span></div>
+  {accounts.length?<label>PropDAO account<select disabled={busy||Boolean(status?.running)} value={accountId} onChange={e=>setAccountId(e.target.value)}><option value="">Choose account</option>{accounts.map(a=><option key={a.accountId} value={a.accountId}>{a.accountId} · {a.status}</option>)}</select></label>:<p>Connect your PropDAO API key in Account settings before deploying.</p>}
+  <div className="field-row"><label>Risk per trade (USDC)<select disabled={busy||Boolean(status?.running)} value={riskUsd} onChange={e=>setRiskUsd(e.target.value)}>{['0.5','1','2','3','5'].map(x=><option key={x} value={x}>${x}</option>)}</select></label><label>Leverage<select disabled={busy||Boolean(status?.running)} value={leverage} onChange={e=>setLeverage(e.target.value)}><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label></div>
+  <p className="output-disclaimer">The runtime rejects a new order if account risk, existing exposure, market lot rules or protective stop/target checks fail. A stop-loss cannot guarantee a specific fill price.</p>
+  {!status?.running&&<label className="warning-remember"><input type="checkbox" disabled={busy||!status?.configured} checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>I authorize automated orders on my selected simulated-capital PropDAO evaluation or funded account.</label>}
+  <div className="market-buttons">{status?.running?<button className="primary" disabled={busy} onClick={()=>void stop()}>{busy?'Stopping…':'Stop robot'}</button>:<button className="primary" disabled={busy||!status?.configured||!selected||!['active','funded'].includes(selected.status)||!confirmed} onClick={()=>void deploy()}>{busy?'Authorizing…':'Deploy live robot'}</button>}<button className="ghost" disabled={busy} onClick={()=>void load()}>Refresh status</button><button className="ghost" disabled={busy} onClick={onClose}>Close</button></div>
+ </Modal>;
+}
 export function DeploymentDialog({onClose}:{client:CloudClient;botId:string;onClose:()=>void;onBroker?:(privateBotId:string)=>void;onFollow?:()=>void;onLog?:(line:string)=>void;timeframe?:string}){
  return <Modal title="Deploy with VALR" close={onClose}><p>Open the robot in your workspace and choose Deploy to choose Demo or Live with VALR market data.</p><p>Choose Demo or Live from Deploy in your robot’s workspace. Live requires a verified VALR connection and runtime.</p><button className="primary" onClick={onClose}>Close</button></Modal>;
 }
