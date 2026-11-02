@@ -60,4 +60,24 @@ describe('PropDAO protected live order adapter',()=>{
   await expect(account.executeOrder('alice','prop-1',{symbol:'BTCUSDC',side:'BUY',price:100,stop:99,target:103,leverage:1,riskUsd:2,intentId:'intent-1234567890',quoteTime:Date.now()})).rejects.toThrow();
   expect(posted).toBe(0);
  });
+ it.each([false,true])('cancels linked GTC remainder and reconciles fill=%s before resuming',async(partialFill)=>{
+  const stored=new Map<string,string>();let submitted=false,cancelled=false,deleted=0;
+  const fetcher=vi.fn(async(url:string,init:RequestInit={})=>{
+   if(url.endsWith('/accounts'))return Response.json({accounts:[{account_id:'prop-1',status:'active'}]});
+   if(url.endsWith('/markets'))return Response.json({data:[{symbol:'BTCUSDC',lotStep:0.001,maxLeverage:2}],fees:{taker:0.00045}});
+   if(url.endsWith('/risk'))return Response.json({equity:1000,roomUsd:50,breached:false});
+   if(url.endsWith('/positions'))return Response.json({data:submitted&&partialFill?[{id:'pos-1',symbol:'BTCUSDC',side:'BUY',qty:0.5,slPrice:99,tpPrice:103}]:[]});
+   if(url.endsWith('/orders')&&init.method==='POST'){submitted=true;return Response.json({orderId:'ord-1',status:'PENDING'});}
+   if(url.endsWith('/orders/ord-1')&&init.method==='DELETE'){deleted++;cancelled=true;return Response.json({status:'CANCELLED'});}
+   if(url.endsWith('/orders'))return Response.json({data:submitted&&!cancelled?[{id:'ord-1',symbol:'BTCUSDC',side:'BUY',qty:1,status:partialFill?'PARTIALLY_FILLED':'PENDING'}]:[]});
+   return Response.json({error:'unknown'},{status:404});
+  });
+  const storage={read:async(k:string)=>stored.get(k)??null,write:async(k:string,v:string)=>{stored.set(k,v)},remove:async(k:string)=>{stored.delete(k)}};
+  const account=new PropDAOAccounts(storage,fetcher as typeof fetch,()=>Buffer.alloc(32,4).toString('base64'));
+  await account.connect('alice','pd_live_abcdefghijklmnopqrstuv');
+  const result=await account.executeOrder('alice','prop-1',{symbol:'BTCUSDC',side:'BUY',price:100,stop:99,target:103,leverage:1,riskUsd:2,intentId:'intent-1234567890',quoteTime:Date.now()});
+  expect(deleted).toBe(1);expect(result.filled).toBe(partialFill);
+  if(partialFill){expect(result).toMatchObject({protected:true,quantity:0.5,positionId:'pos-1'});}
+  else expect(result).toMatchObject({protected:false,quantity:0,providerStatus:'CANCELLED_UNFILLED'});
+ });
 });
