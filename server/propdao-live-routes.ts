@@ -59,8 +59,8 @@ export class PropDAOLiveService{
     }catch(e){accountError=e instanceof Error?e.message:'PropDAO account activity unavailable'}
    }
    return {...state,configured,connected:true,
-    uncertain:state.running===true&&(!matched||Boolean(grant.revokedAt)),
-    deployed:matched,running:state.running===true&&matched&&!grant.revokedAt,
+    uncertain:state.running===true&&(!configured||!matched||Boolean(grant.revokedAt)||Date.now()>=grant.expiresAt),
+    deployed:matched,running:state.running===true&&configured&&matched&&!grant.revokedAt&&Date.now()<grant.expiresAt,
     accountId:grant.accountId,positions,closedTrades,risk,accountError,
     error:health.error};
 
