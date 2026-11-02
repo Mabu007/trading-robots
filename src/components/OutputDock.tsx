@@ -4,12 +4,15 @@ import { Activity, AlertTriangle, Check, ChevronDown, ChevronRight, Copy, GripHo
 import type { Result, Trade } from '../types';
 import type { MonetaryResult, MonetaryTrade } from '../monetary-backtest';
 import { MonetaryResults } from './MonetaryResults';
+import {PropDAOEvaluationPanel} from './PropDAOEvaluationPanel';
+import type {PropDAOSimulation} from '../propdao-evaluation';
 import type { BotVersion } from '../firebase';
 
 export type OutputTab = 'terminal' | 'results' | 'trades' | 'versions';
 
 type Props = {
   monetary: MonetaryResult | null;
+  propEvaluation: PropDAOSimulation | null;
   asset: string;
   timeframe?: string;
   from: string;
@@ -74,12 +77,12 @@ async function copyText(value: string) {
   if (!copied) throw new Error('Clipboard access was denied.');
 }
 
-function ResultPanel({ result, from, to, asset, monetary }: { result: Result | null; from: string; to: string; asset: string; monetary: MonetaryResult | null }) {
+function ResultPanel({ result, from, to, asset, monetary, propEvaluation }: { result: Result | null; from: string; to: string; asset: string; monetary: MonetaryResult | null; propEvaluation:PropDAOSimulation|null }) {
   if (!result) return <div className="output-empty"><Activity size={18}/><strong>No backtest results yet</strong><span>Run a backtest to see performance and data coverage.</span></div>;
   const metrics = result.metrics;
   return <div className="output-result-panel">
-    <div className="output-result-heading"><div><span className="output-eyebrow">{monetary?'MONEY BACKTEST · SIMULATION':'BACKTEST RESULTS · R ONLY'}</span><strong>{asset} <i>·</i> {result.timeframe?.toUpperCase() || '—'}</strong><small>{from} <span>→</span> {to} · {result.candles.length.toLocaleString()} candles</small></div><span className="output-result-mark"><Check size={15}/></span></div>
-    <MonetaryResults result={monetary}/>
+    <div className="output-result-heading"><div><span className="output-eyebrow">{propEvaluation?'PROPDAO · IRON $1K EVALUATION':monetary?'MONEY BACKTEST · SIMULATION':'BACKTEST RESULTS · R ONLY'}</span><strong>{asset} <i>·</i> {result.timeframe?.toUpperCase() || '—'}</strong><small>{from} <span>→</span> {to} · {result.candles.length.toLocaleString()} candles</small></div><span className="output-result-mark"><Check size={15}/></span></div>
+    {propEvaluation?<PropDAOEvaluationPanel simulation={propEvaluation}/>:<MonetaryResults result={monetary}/>}
     <details className="theoretical-results"><summary>View theoretical R results</summary><div className="output-metrics">
       <div className="output-metric featured"><span>NET RESULT</span><strong className={metrics.netReturn >= 0 ? 'green' : 'red'}>{metrics.netReturn >= 0 ? '+' : ''}{metrics.netReturn.toFixed(2)}R</strong></div>
       <div className="output-metric"><span>PROFIT FACTOR</span><strong>{metrics.profitFactor === Infinity ? '∞' : metrics.profitFactor.toFixed(2)}</strong></div>
@@ -93,7 +96,7 @@ function ResultPanel({ result, from, to, asset, monetary }: { result: Result | n
 
 function TradesPanel({ props }: { props: Props }) {
   const [copied, setCopied] = useState('');
-  const trades:Trade[] = props.monetary?.trades ?? props.result?.trades ?? [];
+  const trades:Trade[] = props.propEvaluation?.trades ?? props.monetary?.trades ?? props.result?.trades ?? [];
   const selected = trades.find(trade => trade.id === props.selectedTrade?.id) || null;
   const copyId = async (trade: Trade) => {
     const id = createTradeId(props.asset, props.result?.timeframe, trade);
@@ -111,7 +114,7 @@ function TradesPanel({ props }: { props: Props }) {
           <button type="button" className="output-trade-select" aria-pressed={active} onClick={() => props.onSelectTrade(trade)}>
             <span className={`output-trade-side ${trade.side === 'LONG' ? 'long' : 'short'}`}>{trade.side === 'LONG' ? '↗' : '↘'}</span>
             <span className="output-trade-main"><strong>{id}</strong><small>{formatTime(trade.entryTime)} <i>·</i> {trade.reason}</small></span>
-            <b className={trade.pnl >= 0 ? 'green' : 'red'}>{'pnlZar' in trade ? formatRand((trade as MonetaryTrade).pnlZar) : `${trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)}R`}</b>
+            <b className={trade.pnl >= 0 ? 'green' : 'red'}>{'pnlUsd' in trade ? new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format((trade as any).pnlUsd) : 'pnlZar' in trade ? formatRand((trade as MonetaryTrade).pnlZar) : `${trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)}R`}</b>
           </button>
           <button type="button" className="copy-trade-button" aria-label={`Copy trade ID ${id}`} title="Copy trade ID" onClick={() => void copyId(trade)}>{copied === id ? <Check size={14}/> : <Copy size={14}/>}</button>
         </div>;
@@ -175,7 +178,7 @@ export function OutputDock(props: Props) {
   const tabs: { id: OutputTab; label: string; count?: number; icon: typeof TerminalIcon }[] = [
     { id: 'terminal', label: 'Terminal', count: props.logs.length, icon: TerminalIcon },
     { id: 'results', label: 'Results', count: props.result ? 1 : 0, icon: Activity },
-    { id: 'trades', label: 'Trades', count: (props.monetary?.trades.length ?? props.result?.trades.length ?? 0), icon: ListChecks },
+    { id: 'trades', label: 'Trades', count: (props.propEvaluation?.trades.length ?? props.monetary?.trades.length ?? props.result?.trades.length ?? 0), icon: ListChecks },
     { id: 'versions', label: 'Versions', count: props.versions.length, icon: History },
   ];
   const beginRename = (version: BotVersion) => { setRenameTarget(version); setRenameValue(version.name); setVersionActionError(''); };
@@ -191,7 +194,7 @@ export function OutputDock(props: Props) {
     </header>
     {!props.collapsed && <div className="output-dock-body" role="tabpanel" id={`output-panel-${props.active}`}>
       {props.active === 'terminal' && <div className="terminal-content">{props.logs.length ? props.logs.map((line, index) => <div className={`log-line ${line.includes('failed')||line.includes('stopped')?'error':''}`} key={`${index}-${line}`}><span className="log-prompt">›</span>{line}</div>) : <div className="terminal-placeholder"><span>›</span> Backtest activity, market data, and errors appear here.</div>}</div>}
-      {props.active === 'results' && <ResultPanel result={props.result} from={props.from} to={props.to} asset={props.asset} monetary={props.monetary}/>}
+      {props.active === 'results' && <ResultPanel result={props.result} from={props.from} to={props.to} asset={props.asset} monetary={props.monetary} propEvaluation={props.propEvaluation}/>}
       {props.active === 'trades' && <TradesPanel props={props}/>}
       {props.active === 'versions' && <VersionsPanel props={props} onRename={beginRename} onDelete={version=>{setDeleteTarget(version);setVersionActionError('')}}/>}
     </div>}
