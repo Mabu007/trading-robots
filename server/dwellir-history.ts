@@ -23,7 +23,8 @@ export class DwellirHistory {
  ){}
  private async weekly(market:string,base:'1m'|'5m',start:number,end:number):Promise<MarketCandle[]> {
   const cacheKey=`historical/dwellir/v1/${encodeURIComponent(market)}/${base}/${start}.json`;
-  const cached=await this.storage.read(cacheKey);
+  const completeWeek=end===start+WEEK;
+  const cached=completeWeek?await this.storage.read(cacheKey):null;
   if(cached!==null){
    let parsed:unknown;try{parsed=JSON.parse(cached)}catch{throw Error('Cached Dwellir history is corrupt.')}
    if(!Array.isArray(parsed)||!parsed.every(isValidCandle))throw Error('Cached Dwellir history is invalid.');
@@ -56,7 +57,7 @@ export class DwellirHistory {
     }
     if(!value.hasMore) {
      const result=[...candles.values()].sort((a,b)=>a.time-b.time);
-     await this.storage.write(cacheKey,JSON.stringify(result));
+     if(completeWeek)await this.storage.write(cacheKey,JSON.stringify(result));
      return result;
     }
     if(typeof value.nextCursor!=='string'||!value.nextCursor||cursors.has(value.nextCursor))throw Error('Dwellir pagination did not advance.');
