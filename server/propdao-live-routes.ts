@@ -25,9 +25,21 @@ export class PropDAOLiveService{
   if(!response.ok)throw Error(typeof result.error==='string'?result.error:'Durable Object unavailable');
   return result;
  }
+ async health(){
+  if(!this.configured())return {configured:false,error:'Cloudflare Worker endpoint or internal secret is not configured.'};
+  try{
+   const base=process.env.PROPDAO_LIVE_RUNTIME_URL!,secret=process.env.PROPDAO_LIVE_INTERNAL_SECRET!;
+   const url=new URL('/health',base);
+   if(url.protocol!=='https:'&&!(url.protocol==='http:'&&url.hostname==='127.0.0.1'))throw Error('Runtime requires HTTPS');
+   const response=await this.request(url,{headers:{Authorization:`Bearer ${secret}`},signal:AbortSignal.timeout(10000)});
+   if(!response.ok)throw Error('Cloudflare Worker rejected the runtime secret');
+   const state=await response.json() as any;
+   return {configured:state?.ready===true,error:state?.ready===true?undefined:'Cloudflare Worker is disabled or not ready.'};
+  }catch(e){return {configured:false,error:e instanceof Error?e.message:'Cloudflare Worker unavailable'}}
+ }
  async status(uid:string,botId:string){
-  const grant=await this.grant(uid,botId);const configured=this.configured();
-  if(!grant)return {configured,deployed:false,running:false,accountId:null,events:[],error:configured?'Connect a PropDAO account and authorize a deployment.':'Live runtime is not configured. Historical backtesting remains available.'};
+  const grant=await this.grant(uid,botId);const health=await this.health();const configured=health.configured;
+  if(!grant)return {configured,deployed:false,running:false,accountId:null,events:[],error:configured?'Connect a PropDAO account and authorize a deployment.':health.error||'Live runtime is not available.'};
   if(!configured)return {configured:false,deployed:true,running:false,accountId:grant.accountId,events:[],error:'Worker credentials or endpoint missing; live execution unavailable.'};
   try{
    const state=await this.runtime(grant,'status');
@@ -35,7 +47,7 @@ export class PropDAOLiveService{
   }catch(e){return {configured:true,deployed:true,running:false,uncertain:true,accountId:grant.accountId,events:[],error:e instanceof Error?e.message:'Worker unavailable. Order status is unknown.'}}
  }
  async deploy(uid:string,botId:string,req:Request){
-  if(!this.configured())throw Error('PropDAO live runtime is not configured. No orders were submitted.');
+  if(!(await this.health()).configured)throw Error('PropDAO Durable Object runtime is not ready. No orders were submitted.');
   const input=req.body;
   if(input?.confirm!=='I AUTHORIZE PROPDAO SIMULATED LIVE TRADING')throw Error('Explicit live trading authorization required.');
   if(!safeId(input?.accountId)||!Number.isFinite(Number(input?.riskUsd))||Number(input.riskUsd)<=0||Number(input.riskUsd)>5)throw Error('Choose an account and a trade risk of $0.01 to $5.');
