@@ -45,7 +45,7 @@ export class DwellirHistory {
     try{response=await this.request(url.toString(),{headers:{Accept:'application/json'},signal:AbortSignal.timeout(20_000)})}
     catch{throw Error('Could not reach Dwellir historical data.')}
     if(!response.ok)throw Error(upstreamError(response.status));
-    let value:Page;try{value=await response.json()}catch{throw Error('Dwellir returned malformed JSON.')}
+    let value:Page;try{value=await response.json() as Page}catch{throw Error('Dwellir returned malformed JSON.')}
     if(!value||!Array.isArray(value.data)||typeof value.hasMore!=='boolean'||value.data.length>5000)throw Error('Dwellir returned an invalid candle page.');
     for(const row of value.data){
      const r=row as Record<string,unknown>;
