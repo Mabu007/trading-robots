@@ -20,7 +20,7 @@ export function simulatePropDAO(candles:Candle[],decisions:any[],riskPercent=0.2
  if(!Number.isFinite(riskPercent)||riskPercent<=0||riskPercent>2)throw Error('Evaluation risk must be between 0 and 2%.');
  if(!Object.values(costs).every(x=>Number.isFinite(x)&&x>=0))throw Error('Evaluation costs must be non-negative.');
  const initial=IRON_1K.startingBalance, riskUsd=initial*riskPercent/100;
- let balance=initial,equity=initial,dailyStart=initial,day='',maxDaily=0,maxTotal=0;
+ let balance:number=initial,equity:number=initial,dailyStart:number=initial,day='',maxDaily=0,maxTotal=0;
  let status:EvaluationStatus='not-passed',reason='Profit target not reached in selected historical period.';
  let endedAt:number|null=null,position:({side:Side;entryTime:number;entry:number;stop:number;target:number;riskDistance:number;entryFeeR:number})|null=null;
  const trades:EvaluationTrade[]=[],equityCurve:EvaluationPoint[]=[];
