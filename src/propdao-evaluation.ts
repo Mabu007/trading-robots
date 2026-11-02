@@ -50,12 +50,14 @@ export function simulatePropDAO(candles:Candle[],decisions:any[],riskPercent=0.2
   if(position){
    const p=position;
    // Worst-case within each OHLC bar is checked before any profit: avoid hindsight.
-   const worst=p.side==='LONG'?c.low:c.high;
+   const stopHit=p.side==='LONG'?c.low<=p.stop:c.high>=p.stop;
+   const targetHit=p.side==='LONG'?c.high>=p.target:c.low<=p.target;
+   // A protective stop caps modeled intrabar loss at its stop price,
+   // except when the candle opens through the stop (gap-through).
+   const worst=stopHit?(p.side==='LONG'?Math.min(c.open,p.stop):Math.max(c.open,p.stop)):(p.side==='LONG'?c.low:c.high);
    const adverse=pnlR(p,worst)*riskUsd+balance;
    assess(c.time,adverse);
    if(status!=='not-passed'){mark(c.time);break;}
-   const stopHit=p.side==='LONG'?c.low<=p.stop:c.high>=p.stop;
-   const targetHit=p.side==='LONG'?c.high>=p.target:c.low<=p.target;
    if(stopHit||targetHit){
     const price=stopHit?(p.side==='LONG'?Math.min(c.open,p.stop):Math.max(c.open,p.stop)):p.target;
     close(p,c,price,stopHit?'stop':'target');position=null;closed=true;
@@ -74,7 +76,8 @@ export function simulatePropDAO(candles:Candle[],decisions:any[],riskPercent=0.2
   }
   if(position&&position.entryTime===c.time){
    const p=position;
-   const worst=p.side==='LONG'?c.low:c.high;
+   const stopCrossed=p.side==='LONG'?c.low<=p.stop:c.high>=p.stop;
+   const worst=stopCrossed?(p.side==='LONG'?Math.min(c.open,p.stop):Math.max(c.open,p.stop)):(p.side==='LONG'?c.low:c.high);
    assess(c.time,balance+pnlR(p,worst)*riskUsd);
    if(status!=='not-passed'){mark(c.time);break;}
    const hitStop=p.side==='LONG'?c.low<=p.stop:c.high>=p.stop;
