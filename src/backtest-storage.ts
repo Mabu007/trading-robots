@@ -18,14 +18,14 @@ function decodeBase64(input:string):Uint8Array {
 export async function compressBacktest(state:unknown):Promise<CompressedBacktest> {
  if(typeof CompressionStream==='undefined')throw Error('This browser does not support compressed backtest storage.');
  const bytes=new TextEncoder().encode(JSON.stringify(state));
- const compressed=await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
+ const compressed=await new Response(new Blob([new Uint8Array(bytes)]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
  return {format:'gzip-base64',version:2,payload:encodeBase64(new Uint8Array(compressed)),uncompressedBytes:bytes.byteLength};
 }
 export async function decompressBacktest<T>(value:CompressedBacktest):Promise<T> {
  if(typeof DecompressionStream==='undefined')throw Error('This browser does not support restoring compressed backtests.');
  if(value.uncompressedBytes>60_000_000)throw Error('Saved backtest exceeds the supported restore size.');
  const binary=decodeBase64(value.payload);
- const body=await new Response(new Blob([binary]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+ const body=await new Response(new Blob([new Uint8Array(binary)]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
  if(body.byteLength!==value.uncompressedBytes)throw Error('Saved backtest is incomplete or corrupt.');
  return JSON.parse(new TextDecoder().decode(body)) as T;
 }
