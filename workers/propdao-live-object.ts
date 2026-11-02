@@ -34,7 +34,8 @@ export class PropDAOLiveBot extends DurableObject<any>{
    const c=result[i];if(c.high<Math.max(c.open,c.close)||c.low>Math.min(c.open,c.close)||c.low<=0||[c.open,c.close,c.high,c.volume].some((n:number)=>!Number.isFinite(n))||(i>0&&c.time<=result[i-1].time))throw Error('Invalid market price series');
   }
   if(result.length<30||!result.length||result[result.length-1].time+duration!==end)throw Error('Latest closed market candle missing');
-  for(let i=1;i<result.length;i++)if(result[i].time-result[i-1].time!==duration)throw Error('Recent live candles contain gaps; refusing signal');
+  // Market closures create legitimate historical gaps. The latest two bars must remain contiguous before entry.
+  if(result.length>=2&&result.at(-1)!.time-result.at(-2)!.time!==duration)throw Error('Recent live candles contain gaps; refusing signal');
   return result;
  }
  private async schedule(){
@@ -106,7 +107,7 @@ export class PropDAOLiveBot extends DurableObject<any>{
    await this.ctx.storage.delete('lastError');
   }catch(e){const error=e instanceof Error?e.message:'Live evaluation failed';
    const transient=!(await this.ctx.storage.get('pendingIntent')) &&
-    /Latest closed market candle missing|Recent live candles contain gaps|Hyperliquid live market data unavailable|Invalid Hyperliquid candles/.test(error);
+    /Latest closed market candle missing|Recent live candles contain gaps|Hyperliquid live market data unavailable|Invalid Hyperliquid candles|Could not reach PropDAO|PropDAO rate limit reached|PropDAO account request failed|Live provider unavailable/.test(error);
    if(transient){
     const previous=await this.ctx.storage.get<string>('lastError');
     await this.ctx.storage.put('lastError','Market data paused · '+error);
