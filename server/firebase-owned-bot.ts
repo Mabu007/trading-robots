@@ -6,5 +6,5 @@ export async function readOwnedBotAsset(uid:string,id:string,authorization:strin
  const url=`https://firestore.googleapis.com/v1/projects/${encodeURIComponent(project)}/databases/(default)/documents/users/${encodeURIComponent(uid)}/bots/${encodeURIComponent(id)}`;
  let response:Response;try{response=await request(url,{headers:{Authorization:authorization!},signal:AbortSignal.timeout(10000)})}catch{throw Error('Could not verify saved robot.')}
  if(response.status===404)return null;if(!response.ok)throw Error('Could not verify saved robot.');
- const data=await response.json() as {fields?:{asset?:{stringValue?:unknown}}};const asset=data.fields?.asset?.stringValue;if(typeof asset!=='string'||! /^[A-Z0-9]{3,30}$/.test(asset))throw Error('Saved robot market is invalid.');return {asset};
+ const data=await response.json() as {fields?:{asset?:{stringValue?:unknown};venue?:{stringValue?:unknown}}};const asset=data.fields?.asset?.stringValue;const venueField=data.fields?.venue;if(venueField && venueField.stringValue!=='valr')throw Error('Saved robot is not a VALR robot.');if(typeof asset!=='string'||! /^[A-Z0-9]{3,30}$/.test(asset))throw Error('Saved robot market is invalid.');return {asset};
 }

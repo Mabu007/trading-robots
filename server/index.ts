@@ -9,6 +9,8 @@ import { sharedBotRoutes } from './shared-bots.ts';
 import { marketplace,marketplaceRoutes } from './marketplace.ts';
 import { FirestoreStore } from './firestore-store.ts';
 import { ValrMarketData } from './valr-market-data.ts';
+import { VenueMarketData } from './venue-market-data.ts';
+import { PropDAOAccounts, propDAORoutes } from './propdao-account.ts';
 import { valrAccountRoutes } from './valr-routes.ts';
 import { valrPaperRoutes } from './valr-paper-routes.ts';
 import {ValrAccountLock} from './valr-account-lock.ts';
@@ -18,7 +20,8 @@ import { readOwnedBotAsset } from './firebase-owned-bot.ts';
 
 const app = express();
 const valrMarketData = new ValrMarketData();
-app.use(['/api/marketplace','/api/economy','/api/valr','/api/openrouter'],requestLimit);
+const venueMarketData = new VenueMarketData();
+app.use(['/api/marketplace','/api/economy','/api/valr','/api/venues','/api/openrouter'],requestLimit);
 app.use(express.json({ limit: '10mb' }));
 
 
@@ -71,6 +74,18 @@ app.post('/api/valr/candles', async (req, res) => {
     return res.status(/^Choose|^Unsupported|^Dates|^A page|^This market/.test(message) ? 400 : 502).json({ error: message });
   }
 });
+app.get('/api/venues/propdao/markets', async (_req,res) => {
+  try { res.json(await venueMarketData.propdaoMarkets()); } catch { res.status(502).json({error:'PropDAO markets are unavailable.'}); }
+});
+app.get('/api/venues/hyperliquid/markets', async (_req,res) => {
+  try { res.json(await venueMarketData.hyperliquidMarkets()); } catch { res.status(502).json({error:'Hyperliquid markets are unavailable.'}); }
+});
+app.post('/api/venues/hyperliquid/candles', async (req,res) => {
+  try { res.json(await venueMarketData.hyperliquidCandles(req.body ?? {})); } catch (error) {
+    const message = error instanceof Error ? error.message : 'Hyperliquid data unavailable.';
+    res.status(message.startsWith('Choose') ? 400 : 502).json({error:message});
+  }
+});
 function validBotId(value: string): boolean { return /^[A-Za-z0-9_-]{1,100}$/.test(value); }
 function userBotRoot(uid: string, botId: string): string { return `user-bots/${Buffer.from(uid).toString('base64url')}/${botId}`; }
 async function firebaseUidOrReply(req: express.Request, res: express.Response): Promise<string | null> {
@@ -83,12 +98,13 @@ async function firebaseUidOrReply(req: express.Request, res: express.Response): 
   }
 }
 
+propDAORoutes(app,new PropDAOAccounts({read:readR2Object,write:writeR2Object,remove:deleteR2Object}),firebaseUidOrReply);
 const openRouterAccounts = new OpenRouterAccounts({read:readR2Object,write:writeR2Object,remove:deleteR2Object});
 openRouterRoutes(app,openRouterAccounts,firebaseUidOrReply);
 const economy=new BotEconomy(marketplace.store,{read:readR2Object,write:writeR2Object,root:userBotRoot},marketplace);
 const ownedValrBot=async(uid:string,id:string,req:express.Request)=>{
  const [bot,raw]=await Promise.all([FirestoreStore.configured()?marketplace.store.get(`users/${uid}/bots/${id}`):readOwnedBotAsset(uid,id,req.header('authorization')),readR2Object(`${userBotRoot(uid,id)}/current.json`)]);
- if(!bot||!raw)return null;const saved=JSON.parse(raw);if(saved.userId!==uid||saved.botId!==id||typeof saved.code!=='string'||typeof bot.asset!=='string')return null;return {asset:bot.asset,code:saved.code};
+ if(!bot||!raw)return null;if('venue' in bot && bot.venue!==undefined && bot.venue!=='valr')return null;const saved=JSON.parse(raw);if(saved.userId!==uid||saved.botId!==id||typeof saved.code!=='string'||typeof bot.asset!=='string')return null;return {asset:bot.asset,code:saved.code};
 };
 const valrLock=new ValrAccountLock(marketplace.store);
 const valrExclusive=<T>(uid:string,task:()=>Promise<T>)=>FirestoreStore.configured()?valrLock.run(uid,task):task();

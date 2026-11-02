@@ -85,11 +85,18 @@ function runInSandbox(
   });
 }
 
+export function tradingWindow(candles: Candle[], decisions: any[], tradingStart?: number) {
+  const first = tradingStart === undefined ? 0 : candles.findIndex(c => c.time >= tradingStart);
+  if (first < 0 || candles.length - first < 2) throw new Error('At least two candles are required in the selected trading period.');
+  return { candles: candles.slice(first), decisions: decisions.slice(first), warmupCandles: first };
+}
+
 export async function runBacktest(
   code: string,
   data: Candle[] | Record<string, Candle[]>,
   startingR = 0,
   signal?: AbortSignal,
+  tradingStart?: number,
 ): Promise<Result & { decisions: any[] }> {
   if (signal?.aborted) throw new Error('Backtest cancelled by user.');
   const config = parseStrategyConfig(code);
@@ -114,12 +121,15 @@ export async function runBacktest(
   ];
   const started = performance.now();
   const decisions = await runInSandbox(code, candles, config, datasets, signal);
-  const result = simulate(candles, decisions, startingR,{spread:config.backtestSpread||0,slippage:config.backtestSlippage||0,commissionR:config.backtestCommissionR||0});
+  const window = tradingWindow(candles, decisions, tradingStart);
+  const tradingCandles = window.candles, tradingDecisions = window.decisions;
+  if (window.warmupCandles) logs.push(`Indicator warm-up · ${window.warmupCandles.toLocaleString()} execution candles before the selected period; no trades placed during warm-up`);
+  const result = simulate(tradingCandles, tradingDecisions, startingR,{spread:config.backtestSpread||0,slippage:config.backtestSlippage||0,commissionR:config.backtestCommissionR||0});
   logs.push(...result.logs);
   for (const trade of result.trades.slice(0, 30)) {
     logs.push(`#${trade.id} ${trade.side} · ${trade.reason} · ${trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)}R`);
   }
   if (result.trades.length > 30) logs.push(`${result.trades.length - 30} additional trade events available in the trade list.`);
   logs.push(`Backtest complete · ${result.trades.length} trades · ${(performance.now() - started).toFixed(0)} ms`);
-  return { ...result, logs, decisions };
+  return { ...result, logs, decisions: tradingDecisions };
 }
