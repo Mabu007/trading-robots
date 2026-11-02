@@ -104,7 +104,7 @@ openRouterRoutes(app,openRouterAccounts,firebaseUidOrReply);
 const economy=new BotEconomy(marketplace.store,{read:readR2Object,write:writeR2Object,root:userBotRoot},marketplace);
 const ownedValrBot=async(uid:string,id:string,req:express.Request)=>{
  const [bot,raw]=await Promise.all([FirestoreStore.configured()?marketplace.store.get(`users/${uid}/bots/${id}`):readOwnedBotAsset(uid,id,req.header('authorization')),readR2Object(`${userBotRoot(uid,id)}/current.json`)]);
- if(!bot||!raw)return null;const saved=JSON.parse(raw);if(saved.userId!==uid||saved.botId!==id||typeof saved.code!=='string'||typeof bot.asset!=='string')return null;return {asset:bot.asset,code:saved.code};
+ if(!bot||!raw)return null;if('venue' in bot && bot.venue!==undefined && bot.venue!=='valr')return null;const saved=JSON.parse(raw);if(saved.userId!==uid||saved.botId!==id||typeof saved.code!=='string'||typeof bot.asset!=='string')return null;return {asset:bot.asset,code:saved.code};
 };
 const valrLock=new ValrAccountLock(marketplace.store);
 const valrExclusive=<T>(uid:string,task:()=>Promise<T>)=>FirestoreStore.configured()?valrLock.run(uid,task):task();
