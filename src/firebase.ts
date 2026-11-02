@@ -1,3 +1,4 @@
+import {cloudBotFromRecord} from './cloud-bot';
 export type CloudBot = {
   id: string;
   name: string;
@@ -74,7 +75,7 @@ export function connectFirebase(): Promise<CloudClient | null> {
       async listBots() {
         const botCollection = storeSdk.collection(db, 'users', await currentUserId(), 'bots');
         const snapshot = await storeSdk.getDocs(storeSdk.query(botCollection, storeSdk.limit(100)));
-        return snapshot.docs.map((doc: any) => { const data = doc.data(); return { id: doc.id, ...data, storageKey: data.storage?.key } }) as CloudBot[];
+        return snapshot.docs.map((doc:any)=>cloudBotFromRecord(doc.id,doc.data()));
       },
       async getIdToken(forceRefresh = false) {
         return (await signedInUser()).getIdToken(forceRefresh);
