@@ -3,6 +3,7 @@ import 'dotenv/config';
 import {requestLimit} from './request-limits.ts';
 import express from 'express';
 import { createPublicKey, randomUUID, verify as verifySignature } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
 import { deleteR2Object, getR2Config, listR2Objects, readR2Object, writeR2Object } from './r2.ts';
 import {recordAIUsage} from './usage.ts';
 import { BotEconomy, economyRoutes } from './bot-economy.ts';
@@ -187,16 +188,30 @@ app.delete('/api/user-bots/:botId', async (req, res) => {
   }
 });
 
+type CompressedRun = {format:'gzip-base64';version:2;payload:string;uncompressedBytes:number};
+function isCompressedRun(value:unknown):value is CompressedRun {
+ const v=value as Partial<CompressedRun>|null;
+ return !!v&&v.format==='gzip-base64'&&v.version===2&&typeof v.payload==='string'&&v.payload.length>0&&v.payload.length<3_000_000&&/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(v.payload)&&Number.isInteger(v.uncompressedBytes)&&v.uncompressedBytes!>0&&v.uncompressedBytes!<=60_000_000;
+}
+function checkBacktestState(state:any):boolean {
+ return !!state&&typeof state==='object'&&!!state.result&&Array.isArray(state.result.candles)&&Array.isArray(state.result.trades)&&Array.isArray(state.logs);
+}
+function verifyCompressedRun(value:CompressedRun):boolean {
+ const bytes=gunzipSync(Buffer.from(value.payload,'base64'),{maxOutputLength:60_000_000});
+ if(bytes.byteLength!==value.uncompressedBytes)return false;
+ const state=JSON.parse(bytes.toString('utf8'));
+ return checkBacktestState(state);
+}
+
 app.put('/api/user-bots/:botId/backtest', async (req, res) => {
   const uid = await firebaseUidOrReply(req, res); if (!uid) return;
   const { botId } = req.params;
   const state = req.body;
   if (!validBotId(botId)) return res.status(400).json({ error: 'Robot ID is invalid.' });
-  if (!state || typeof state !== 'object' || !state.result || !Array.isArray(state.result.candles) || !Array.isArray(state.result.trades) || !Array.isArray(state.logs)) {
-    return res.status(400).json({ error: 'The completed backtest data is incomplete.' });
-  }
-  const serialized = JSON.stringify({ ...state, schemaVersion: 1, userId: uid, botId, savedAt: new Date().toISOString() });
-  if (Buffer.byteLength(serialized, 'utf8') > 9_000_000) return res.status(413).json({ error: 'This backtest is too large to sync. Shorten the date range and run it again.' });
+  if (!isCompressedRun(state)) return res.status(400).json({ error: 'Invalid compressed backtest payload. Reload the application and retry.' });
+  try { if (!verifyCompressedRun(state)) return res.status(400).json({ error: 'The completed backtest is incomplete.' }); }
+  catch { return res.status(400).json({ error: 'Backtest compression failed integrity validation.' }); }
+  const serialized = JSON.stringify({ ...state, schemaVersion: 2, userId: uid, botId, savedAt: new Date().toISOString() });
   try {
     await writeR2Object(`${userBotRoot(uid, botId)}/backtest.json`, serialized);
     return res.json({ saved: true });
@@ -247,7 +262,7 @@ app.get('/api/user-bots/:botId/backtest', async (req, res) => {
     const body = await readR2Object(`${userBotRoot(uid, botId)}/backtest.json`);
     if (!body) return res.status(404).json({ error: 'No completed backtest was found for this robot.' });
     const stored = JSON.parse(body);
-    if (stored.userId !== uid || stored.botId !== botId || !stored.result || !Array.isArray(stored.result.candles) || !Array.isArray(stored.result.trades)) {
+    if (stored.userId !== uid || stored.botId !== botId || !(isCompressedRun(stored) || checkBacktestState(stored))) {
       return res.status(409).json({ error: 'Saved backtest data failed its ownership or format check.' });
     }
     const { userId: _userId, botId: _botId, schemaVersion: _schemaVersion, ...state } = stored;
