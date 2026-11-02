@@ -10,7 +10,7 @@ async function hash(s:string){return Array.from(new Uint8Array(await crypto.subt
 export class PropDAOLiveBot extends DurableObject<any>{
  private tail:Promise<unknown>=Promise.resolve();
  private serial<T>(fn:()=>Promise<T>):Promise<T>{const next=this.tail.then(fn,fn);this.tail=next.catch(()=>{});return next}
- private async state():Promise<Status>{return {running:(await this.ctx.storage.get<boolean>('running'))===true,lastError:await this.ctx.storage.get<string>('lastError'),lastEvaluation:await this.ctx.storage.get('lastEvaluation'),lastOrder:await this.ctx.storage.get('lastOrder'),events:(await this.ctx.storage.get<string[]>('events'))||[]};}
+ private async state():Promise<Status>{return {running:(await this.ctx.storage.get<boolean>('running'))===true,lastError:await this.ctx.storage.get<string>('lastError'),lastEvaluation:await this.ctx.storage.get('lastEvaluation'),lastOrder:await this.ctx.storage.get('lastOrder'),lastAccount:await this.ctx.storage.get('lastAccount'),events:(await this.ctx.storage.get<string[]>('events'))||[]};}
  private async record(message:string){const events=(await this.ctx.storage.get<string[]>('events'))||[];events.push(`${new Date().toISOString()} · ${message.slice(0,240)}`);await this.ctx.storage.put('events',events.slice(-100));}
  private async provider(grant:Grant,action:string,payload?:unknown){
   const origin=this.env.PROPDAO_CONTROL_URL;
@@ -28,12 +28,13 @@ export class PropDAOLiveBot extends DurableObject<any>{
   if(!response.ok)throw Error('Hyperliquid live market data unavailable');
   const rows=await response.json<any>();
   if(!Array.isArray(rows))throw Error('Invalid Hyperliquid candles');
-  const result=rows.map((r:any)=>({time:Number(r.t)/1000,open:Number(r.o),high:Number(r.h),low:Number(r.l),close:Number(r.c),volume:Number(r.v)})).filter((r:any)=>Number.isFinite(r.time)&&r.time>=from/1000&&r.time<end);
+  const result=rows.map((r:any)=>{if(r.s!==grant.coin||r.i!==interval[timeframe])throw Error('Market-data symbol/timeframe mismatch');return {time:Number(r.t)/1000,open:Number(r.o),high:Number(r.h),low:Number(r.l),close:Number(r.c),volume:Number(r.v)}}).filter((r:any)=>Number.isFinite(r.time)&&r.time>=from/1000&&r.time<end);
   result.sort((a:any,b:any)=>a.time-b.time);
   for(let i=0;i<result.length;i++){
    const c=result[i];if(c.high<Math.max(c.open,c.close)||c.low>Math.min(c.open,c.close)||c.low<=0||[c.open,c.close,c.high,c.volume].some((n:number)=>!Number.isFinite(n))||(i>0&&c.time<=result[i-1].time))throw Error('Invalid market price series');
   }
   if(result.length<30||!result.length||result[result.length-1].time+duration!==end)throw Error('Latest closed market candle missing');
+  for(let i=Math.max(1,result.length-30);i<result.length;i++)if(result[i].time-result[i-1].time!==duration)throw Error('Recent live candles contain gaps; refusing signal');
   return result;
  }
  private async schedule(){
@@ -74,6 +75,7 @@ export class PropDAOLiveBot extends DurableObject<any>{
    const config=parseStrategyConfig(grant.code),period=TF_SECONDS[config.executionTimeframe],close=Math.floor((Date.now()/1000-5)/period)*period,marker=`evaluation:${grant.id}`;
    if((await this.ctx.storage.get<number>(marker)||0)>=close)return;
    const account=await this.provider(grant,'snapshot');
+   await this.ctx.storage.put('lastAccount',{time:Date.now(),equity:account.risk?.equity,roomUsd:account.risk?.roomUsd,positions:account.positions?.length??0,orders:account.orders?.length??0,accountStatus:account.account?.status});
    if(account.risk?.breached||!['active','funded'].includes(account.account?.status)){await this.ctx.storage.put('running',false);await this.record('Account ineligible or risk breached. Trading stopped.');return}
    if(account.positions?.length||account.orders?.length){await this.ctx.storage.put(marker,close);await this.record('Existing position/order; awaiting reconciliation and skipping entry.');return}
    const data:Record<string,any[]>={};
