@@ -57,7 +57,7 @@ export function simulatePropDAO(candles:Candle[],decisions:any[],riskPercent=0.2
    const worst=stopHit?(p.side==='LONG'?Math.min(c.open,p.stop):Math.max(c.open,p.stop)):(p.side==='LONG'?c.low:c.high);
    const adverse=pnlR(p,worst)*riskUsd+balance;
    assess(c.time,adverse);
-   if(status!=='not-passed'){mark(c.time);break;}
+   if(status!=='not-passed'){close(p,c,worst,'signal');position=null;equity=balance;mark(c.time);break;}
    if(stopHit||targetHit){
     const price=stopHit?(p.side==='LONG'?Math.min(c.open,p.stop):Math.max(c.open,p.stop)):p.target;
     close(p,c,price,stopHit?'stop':'target');position=null;closed=true;
@@ -79,7 +79,7 @@ export function simulatePropDAO(candles:Candle[],decisions:any[],riskPercent=0.2
    const stopCrossed=p.side==='LONG'?c.low<=p.stop:c.high>=p.stop;
    const worst=stopCrossed?(p.side==='LONG'?Math.min(c.open,p.stop):Math.max(c.open,p.stop)):(p.side==='LONG'?c.low:c.high);
    assess(c.time,balance+pnlR(p,worst)*riskUsd);
-   if(status!=='not-passed'){mark(c.time);break;}
+   if(status!=='not-passed'){close(p,c,worst,'signal');position=null;equity=balance;mark(c.time);break;}
    const hitStop=p.side==='LONG'?c.low<=p.stop:c.high>=p.stop;
    const hitTarget=p.side==='LONG'?c.high>=p.target:c.low<=p.target;
    if(hitStop||hitTarget){
