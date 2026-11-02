@@ -18,6 +18,7 @@ import { MonetaryControls, type SimulationSettings } from './components/Monetary
 import { simulateMoney, validateMonetaryAssumptions } from './monetary-backtest';
 import {simulatePropDAO, type PropDAOSimulation} from './propdao-evaluation';
 import {PropDAOEvaluationPanel} from './components/PropDAOEvaluationPanel';
+import './propdao-evaluation.css';
 import { backtestMoneySummary } from './backtest-summary';
 import { StrategyDocCard } from './components/StrategyDocCard';
 import { OutputDock, type OutputTab, createTradeId } from './components/OutputDock';
