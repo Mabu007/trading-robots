@@ -31,11 +31,6 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npm run check:runtime
       - run: npm run worker:propdao:live:build
-      - name: Install Worker secret without exposing it
-        shell: bash
-        run: |
-          set -euo pipefail
-          printf '%s' "$PROPDAO_LIVE_INTERNAL_SECRET" | npx wrangler secret put PROPDAO_LIVE_INTERNAL_SECRET --config workers/wrangler.propdao-live.jsonc >/dev/null
       - name: Deploy Cloudflare Worker with entries disabled
         shell: bash
         run: |
@@ -46,6 +41,11 @@ jobs:
           echo "PROPDAO_WORKER_URL=$URL" >> "$GITHUB_ENV"
           echo "## PropDAO Worker" >> "$GITHUB_STEP_SUMMARY"
           echo "Deployed (order submission remains disabled): \`$URL\`" >> "$GITHUB_STEP_SUMMARY"
+      - name: Install Worker secret without exposing it
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$PROPDAO_LIVE_INTERNAL_SECRET" | npx wrangler secret put PROPDAO_LIVE_INTERNAL_SECRET --config workers/wrangler.propdao-live.jsonc >/dev/null
       - name: Verify authenticated health endpoint and closed execution gate
         shell: bash
         run: |
