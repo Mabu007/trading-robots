@@ -3,7 +3,7 @@ import type {Express,Request,Response} from 'express';
 import {parseStrategyConfig} from '../src/strategy.ts';
 import {PropDAOAccounts} from './propdao-account.ts';
 
-type Storage={read:(key:string)=>Promise<string|null>;write:(key:string,value:string)=>Promise<void>};
+type Storage={read:(key:string)=>Promise<string|null>;write:(key:string,value:string)=>Promise<void>;list?:(prefix:string,limit:number)=>Promise<string[]>};
 type Dependencies=Storage&{uid:(req:Request,res:Response)=>Promise<string|null>;bot:(uid:string,id:string,req:Request)=>Promise<{asset:string;code:string;venue?:string}|null>;accounts:PropDAOAccounts;request?:typeof fetch};
 export type PropGrant={id:string;uid:string;botId:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;leverage:number;issuedAt:number;expiresAt:number};
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
@@ -56,6 +56,21 @@ export class PropDAOLiveService{
   const grant:PropGrant={id:randomBytes(24).toString('hex'),uid,botId,accountId:input.accountId,symbol:bot.asset,coin:market.dex?`${market.dex}:${market.coin}`:market.coin,code:bot.code,codeHash:hash(bot.code),riskUsd:Number(input.riskUsd),leverage,issuedAt:now,expiresAt:now+24*3600_000};
   await this.deps.write(this.key(uid,botId),JSON.stringify(grant));
   return this.runtime(grant,'deploy',grant);
+ }
+ async beforeCredentialChange(uid:string){
+  if(!this.deps.list)throw Error('Credential-change safety check unavailable');
+  const prefix=`propdao-live/v1/${process.env.VERCEL_ENV||'development'}/${Buffer.from(uid).toString('base64url')}/`;
+  const keys=await this.deps.list(prefix,101);
+  if(keys.length>100)throw Error('Too many live grants to verify');
+  for(const key of keys){
+   const raw=await this.deps.read(key);if(!raw)continue;const g=JSON.parse(raw) as PropGrant;
+   if(g.uid!==uid)throw Error('Live authorization ownership mismatch');
+   if(g.expiresAt<Date.now())continue;
+   const current=await this.status(uid,g.botId);
+   if(current.running||current.uncertain||!current.configured)throw Error('Stop and reconcile all PropDAO live robots before changing API keys');
+   const live=await this.deps.accounts.accountRisk(uid,g.accountId);
+   if(live.positions.length||live.orders.length)throw Error('Close or cancel PropDAO orders and positions before disconnecting');
+  }
  }
  async stop(uid:string,botId:string){const g=await this.grant(uid,botId);if(!g)throw Error('No authorized PropDAO deployment');return this.runtime(g,'stop',{});}
  async provider(input:any){
