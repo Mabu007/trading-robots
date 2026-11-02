@@ -50,4 +50,29 @@ describe('PropDAO live execution authorization',()=>{
   await expect(svc.beforeCredentialChange('alice')).rejects.toThrow(/Stop and reconcile/);
   expect(fetcher).toHaveBeenCalled();
  });
+ it('checks connectivity while entries are disabled and rejects deployment',async()=>{
+  vi.stubEnv('PROPDAO_LIVE_ENABLED','false');vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
+  const {svc,fetcher}=setup();
+  expect(await svc.health()).toMatchObject({configured:false,connected:true,error:'Runtime connected. Automated trading is disabled.'});
+  await expect(svc.deploy('alice','bot-1',{body:{accountId:'prop-1',riskUsd:2,confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'}} as any)).rejects.toThrow(/not ready/);
+  expect(fetcher.mock.calls.every(call=>String(call[0]).endsWith('/health'))).toBe(true);
+ });
+ it('revokes provider permission even when the Worker stop request fails',async()=>{
+  vi.stubEnv('PROPDAO_LIVE_ENABLED','true');vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
+  const {svc,fetcher,saved,accounts}=setup();
+  await svc.deploy('alice','bot-1',{body:{accountId:'prop-1',riskUsd:2,leverage:1,confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'}} as any);
+  const grant=JSON.parse([...saved.values()][0]);
+  fetcher.mockRejectedValueOnce(new Error('Worker offline'));
+  await expect(svc.stop('alice','bot-1')).rejects.toThrow('Worker offline');
+  await expect(svc.provider({uid:'alice',botId:'bot-1',grantId:grant.id,action:'execute'})).rejects.toThrow(/authorization expired/);
+  expect(accounts.executeOrder).not.toHaveBeenCalled();
+ });
+ it('reports uncertainty when a saved deployment cannot be reached',async()=>{
+  vi.stubEnv('PROPDAO_LIVE_ENABLED','true');vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
+  const {svc,fetcher}=setup();
+  await svc.deploy('alice','bot-1',{body:{accountId:'prop-1',riskUsd:2,leverage:1,confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'}} as any);
+  fetcher.mockRejectedValueOnce(new Error('Worker offline'));
+  expect(await svc.status('alice','bot-1')).toMatchObject({running:false,uncertain:true,connected:false});
+ });
+
 });

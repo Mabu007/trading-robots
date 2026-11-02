@@ -31,10 +31,28 @@ const url = output.match(/https:\/\/[A-Za-z0-9.-]+\.workers\.dev/)?.[0];
 if (!url) throw new Error('No deployed Worker URL returned');
 run(['secret', 'put', 'PROPDAO_LIVE_INTERNAL_SECRET', ...config], secret);
 const health = `${url}/health`;
-const unauthorized = await fetch(health);
+async function probe(headers, expectedStatus) {
+  for(let attempt=0;attempt<6;attempt++){
+    const response=await fetch(health,{headers,signal:AbortSignal.timeout(10000)});
+    if(response.status===expectedStatus)return response;
+    if(attempt===5)throw new Error(`Worker health HTTP ${response.status}; expected ${expectedStatus}`);
+    await new Promise(resolve=>setTimeout(resolve,2000));
+  }
+}
+const unauthorized = await probe({},401);
 if (unauthorized.status !== 401) throw new Error('Unauthenticated Worker request was not rejected');
-const authenticated = await fetch(health, { headers: { Authorization: `Bearer ${secret}` } });
+const authenticated = await probe({ Authorization: `Bearer ${secret}` },200);
 const state = await authenticated.json();
 if (!authenticated.ok || state.runtime !== 'propdao-durable-object' || state.ready !== false) throw new Error('Worker health or disabled gate verification failed');
 console.log(`PROPDAO_WORKER_URL=${url}`);
 console.log('Verified authenticated health, unauthorized rejection, and disabled order submission');
+// Exercise the actual BOTS binding without a grant, alarm, account, or order.
+const probePath = `${url}/live/${'0'.repeat(64)}`;
+const probeHeaders = { Authorization: `Bearer ${secret}`, 'X-TV-UID': 'runtime-readiness-probe' };
+const status = await fetch(`${probePath}/status`, { headers: probeHeaders });
+const statusBody = await status.json();
+if (!status.ok || statusBody.running !== false || statusBody.grant !== null) throw new Error('Durable Object status verification failed');
+const denied = await fetch(`${probePath}/deploy`, {method:'POST',headers:probeHeaders,body:'{}'});
+const deniedBody = await denied.json();
+if (denied.status !== 400 || deniedBody.error !== 'Live runtime is disabled') throw new Error('Disabled Durable Object accepted deployment');
+console.log('Verified BOTS binding, empty stopped state, and disabled deployment rejection');

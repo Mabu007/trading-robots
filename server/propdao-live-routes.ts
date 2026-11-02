@@ -5,7 +5,7 @@ import {PropDAOAccounts} from './propdao-account.ts';
 
 type Storage={read:(key:string)=>Promise<string|null>;write:(key:string,value:string)=>Promise<void>;list?:(prefix:string,limit:number)=>Promise<string[]>};
 type Dependencies=Storage&{uid:(req:Request,res:Response)=>Promise<string|null>;bot:(uid:string,id:string,req:Request)=>Promise<{asset:string;code:string;venue?:string}|null>;accounts:PropDAOAccounts;request?:typeof fetch};
-export type PropGrant={id:string;uid:string;botId:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;leverage:number;issuedAt:number;expiresAt:number};
+export type PropGrant={id:string;uid:string;botId:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;leverage:number;issuedAt:number;expiresAt:number;revokedAt?:number};
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 const safeId=(value:string)=>/^[A-Za-z0-9_-]{1,128}$/.test(value);
 export class PropDAOLiveService{
@@ -26,7 +26,7 @@ export class PropDAOLiveService{
   return result;
  }
  async health(){
-  if(!this.configured())return {configured:false,error:'Cloudflare Worker endpoint or internal secret is not configured.'};
+  if(!process.env.PROPDAO_LIVE_RUNTIME_URL||!process.env.PROPDAO_LIVE_INTERNAL_SECRET||process.env.PROPDAO_LIVE_INTERNAL_SECRET.length<32)return {configured:false,connected:false,error:'Cloudflare Worker endpoint or internal secret is not configured.'};
   try{
    const base=process.env.PROPDAO_LIVE_RUNTIME_URL!,secret=process.env.PROPDAO_LIVE_INTERNAL_SECRET!;
    const url=new URL('/health',base);
@@ -34,16 +34,17 @@ export class PropDAOLiveService{
    const response=await this.request(url,{headers:{Authorization:`Bearer ${secret}`},signal:AbortSignal.timeout(10000)});
    if(!response.ok)throw Error('Cloudflare Worker rejected the runtime secret');
    const state=await response.json() as any;
-   return {configured:state?.ready===true,error:state?.ready===true?undefined:'Cloudflare Worker is disabled or not ready.'};
-  }catch(e){return {configured:false,error:e instanceof Error?e.message:'Cloudflare Worker unavailable'}}
+   const enabled=this.configured()&&state?.ready===true;
+   return {configured:enabled,connected:true,error:enabled?undefined:'Runtime connected. Automated trading is disabled.'};
+  }catch(e){return {configured:false,connected:false,error:e instanceof Error?e.message:'Cloudflare Worker unavailable'}}
  }
  async status(uid:string,botId:string){
   const grant=await this.grant(uid,botId);const health=await this.health();const configured=health.configured;
-  if(!grant)return {configured,deployed:false,running:false,accountId:null,events:[],error:configured?'Connect a PropDAO account and authorize a deployment.':health.error||'Live runtime is not available.'};
-  if(!configured)return {configured:false,deployed:true,running:false,accountId:grant.accountId,events:[],error:'Worker credentials or endpoint missing; live execution unavailable.'};
+  if(!grant)return {configured,connected:health.connected,deployed:false,running:false,accountId:null,events:[],error:configured?'Connect a PropDAO account and authorize a deployment.':health.error||'Live runtime is not available.'};
+  if(!health.connected)return {configured:false,connected:false,deployed:true,running:false,uncertain:true,accountId:grant.accountId,events:[],error:health.error};
   try{
    const state=await this.runtime(grant,'status');
-   return {...state,configured:true,deployed:state.grant?.id===grant.id,running:state.running===true,accountId:grant.accountId};
+   return {...state,configured,connected:true,uncertain:state.running===true&&(state.grant?.id!==grant.id||Boolean(grant.revokedAt)),deployed:state.grant?.id===grant.id,running:state.running===true&&state.grant?.id===grant.id&&!grant.revokedAt,accountId:grant.accountId,error:health.error};
   }catch(e){return {configured:true,deployed:true,running:false,uncertain:true,accountId:grant.accountId,events:[],error:e instanceof Error?e.message:'Worker unavailable. Order status is unknown.'}}
  }
  async deploy(uid:string,botId:string,req:Request){
@@ -84,11 +85,11 @@ export class PropDAOLiveService{
    if(live.positions.length||live.orders.length)throw Error('Close or cancel PropDAO orders and positions before disconnecting');
   }
  }
- async stop(uid:string,botId:string){const g=await this.grant(uid,botId);if(!g)throw Error('No authorized PropDAO deployment');return this.runtime(g,'stop',{});}
+ async stop(uid:string,botId:string){const g=await this.grant(uid,botId);if(!g)throw Error('No authorized PropDAO deployment');await this.deps.write(this.key(uid,botId),JSON.stringify({...g,revokedAt:Date.now()}));return this.runtime(g,'stop',{});}
  async provider(input:any){
   const {uid,botId,grantId,action,payload}=input??{};
   if(typeof uid!=='string'||!safeId(botId)||typeof grantId!=='string')throw Error('Invalid provider authorization');
-  const grant=await this.grant(uid,botId);if(!grant||grant.id!==grantId||Date.now()>=grant.expiresAt)throw Error('Live authorization expired');
+  const grant=await this.grant(uid,botId);if(!grant||grant.revokedAt||grant.id!==grantId||Date.now()>=grant.expiresAt)throw Error('Live authorization expired');
   if(action==='snapshot')return this.deps.accounts.accountRisk(uid,grant.accountId);
   if(action==='execute'){
    if(!this.configured())throw Error('Live execution disabled');

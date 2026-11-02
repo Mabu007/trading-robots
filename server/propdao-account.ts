@@ -42,7 +42,8 @@ export class PropDAOAccounts {
   if(!Number.isFinite(risk)||risk<=0||risk>10)throw Error('Invalid live trade risk budget');
   if(!Number.isFinite(input.price)||!Number.isFinite(input.stop)||!Number.isFinite(input.target)||input.price<=0||input.stop<=0||input.target<=0||!Number.isFinite(input.leverage))throw Error('Invalid live order prices');
   if(input.side==='BUY'?input.target<=input.price:input.target>=input.price)throw Error('Target must be on profitable side');
-  // Bound worst-case entry slippage to 0.10% using an immediate-or-cancel limit.
+  // Bound entry price to 0.10% using a GTC limit. PropDAO rejects limit+IOC.
+  // A resting remainder requires reconciliation; never treat submission as a fill.
   // Size from that adverse limit, not the stale candle-close reference quote.
   const maxEntry=Number((input.price*(input.side==='BUY'?1.001:0.999)).toPrecision(12));
   if(input.side==='BUY'?input.target<=maxEntry:input.target>=maxEntry)throw Error('Take profit must remain beyond the worst allowed entry fill');
@@ -54,7 +55,7 @@ export class PropDAOAccounts {
   const verdict=validatePropDAORisk({status:live.account.status,breached:live.risk.breached,roomUsd:live.risk.roomUsd,availableMargin:live.risk.equity,side:input.side,entry:maxEntry,stop:input.stop,quantity:qty,lotStep:market.lotStep,leverage:input.leverage,maxLeverage:market.maxLeverage,takerFeeRate:fee,userRiskLimitUsd:risk});
   if(!verdict.ok)throw Error(verdict.reason);
   const apiKey=await this.load(uid);if(!apiKey)throw Error('Credentials unavailable');
-  const response=await this.request(`https://app.propdao.finance/api/v1/accounts/${encodeURIComponent(id)}/orders`,{method:'POST',headers:{Authorization:`Bearer ${apiKey}`,'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({symbol:input.symbol,side:input.side,qty,leverage:input.leverage,orderType:'limit',tif:'ioc',limitPrice:maxEntry,sl:input.stop,tp:input.target,intentId:input.intentId}),signal:AbortSignal.timeout(15000)});
+  const response=await this.request(`https://app.propdao.finance/api/v1/accounts/${encodeURIComponent(id)}/orders`,{method:'POST',headers:{Authorization:`Bearer ${apiKey}`,'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({symbol:input.symbol,side:input.side,qty,leverage:input.leverage,orderType:'limit',tif:'gtc',limitPrice:maxEntry,sl:input.stop,tp:input.target,intentId:input.intentId}),signal:AbortSignal.timeout(15000)});
   let body:any;try{body=await response.json()}catch{throw Error('PropDAO order response is ambiguous; reconcile by intentId before retrying')};
   if(!response.ok)throw Error(typeof body?.error==='string'?body.error:'PropDAO rejected live order');
   const base=`https://app.propdao.finance/api/v1/accounts/${encodeURIComponent(id)}`;
@@ -76,7 +77,11 @@ export class PropDAOAccounts {
    if(!revised||!isProtected(revised))throw Error('Protective orders did not reconcile. Inspect your position immediately');
    position=revised;
   }
-  return {intentId:input.intentId,quantity:qty,plannedLoss:verdict.plannedLoss,protected:true,positionId:position.id,provider:body};
+  const remaining=await this.get(apiKey,`/accounts/${encodeURIComponent(id)}/orders`);
+  if(!Array.isArray(remaining?.data)||remaining.data.length)throw Error('Resting order or partial fill requires reconciliation. Protected positions remain; no further entries permitted.');
+  const filledQuantity=Number(position.qty);
+  if(!Number.isFinite(filledQuantity)||filledQuantity<=0||filledQuantity>qty+market.lotStep/2)throw Error('Unexpected filled quantity; account reconciliation required');
+  return {intentId:input.intentId,quantity:filledQuantity,requestedQuantity:qty,plannedLoss:verdict.plannedLoss,protected:true,positionId:position.id,provider:body};
  }
  async getPublicMarkets(){
   let response:Response;try{response=await this.request('https://app.propdao.finance/api/v1/markets',{signal:AbortSignal.timeout(10000)})}catch{throw Error('Could not load PropDAO market metadata')};

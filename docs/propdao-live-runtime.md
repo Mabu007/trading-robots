@@ -35,3 +35,25 @@ Status: **disabled by default**. This integration uses a Durable Object per user
 ## Known boundaries
 
 This is simulated-capital live trading on PropDAO, not live-money brokerage custody. Account challenges can still be lost. Trading costs, funding, provider downtime, price gaps, missed alarms and protective-order race conditions remain risks. Before treating this as production-ready, add a provider-connected dry run that verifies fill ↔ protective bracket linkage and durable order reconciliation under API timeouts. Do not enable with an unsupported instrument or missing Cloudflare credentials.
+
+
+## Deployment from Vercel-held credentials
+
+Run `node scripts/deploy-propdao-from-vercel.mjs` explicitly in a production build with
+`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and the shared
+`PROPDAO_LIVE_INTERNAL_SECRET`. `PROPDAO_LIVE_ENABLED` must be `false`.
+The command verifies Workers API access, deploys the SQLite Durable Object,
+installs the secret, and probes authentication and the disabled BOTS binding.
+It never runs in the ordinary frontend build and never exports credentials.
+
+The Live Trading status distinguishes connectivity from execution permission.
+Stop revokes the server-side grant before contacting the Worker. Already accepted
+provider requests and existing/resting positions are not cancelled by Stop.
+A persistent pending intent is recorded before submission; ambiguous responses
+halt entries and block redeployment until operator reconciliation. Runtime errors
+also halt the bot. Recovery/clearance of unresolved intents is not automated.
+
+PropDAO documents IOC as market-only. The adapter uses a price-bounded GTC limit,
+checks actual positions and brackets, and halts on resting remainders. It must not
+be enabled until this lifecycle and failure recovery are verified with an explicitly
+designated disposable account. A passing build or mocked test is not that evidence.
