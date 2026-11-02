@@ -45,6 +45,7 @@ export class PropDAOAccounts {
   // Bound worst-case entry slippage to 0.10% using an immediate-or-cancel limit.
   // Size from that adverse limit, not the stale candle-close reference quote.
   const maxEntry=Number((input.price*(input.side==='BUY'?1.001:0.999)).toPrecision(12));
+  if(input.side==='BUY'?input.target<=maxEntry:input.target>=maxEntry)throw Error('Take profit must remain beyond the worst allowed entry fill');
   const lossPerUnit=Math.abs(maxEntry-input.stop)+(maxEntry+input.stop)*fee;
   const marginPerUnit=maxEntry/input.leverage;
   if(!Number.isFinite(lossPerUnit)||lossPerUnit<=0||!Number.isFinite(marginPerUnit)||marginPerUnit<=0)throw Error('Invalid market size');
