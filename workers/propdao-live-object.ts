@@ -97,9 +97,11 @@ export class PropDAOLiveBot extends DurableObject<any>{
    const intentId=`tv-${grant.id}-${close}`;
    await this.ctx.storage.put('pendingIntent',{intentId,createdAt:Date.now(),symbol:grant.symbol,side:decision.action,stop,target});
    const order=await this.provider(grant,'execute',{symbol:grant.symbol,side:decision.action,price:last.close,stop,target,quoteTime:Date.now(),candleClose:close,intentId});
-   await this.ctx.storage.put('lastOrder',{time:Date.now(),intentId,quantity:order.quantity,plannedLoss:order.plannedLoss,protected:order.protected===true,providerStatus:order.provider?.status||'submitted'});
+   if(order.filled!==true&&order.filled!==false)throw Error('Provider did not confirm a fill outcome');
+   if(order.filled===true&&order.protected!==true)throw Error('Fill has no confirmed protective bracket');
+   await this.ctx.storage.put('lastOrder',{time:Date.now(),intentId,quantity:order.quantity,plannedLoss:order.plannedLoss,protected:order.protected===true,providerStatus:order.providerStatus||(order.filled?'PROTECTED_FILL':'CANCELLED_UNFILLED')});
    await this.ctx.storage.delete('pendingIntent');
-   await this.record(`Submitted ${decision.action} ${grant.symbol} · ${intentId}`);
+   await this.record(order.filled?`Protected fill ${decision.action} ${grant.symbol} · ${intentId}`:`Unfilled entry cancelled ${grant.symbol} · ${intentId}`);
    await this.ctx.storage.delete('lastError');
   }catch(e){const error=e instanceof Error?e.message:'Live evaluation failed';await this.ctx.storage.put('running',false);await this.ctx.storage.put('lastError',error);await this.record(`Evaluation error: ${error}`);}finally{await this.schedule()}
  })}
