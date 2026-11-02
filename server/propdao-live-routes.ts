@@ -112,7 +112,7 @@ export class PropDAOLiveService{
   const leverage=Number(input.leverage??1);
   if(!Number.isFinite(leverage)||leverage<1||leverage>Number(market.maxLeverage))throw Error('Selected leverage exceeds allowed market limit');
   const now=Date.now();
-  const grant:PropGrant={id:randomBytes(24).toString('hex'),uid,botId,accountId:input.accountId,symbol:bot.asset,coin:market.dex?`${market.dex}:${market.coin}`:market.coin,code:bot.code,codeHash:hash(bot.code),riskUsd:Number(input.riskUsd),leverage,issuedAt:now,expiresAt:now+24*3600_000};
+  const grant:PropGrant={id:randomBytes(24).toString('hex'),uid,botId,accountId:input.accountId,symbol:bot.asset,coin:market.dex?`${market.dex}:${market.coin}`:market.coin,code:bot.code,codeHash:hash(bot.code),riskUsd:Number(input.riskUsd),leverage,issuedAt:now,expiresAt:now+7*24*3600_000};
   await this.deps.write(this.key(uid,botId),JSON.stringify(grant));
   return this.runtime(grant,'deploy',grant);
  }
