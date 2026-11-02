@@ -42,15 +42,18 @@ export class PropDAOAccounts {
   if(!Number.isFinite(risk)||risk<=0||risk>10)throw Error('Invalid live trade risk budget');
   if(!Number.isFinite(input.price)||!Number.isFinite(input.stop)||!Number.isFinite(input.target)||input.price<=0||input.stop<=0||input.target<=0||!Number.isFinite(input.leverage))throw Error('Invalid live order prices');
   if(input.side==='BUY'?input.target<=input.price:input.target>=input.price)throw Error('Target must be on profitable side');
-  const lossPerUnit=Math.abs(input.price-input.stop)+(input.price+input.stop)*fee;
-  const marginPerUnit=input.price/input.leverage;
+  // Bound worst-case entry slippage to 0.10% using an immediate-or-cancel limit.
+  // Size from that adverse limit, not the stale candle-close reference quote.
+  const maxEntry=Number((input.price*(input.side==='BUY'?1.001:0.999)).toPrecision(12));
+  const lossPerUnit=Math.abs(maxEntry-input.stop)+(maxEntry+input.stop)*fee;
+  const marginPerUnit=maxEntry/input.leverage;
   if(!Number.isFinite(lossPerUnit)||lossPerUnit<=0||!Number.isFinite(marginPerUnit)||marginPerUnit<=0)throw Error('Invalid market size');
   const maxQty=Math.min(risk/lossPerUnit,live.risk.equity/marginPerUnit);
   const qty=Number((Math.floor(maxQty/market.lotStep+1e-9)*market.lotStep).toPrecision(12));
-  const verdict=validatePropDAORisk({status:live.account.status,breached:live.risk.breached,roomUsd:live.risk.roomUsd,availableMargin:live.risk.equity,side:input.side,entry:input.price,stop:input.stop,quantity:qty,lotStep:market.lotStep,leverage:input.leverage,maxLeverage:market.maxLeverage,takerFeeRate:fee,userRiskLimitUsd:risk});
+  const verdict=validatePropDAORisk({status:live.account.status,breached:live.risk.breached,roomUsd:live.risk.roomUsd,availableMargin:live.risk.equity,side:input.side,entry:maxEntry,stop:input.stop,quantity:qty,lotStep:market.lotStep,leverage:input.leverage,maxLeverage:market.maxLeverage,takerFeeRate:fee,userRiskLimitUsd:risk});
   if(!verdict.ok)throw Error(verdict.reason);
   const apiKey=await this.load(uid);if(!apiKey)throw Error('Credentials unavailable');
-  const response=await this.request(`https://app.propdao.finance/api/v1/accounts/${encodeURIComponent(id)}/orders`,{method:'POST',headers:{Authorization:`Bearer ${apiKey}`,'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({symbol:input.symbol,side:input.side,qty,leverage:input.leverage,orderType:'market',sl:input.stop,tp:input.target,intentId:input.intentId}),signal:AbortSignal.timeout(15000)});
+  const response=await this.request(`https://app.propdao.finance/api/v1/accounts/${encodeURIComponent(id)}/orders`,{method:'POST',headers:{Authorization:`Bearer ${apiKey}`,'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({symbol:input.symbol,side:input.side,qty,leverage:input.leverage,orderType:'limit',tif:'ioc',limitPrice:maxEntry,sl:input.stop,tp:input.target,intentId:input.intentId}),signal:AbortSignal.timeout(15000)});
   let body:any;try{body=await response.json()}catch{throw Error('PropDAO order response is ambiguous; reconcile by intentId before retrying')};
   if(!response.ok)throw Error(typeof body?.error==='string'?body.error:'PropDAO rejected live order');
   const base=`https://app.propdao.finance/api/v1/accounts/${encodeURIComponent(id)}`;
