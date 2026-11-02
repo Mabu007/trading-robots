@@ -15,11 +15,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
-      - run: npm ci
+      # Repository uses bun.lock, not npm package-lock.json; npm ci fails here.
+      - run: npm install --no-audit --no-fund
       - run: npm test
       - run: npm run build
       - run: npm run check:runtime
       - run: npm run worker:valr:build
       - run: npm run worker:valr:live:build
+      - run: npm run worker:propdao:live:build
         # Local fixtures only; live venue credentials are never required.
