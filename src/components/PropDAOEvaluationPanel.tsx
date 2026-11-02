@@ -1,21 +1,38 @@
-import type {PropDAOSimulation} from '../propdao-evaluation';
-import {IRON_1K} from '../propdao-evaluation';
+import type { PropDAOSimulation } from '../propdao-evaluation';
+import { IRON_1K } from '../propdao-evaluation';
 
-const usd=(v:number)=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(v);
-const pct=(v:number)=>Math.max(0,v).toFixed(2);
+const usd=(value:number)=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(value);
+const percent=(value:number)=>Math.max(0,value).toFixed(2);
+type LimitMeter={label:string;used:number;maximum:number;value:string;tone:'loss'|'target'};
 export function PropDAOEvaluationPanel({simulation,busy=false}:{simulation:PropDAOSimulation|null;busy?:boolean}){
- const s=simulation;const passed=s?.status==='passed',failed=Boolean(s?.status?.startsWith('failed'));
- return <section className="prop-evaluation" aria-label="PropDAO historical evaluation simulator">
-  <div className="prop-evaluation-head"><div><span>IRON $1K · PRO</span><strong>PropDAO evaluation simulator</strong></div><span className={'prop-evaluation-status '+(passed?'pass':failed?'fail':'pending')}>{!s?'NOT TESTED':passed?'PASSED':failed?'FAILED':'NOT PASSED'}</span></div>
-  <div className="prop-equity"><div><span>Equity</span><strong>{usd(s?.equity??IRON_1K.startingBalance)}</strong></div><div><span>Balance</span><strong>{usd(s?.balance??IRON_1K.startingBalance)}</strong></div><div><span>Available (estimated)</span><strong>{usd(s?.available??IRON_1K.startingBalance)}</strong></div></div>
-  <div className="prop-meters">
-   <div><label><span>Static drawdown used</span><b>{pct((s?.drawdownUsed??0)/IRON_1K.startingBalance*100)} of 5.00%</b></label><progress max="50" value={Math.min(50,s?.drawdownUsed??0)}/></div>
-   <div><label><span>Daily loss used (UTC)</span><b>{pct((s?.dailyLossUsed??0)/Math.max(1,(s?.dailyAllowance??IRON_1K.maxDailyLoss)/0.02)*100)} of 2.00%</b></label><progress max={s?.dailyAllowance??IRON_1K.maxDailyLoss} value={Math.min(s?.dailyAllowance??IRON_1K.maxDailyLoss,s?.dailyLossUsed??0)}/></div>
-   <div><label><span>Profit target</span><b>{pct(s?.profitTargetUsed??0)} of 10.00%</b></label><progress max="100" value={Math.min(100,Math.max(0,(s?.balance??1000)-1000))}/></div>
+ const s=simulation;
+ const passed=s?.status==='passed',failed=Boolean(s?.status?.startsWith('failed'));
+ const dailyAllowance=s?.dailyAllowance??IRON_1K.maxDailyLoss;
+ const meters:LimitMeter[]=[
+  {label:'STATIC DRAWDOWN',used:s?.drawdownUsed??0,maximum:IRON_1K.maxStaticLoss,value:`${percent((s?.drawdownUsed??0)/IRON_1K.startingBalance*100)}% / 5.00%`,tone:'loss'},
+  {label:'DAILY LOSS · UTC',used:s?.dailyLossUsed??0,maximum:dailyAllowance,value:`${percent((s?.dailyLossUsed??0)/Math.max(1,dailyAllowance/0.02)*100)}% / 2.00%`,tone:'loss'},
+  {label:'PROFIT TARGET',used:Math.max(0,(s?.balance??IRON_1K.startingBalance)-IRON_1K.startingBalance),maximum:IRON_1K.targetProfit,value:`${percent(s?.profitTargetUsed??0)}% / 10.00%`,tone:'target'}
+ ];
+ return <section className="output-result-panel prop-native-results" aria-label="PropDAO historical evaluation simulator">
+  <div className="output-result-heading">
+   <div><span className="output-eyebrow">PROPDAO · IRON $1K PRO</span><strong>Evaluation results</strong><small>Historical simulation · 1,000 USDC starting balance</small></div>
+   <span className={`prop-native-status ${passed?'green':failed?'red':''}`}>{!s?'NOT TESTED':passed?'PASSED':failed?'FAILED':'NOT PASSED'}</span>
   </div>
-  <div className="prop-target"><strong>{usd(s?.profitTargetRemaining??IRON_1K.targetProfit)} to target</strong><span>{s? `${s.completedTrades} trades · ${pct(s.riskPercent)}% initial risk per trade`: 'Run a backtest to evaluate the challenge'}</span></div>
-  {s&&<p className={'prop-evaluation-outcome '+(passed?'pass':failed?'fail':'pending')} role="status">{passed?'PASS':failed?'BREACH':'TARGET NOT MET'} · {s.reason} {s.endedAt?`(${new Date(s.endedAt*1000).toLocaleString()})`:''}</p>}
-  <p className="prop-evaluation-note">Historical simulation only, not a connected PropDAO account. Applies 10% target, $50 static equity floor and $20 daily loss limit, resetting daily at 00:00 UTC. Costs use strategy backtest assumptions. Available is estimated equity; margin, venue funding, execution fees and exact firm reset rules are not verified. Intrabar breaches are conservatively estimated from OHLC extremes.</p>
-  {busy&&<small>Running evaluation…</small>}
+  <div className="output-metrics prop-native-summary">
+   <div className="output-metric featured"><span>EQUITY</span><strong>{usd(s?.equity??IRON_1K.startingBalance)}</strong></div>
+   <div className="output-metric"><span>BALANCE</span><strong>{usd(s?.balance??IRON_1K.startingBalance)}</strong></div>
+   <div className="output-metric"><span>AVAILABLE · EST.</span><strong>{usd(s?.available??IRON_1K.startingBalance)}</strong></div>
+   <div className="output-metric"><span>PROFIT / LOSS</span><strong className={(s?.profit??0)>=0?'green':'red'}>{usd(s?.profit??0)}</strong></div>
+   <div className="output-metric"><span>REMAINING TO TARGET</span><strong>{usd(s?.profitTargetRemaining??IRON_1K.targetProfit)}</strong></div>
+  </div>
+  <div className="prop-native-limits">
+   {meters.map(m=><div className="output-metric prop-native-limit" key={m.label}>
+    <div className="prop-native-meter-label"><span>{m.label}</span><strong>{m.value}</strong></div>
+    <progress aria-label={m.label} max={m.maximum||1} value={Math.min(m.maximum||1,Math.max(0,m.used))} className={m.tone}/>
+   </div>)}
+  </div>
+  {s&&<div className="prop-native-outcome"><span className={passed?'green':failed?'red':''}>{passed?'PASS':failed?'BREACH':'TARGET NOT MET'}</span><span>{s.reason}</span><small>{s.completedTrades} simulated trades · {percent(s.riskPercent)}% initial risk per trade{s.endedAt?` · ${new Date(s.endedAt*1000).toLocaleString()}`:''}</small></div>}
+  {busy&&<p className="output-disclaimer">Running evaluation…</p>}
+  <p className="output-disclaimer">Historical estimate, not your connected PropDAO account. Daily allowance resets at 00:00 UTC; margin, funding, actual fills and firm-specific exceptions are not verified.</p>
  </section>;
 }
