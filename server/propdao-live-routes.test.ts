@@ -77,7 +77,7 @@ describe('PropDAO live execution authorization',()=>{
 
  it('requires a saved owner authorization before reading live market candles',async()=>{
   const {svc}=setup();
-  await expect(svc.market('alice','bot-1')).rejects.toThrow(/No active/);
+  await expect(svc.market('alice','bot-1')).rejects.toThrow(/No PropDAO deployment/);
  });
  it('serves validated fresh Hyperliquid candles for an authorized PropDAO workspace',async()=>{
   vi.stubEnv('VERCEL_ENV','development');vi.stubEnv('PROPDAO_LIVE_ENABLED','true');
@@ -93,6 +93,6 @@ describe('PropDAO live execution authorization',()=>{
   expect(market).toMatchObject({source:'Hyperliquid',symbol:'BTCUSDC',timeframe:'m1',fresh:true});
   expect(market.candles).toHaveLength(1);
   expect(market.candles[0].close).toBe(101);
-  await expect(svc.market('bob','bot-1')).rejects.toThrow(/No active/);
+  await expect(svc.market('bob','bot-1')).rejects.toThrow(/No PropDAO deployment/);
  });
 });
