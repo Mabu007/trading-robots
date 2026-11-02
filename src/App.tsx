@@ -215,7 +215,7 @@ ${appContext}`;
   const [savedCode,savedChat,savedRun]=await Promise.allSettled([
    bot.storageKey?userBotRequest<{code:string}>(`/api/user-bots/${encodeURIComponent(bot.id)}/current`,'GET'):Promise.resolve({code:bot.code||starterCode}),
    cloudClient.loadChats(bot.id),
-   userBotRequest<any>(`/api/user-bots/${encodeURIComponent(bot.id)}/backtest`,'GET').then(async payload=>isCompressedBacktest(payload)?{...(await decompressBacktest<any>(payload)),...(Array.isArray(payload.logs)?{logs:payload.logs}:{})}:payload),
+   userBotRequest<any>(`/api/user-bots/${encodeURIComponent(bot.id)}/backtest`,'GET').then(async payload=>isCompressedBacktest(payload)?{...(await decompressBacktest<any>(payload)),...(Array.isArray((payload as any).logs)?{logs:(payload as any).logs}:{})}:payload),
   ]);
   if(botLoadRef.current!==bot.id)return;
   const loadedCode=savedCode.status==='fulfilled'?savedCode.value.code:bot.code||starterCode;
