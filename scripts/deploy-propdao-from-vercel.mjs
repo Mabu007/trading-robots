@@ -54,7 +54,7 @@ const unauthorized = await probe({},401);
 if (unauthorized.status !== 401) throw new Error('Unauthenticated Worker request was not rejected');
 const authenticated = await probe({ Authorization: `Bearer ${secret}` },200);
 const state = await authenticated.json();
-if (!authenticated.ok || state.runtime !== 'propdao-durable-object' || state.ready !== activate) throw new Error('Worker health or execution gate verification failed');
+if (!authenticated.ok || state.runtime !== 'propdao-durable-object' || state.version !== 2 || state.ready !== activate) throw new Error('Worker health or execution gate verification failed');
 console.log(`PROPDAO_WORKER_URL=${url}`);
 console.log('Verified authenticated health, unauthorized rejection, and Worker enabled gate = '+activate);
 // Exercise the actual BOTS binding without a grant, alarm, account, or order.
