@@ -10,7 +10,7 @@ export function PropDAOEvaluationPanel({simulation,busy=false}:{simulation:PropD
   <div className="prop-equity"><div><span>Equity</span><strong>{usd(s?.equity??IRON_1K.startingBalance)}</strong></div><div><span>Balance</span><strong>{usd(s?.balance??IRON_1K.startingBalance)}</strong></div><div><span>Available (estimated)</span><strong>{usd(s?.available??IRON_1K.startingBalance)}</strong></div></div>
   <div className="prop-meters">
    <div><label><span>Static drawdown used</span><b>{pct((s?.drawdownUsed??0)/IRON_1K.startingBalance*100)} of 5.00%</b></label><progress max="50" value={Math.min(50,s?.drawdownUsed??0)}/></div>
-   <div><label><span>Daily loss used (UTC)</span><b>{pct((s?.dailyLossUsed??0)/IRON_1K.startingBalance*100)} of 2.00%</b></label><progress max="20" value={Math.min(20,s?.dailyLossUsed??0)}/></div>
+   <div><label><span>Daily loss used (UTC)</span><b>{pct((s?.dailyLossUsed??0)/Math.max(1,(s?.dailyAllowance??IRON_1K.maxDailyLoss)/0.02)*100)} of 2.00%</b></label><progress max={s?.dailyAllowance??IRON_1K.maxDailyLoss} value={Math.min(s?.dailyAllowance??IRON_1K.maxDailyLoss,s?.dailyLossUsed??0)}/></div>
    <div><label><span>Profit target</span><b>{pct(s?.profitTargetUsed??0)} of 10.00%</b></label><progress max="100" value={Math.min(100,Math.max(0,(s?.balance??1000)-1000))}/></div>
   </div>
   <div className="prop-target"><strong>{usd(s?.profitTargetRemaining??IRON_1K.targetProfit)} to target</strong><span>{s? `${s.completedTrades} trades · ${pct(s.riskPercent)}% initial risk per trade`: 'Run a backtest to evaluate the challenge'}</span></div>
