@@ -42,6 +42,7 @@ export class PropDAOAccounts {
   if(!Number.isFinite(risk)||risk<=0||risk>10)throw Error('Invalid live trade risk budget');
   if(!Number.isFinite(input.price)||!Number.isFinite(input.stop)||!Number.isFinite(input.target)||input.price<=0||input.stop<=0||input.target<=0||!Number.isFinite(input.leverage))throw Error('Invalid live order prices');
   if(input.side==='BUY'?input.target<=input.price:input.target>=input.price)throw Error('Target must be on profitable side');
+  if(input.side==='BUY'?input.stop>=input.price:input.stop<=input.price)throw Error('Stop must be on the losing side of the reference price');
   // Bound entry price to 0.10% using a GTC limit. PropDAO rejects limit+IOC.
   // A resting remainder requires reconciliation; never treat submission as a fill.
   // Size from that adverse limit, not the stale candle-close reference quote.
@@ -66,7 +67,28 @@ export class PropDAOAccounts {
   };
   const protectedPrice=(actual:unknown,expected:number)=>typeof actual==='number'&&Number.isFinite(actual)&&Math.abs(actual-expected)<=Math.max(0.01,Math.abs(expected)*0.000001);
   const isProtected=(position:any)=>protectedPrice(position.slPrice,input.stop)&&protectedPrice(position.tpPrice,input.target);
+  // Never cancel another user's/manual order. Require the response ID or intentId.
+  const entryOrders=await this.get(apiKey,`/accounts/${encodeURIComponent(id)}/orders`);
+  if(!Array.isArray(entryOrders?.data))throw Error('Unable to reconcile PropDAO resting orders');
+  const responseOrderId=body?.orderId??body?.order?.id??body?.id;
+  let cancelledUnfilled=false;
+  if(entryOrders.data.length){
+   if(entryOrders.data.length!==1)throw Error('More than one resting order; manual reconciliation required');
+   const resting=entryOrders.data[0],restingId=String(resting?.id??'');
+   const linked=resting?.intentId===input.intentId||(typeof responseOrderId==='string'&&responseOrderId===restingId);
+   const aligned=resting?.symbol===input.symbol&&resting?.side===input.side&&Number(resting?.qty)>0;
+   if(!validId(restingId)||!linked||!aligned||!['PENDING','PARTIALLY_FILLED'].includes(resting.status))
+    throw Error('Resting order is not linked to the entry intent; manual reconciliation required');
+   const cancel=await this.request(`${base}/orders/${encodeURIComponent(restingId)}`,{
+    method:'DELETE',headers:{Authorization:`Bearer ${apiKey}`,Accept:'application/json'},signal:AbortSignal.timeout(12000)
+   });
+   if(!cancel.ok)throw Error('Unable to cancel remaining entry order; manual reconciliation required');
+   const checked=await this.get(apiKey,`/accounts/${encodeURIComponent(id)}/orders`);
+   if(!Array.isArray(checked?.data)||checked.data.length)throw Error('Entry cancellation not confirmed; manual reconciliation required');
+   cancelledUnfilled=true;
+  }
   const matching=(await fetchPositions()).filter((p:any)=>p.symbol===input.symbol&&p.side===input.side&&Number(p.qty)>0);
+  if(matching.length===0&&cancelledUnfilled)return {intentId:input.intentId,quantity:0,requestedQuantity:qty,plannedLoss:0,protected:false,filled:false,providerStatus:'CANCELLED_UNFILLED'};
   if(matching.length!==1)throw Error('Live entry needs reconciliation; no further entries permitted while positions are unresolved');
   let position=matching[0];
   if(!isProtected(position)){
@@ -81,7 +103,7 @@ export class PropDAOAccounts {
   if(!Array.isArray(remaining?.data)||remaining.data.length)throw Error('Resting order or partial fill requires reconciliation. Protected positions remain; no further entries permitted.');
   const filledQuantity=Number(position.qty);
   if(!Number.isFinite(filledQuantity)||filledQuantity<=0||filledQuantity>qty+market.lotStep/2)throw Error('Unexpected filled quantity; account reconciliation required');
-  return {intentId:input.intentId,quantity:filledQuantity,requestedQuantity:qty,plannedLoss:verdict.plannedLoss,protected:true,positionId:position.id,provider:body};
+  return {intentId:input.intentId,quantity:filledQuantity,requestedQuantity:qty,plannedLoss:verdict.plannedLoss,protected:true,filled:true,positionId:position.id,providerStatus:'PROTECTED_FILL',provider:body};
  }
  async getPublicMarkets(){
   let response:Response;try{response=await this.request('https://app.propdao.finance/api/v1/markets',{signal:AbortSignal.timeout(10000)})}catch{throw Error('Could not load PropDAO market metadata')};
