@@ -4,9 +4,9 @@ import { VenueMarketData } from './venue-market-data.ts';
 describe('provider market data', () => {
   it('uses PropDAO metadata and rejects malformed risk limits', async () => {
     const request=vi.fn().mockResolvedValueOnce(Response.json({fees:{maker:0.00015,taker:0.00045},data:[{symbol:'GOLDUSDC',coin:'GOLD',dex:'xyz',lotStep:0.01,maxLeverage:1.5}]})).mockResolvedValueOnce(Response.json({fees:{maker:0,taker:0},data:[{symbol:'BTCUSDC',coin:'BTC',lotStep:0,maxLeverage:2}]}));
-    const provider=new VenueMarketData(request);
+    let now=0;const provider=new VenueMarketData(request,()=>now);
     expect((await provider.propdaoMarkets()).markets[0]).toMatchObject({symbol:'GOLDUSDC',lotStep:0.01});
-    await expect(provider.propdaoMarkets()).rejects.toThrow('invalid market metadata');
+    now=31000;await expect(provider.propdaoMarkets()).rejects.toThrow('invalid market metadata');
   });
   it('discovers native and HIP-3 markets without relabeling their names', async () => {
     const request=vi.fn(async (_:string, init:RequestInit)=>{

@@ -3,13 +3,18 @@ import { countObservedGaps, intervalMs, isTimeframe, isValidCandle, type MarketC
 // Public read-only APIs. Account access and order submission are deliberately
 // separate from market discovery and are not enabled by these adapters.
 export class VenueMarketData {
+  private metadataCache=new Map<string,{until:number;value:any}>();
   private request: typeof fetch;
   private clock: () => number;
   constructor(request: typeof fetch = fetch, clock: () => number = Date.now) { this.request=request; this.clock=clock; }
   private async json(url: string, init?: RequestInit): Promise<any> {
+    const cacheable=!init?.body||!String(init.body).includes('candleSnapshot');
+    const cacheKey=url+String(init?.body??'');
+    const cached=this.metadataCache.get(cacheKey);
+    if(cacheable&&cached&&cached.until>this.clock())return cached.value;
     const response = await this.request(url, { ...init, signal: AbortSignal.timeout(10000) });
     if (!response.ok) throw new Error(response.status === 429 ? 'Provider rate limit reached. Retry later.' : `Market data provider returned HTTP ${response.status}.`);
-    try { return await response.json(); } catch { throw new Error('Market data provider returned invalid JSON.'); }
+    try { const value=await response.json();if(cacheable){this.metadataCache.set(cacheKey,{until:this.clock()+30000,value});while(this.metadataCache.size>128)this.metadataCache.delete(this.metadataCache.keys().next().value!)}return value; } catch { throw new Error('Market data provider returned invalid JSON.'); }
   }
   private hyper(body: unknown) {
     return this.json('https://api.hyperliquid.xyz/info', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });

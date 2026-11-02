@@ -1,3 +1,4 @@
+import {venueOf} from '../shared/venues.ts';
 import 'dotenv/config';
 import {requestLimit} from './request-limits.ts';
 import express from 'express';
@@ -80,6 +81,17 @@ app.get('/api/venues/propdao/markets', async (_req,res) => {
 app.get('/api/venues/hyperliquid/markets', async (_req,res) => {
   try { res.json(await venueMarketData.hyperliquidMarkets()); } catch { res.status(502).json({error:'Hyperliquid markets are unavailable.'}); }
 });
+app.post('/api/venues/propdao/candles', async (req,res) => {
+ try {
+  const market=(await venueMarketData.propdaoMarkets()).markets.find((m:any)=>m.symbol===req.body?.asset);
+  if(!market)return res.status(400).json({error:'Choose an available PropDAO market.'});
+  const coin=market.dex?(market.coin.includes(':')?market.coin:`${market.dex}:${market.coin}`):market.coin;
+  const discovered=(await venueMarketData.hyperliquidMarkets()).markets.some((m:any)=>m.symbol===coin);
+  if(!discovered)return res.status(422).json({error:'No verified matching Hyperliquid market is available.'});
+  const data=await venueMarketData.hyperliquidCandles({...req.body,asset:coin});
+  return res.json({...data,asset:market.symbol,source:`Hyperliquid reference (${coin}) for PropDAO; simulated fills may differ`});
+ }catch {return res.status(502).json({error:'PropDAO reference history is unavailable. Hyperliquid retains the latest 5,000 candles per interval.'})}
+});
 app.post('/api/venues/hyperliquid/candles', async (req,res) => {
   try { res.json(await venueMarketData.hyperliquidCandles(req.body ?? {})); } catch (error) {
     const message = error instanceof Error ? error.message : 'Hyperliquid data unavailable.';
@@ -124,7 +136,7 @@ app.put('/api/user-bots/:botId/current', async (req, res) => {
   if (!getR2Config()) return res.status(503).json({ error: 'Robot storage is not configured on the server.' });
   const storageKey = `${userBotRoot(uid, botId)}/current.json`;
   try {
-    await writeR2Object(storageKey, JSON.stringify({ schemaVersion: 1, userId: uid, botId, code, updatedAt: new Date().toISOString() }));
+    await writeR2Object(storageKey, JSON.stringify({ schemaVersion: 1, userId: uid, botId, code, venue:venueOf(req.body?.venue), updatedAt: new Date().toISOString() }));
     return res.json({ storageKey });
   } catch (error) {
     console.error('User robot save failed', { botId, message: error instanceof Error ? error.message : String(error) });
@@ -350,7 +362,7 @@ app.post('/api/ai', async (req, res) => {
     return res.status(400).json({ error: 'Send 1–24 chat messages with supported roles and text content under 80 KB each.' });
   }
   const selectedAsset = req.body?.asset;
-  if (selectedAsset !== undefined && (typeof selectedAsset !== 'string' || !/^[A-Z0-9]{3,30}$/.test(selectedAsset))) return res.status(400).json({ error: 'Choose a supported instrument for AI context.' });
+  if (selectedAsset !== undefined && (typeof selectedAsset !== 'string' || !/^[a-zA-Z0-9_:.@-]{1,64}$/.test(selectedAsset))) return res.status(400).json({ error: 'Choose a supported instrument for AI context.' });
   const requestedTokens = Number(req.body?.maxTokens);
   const maxTokens = Number.isInteger(requestedTokens) ? Math.max(200, Math.min(6000, requestedTokens)) : 1600;
 
