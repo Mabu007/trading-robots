@@ -19,9 +19,9 @@ function ValrBrokerDialog({client,onClose,onPropDAO}:{client:CloudClient;onClose
 }
 export function BrokerDialog({client,onClose,initialVenue='valr'}:{client:CloudClient;initialVenue?:'valr'|'propdao';shareId?:string;onClose:()=>void}) {
  const [venue,setVenue]=useState<'valr'|'propdao'>(initialVenue);
- return venue==='valr'?<ValrBrokerDialog client={client} onClose={onClose} onPropDAO={()=>setVenue('propdao')}/>:<PropDAOAccount client={client} onClose={onClose} onVALR={()=>setVenue('valr')}/>;
+ return venue==='valr'?<ValrBrokerDialog client={client} onClose={onClose} onPropDAO={()=>setVenue('propdao')}/>:<PropDAOAccount client={client} onClose={onClose}/>;
 }
-function PropDAOAccount({client,onClose,onVALR}:{client:CloudClient;onClose:()=>void;onVALR:()=>void}){
+function PropDAOAccount({client,onClose}:{client:CloudClient;onClose:()=>void}){
  const [key,setKey]=useState(''),[connected,setConnected]=useState(false),[accounts,setAccounts]=useState<{accountId:string;status:string}[]>([]),[selected,setSelected]=useState(''),[snapshot,setSnapshot]=useState<any>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const storageKey='trading-vibes:propdao:selected-account';
  const load=async()=>{setBusy(true);setError('');try{const result=await sharingRequest<any>(client,'/api/venues/propdao/accounts');const list=result.accounts||[];setConnected(result.connected);setAccounts(list);let saved='';try{saved=localStorage.getItem(storageKey)||''}catch{}setSelected(current=>list.some((a:any)=>a.accountId===current)?current:list.some((a:any)=>a.accountId===saved)?saved:'');}catch(e){setError(message(e))}finally{setBusy(false)}};
@@ -31,7 +31,6 @@ function PropDAOAccount({client,onClose,onVALR}:{client:CloudClient;onClose:()=>
  const disconnect=async()=>{setBusy(true);setError('');try{await sharingRequest(client,'/api/venues/propdao/disconnect','POST',{});try{localStorage.removeItem(storageKey)}catch{}setConnected(false);setAccounts([]);setSnapshot(null);setSelected('');setNotice('Disconnected. Any running robot must be stopped before reconnecting a key.')}catch(e){setError(message(e))}finally{setBusy(false)}};
  const save=()=>{if(!selected){setError('Select an account before saving.');return}try{localStorage.setItem(storageKey,selected)}catch{setError('Could not save this account selection on your device.');return}onClose()};
  return <Modal title="PropDAO account" close={onClose}>
-  <div className="market-buttons"><button type="button" className="ghost" onClick={onVALR} disabled={busy}>Manage VALR account</button></div>
   <p>Connect your PropDAO developer key to select an evaluation or funded account. Connecting alone never authorizes orders.</p>
   <p><a href="https://www.propdao.finance/docs" target="_blank" rel="noreferrer">Developer key instructions ↗</a></p>
   {error&&<p className="share-error" role="alert">{error}</p>}{notice&&<p className="market-status" role="status">{notice}</p>}
