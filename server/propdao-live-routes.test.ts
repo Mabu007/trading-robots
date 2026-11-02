@@ -22,7 +22,7 @@ describe('PropDAO live execution authorization',()=>{
   vi.stubEnv('PROPDAO_LIVE_ENABLED','false');
   const state=await svc.status('alice','bot-1');
   expect(state.configured).toBe(false);
-  await expect(svc.deploy('alice','bot-1',{body:{}} as any)).rejects.toThrow(/not configured/);
+  await expect(svc.deploy('alice','bot-1',{body:{accountId:'prop-1',riskUsd:2,leverage:1,confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'}} as any)).rejects.toThrow(/not ready/);
   expect(fetcher).not.toHaveBeenCalled();
  });
  it('requires explicit authorization and rejects unavailable account risk',async()=>{
@@ -31,7 +31,7 @@ describe('PropDAO live execution authorization',()=>{
   await expect(svc.deploy('alice','bot-1',{body:{accountId:'prop-1',riskUsd:2,leverage:1}} as any)).rejects.toThrow(/Explicit/);
   accounts.accountRisk.mockResolvedValueOnce({account:{status:'active'},risk:{equity:1000,roomUsd:3,breached:false},positions:[],orders:[]});
   await expect(svc.deploy('alice','bot-1',{body:{accountId:'prop-1',riskUsd:2,leverage:1,confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'}} as any)).rejects.toThrow(/risk room/);
-  expect(fetcher).not.toHaveBeenCalled();
+  expect(fetcher).toHaveBeenCalledTimes(1); // readiness only; no deployment call
  });
  it('stores an account-scoped grant, authorizes worker provider only, blocks key changes while running',async()=>{
   vi.stubEnv('PROPDAO_LIVE_ENABLED','true');vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));vi.stubEnv('VERCEL_ENV','preview');
