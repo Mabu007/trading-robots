@@ -64,10 +64,10 @@ export class PropDAOAccounts {
  }
  async disconnect(uid:string){await this.storage.remove(path(uid));return {connected:false};}
 }
-export function propDAORoutes(app:Express,accounts:PropDAOAccounts,uid:(req:Request,res:ExpressResponse)=>Promise<string|null>){
+export function propDAORoutes(app:Express,accounts:PropDAOAccounts,uid:(req:Request,res:ExpressResponse)=>Promise<string|null>,beforeChange?:(uid:string)=>Promise<void>){
  const handle=(fn:(id:string,req:Request)=>Promise<unknown>)=>async(req:Request,res:ExpressResponse)=>{res.setHeader('Cache-Control','no-store');const id=await uid(req,res);if(!id)return;try{return res.json(await fn(id,req))}catch(e){const message=e instanceof Error?e.message:'';const allowed=/^(PropDAO credential encryption is not configured\.|Could not reach PropDAO\.|PropDAO rate limit reached\. Retry later\.|PropDAO rejected the API key\.|PropDAO account request failed\.|PropDAO returned invalid account data\.|Unable to decrypt PropDAO credentials\. Reconnect your account\.|Enter a valid PropDAO API key\.|Choose a valid PropDAO account\.|Connect a PropDAO API key first\.|PropDAO account not found\.)$/;return res.status(400).json({error:allowed.test(message)?message:'PropDAO account request failed.'})}};
- app.post('/api/venues/propdao/connect',handle((id,req)=>accounts.connect(id,req.body?.apiKey)));
+ app.post('/api/venues/propdao/connect',handle(async(id,req)=>{if(beforeChange)await beforeChange(id);return accounts.connect(id,req.body?.apiKey)}));
  app.get('/api/venues/propdao/accounts',handle(id=>accounts.list(id)));
  app.get('/api/venues/propdao/accounts/:accountId',handle((id,req)=>accounts.snapshot(id,req.params.accountId)));
- app.post('/api/venues/propdao/disconnect',handle(id=>accounts.disconnect(id)));
+ app.post('/api/venues/propdao/disconnect',handle(async id=>{if(beforeChange)await beforeChange(id);return accounts.disconnect(id)}));
 }
