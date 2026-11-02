@@ -33,7 +33,7 @@ export class PropDAOLiveBot extends DurableObject<any>{
   for(let i=0;i<result.length;i++){
    const c=result[i];if(c.high<Math.max(c.open,c.close)||c.low>Math.min(c.open,c.close)||c.low<=0||[c.open,c.close,c.high,c.volume].some((n:number)=>!Number.isFinite(n))||(i>0&&c.time<=result[i-1].time))throw Error('Invalid market price series');
   }
-  if(result.length<30||result.at(-1)?.time+duration!==end)throw Error('Latest closed market candle missing');
+  if(result.length<30||!result.length||result[result.length-1].time+duration!==end)throw Error('Latest closed market candle missing');
   return result;
  }
  private async schedule(){
