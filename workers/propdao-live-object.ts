@@ -86,14 +86,14 @@ export class PropDAOLiveBot extends DurableObject<any>{
    const decision=decisions.at(-1);
    await this.ctx.storage.put(marker,close);
    await this.ctx.storage.put('lastEvaluation',{time:Date.now(),candleClose:close,action:decision?.action||'WAIT'});
-   if(decision?.action!=='BUY'&&decision?.action!=='SELL')return;
+   if(decision?.action!=='BUY'&&decision?.action!=='SELL'){await this.ctx.storage.delete('lastError');return;}
    const last=execution.at(-1);
    if(!last||last.time+period!==close||Date.now()-close*1000>25000)throw Error('Live candle too old for order entry');
    const stop=Number(decision.stopLoss),target=Number(decision.takeProfit);
    if(!Number.isFinite(stop)||!Number.isFinite(target)||stop<=0||target<=0)throw Error('Missing protective stop or target');
    const intentId=`tv-${grant.id}-${close}`;
    const order=await this.provider(grant,'execute',{symbol:grant.symbol,side:decision.action,price:last.close,stop,target,quoteTime:Date.now(),candleClose:close,intentId});
-   await this.ctx.storage.put('lastOrder',{time:Date.now(),intentId,quantity:order.quantity,plannedLoss:order.plannedLoss,providerStatus:order.provider?.status||'submitted'});
+   await this.ctx.storage.put('lastOrder',{time:Date.now(),intentId,quantity:order.quantity,plannedLoss:order.plannedLoss,protected:order.protected===true,providerStatus:order.provider?.status||'submitted'});
    await this.record(`Submitted ${decision.action} ${grant.symbol} · ${intentId}`);
    await this.ctx.storage.delete('lastError');
   }catch(e){const error=e instanceof Error?e.message:'Live evaluation failed';await this.ctx.storage.put('lastError',error);await this.record(`Evaluation error: ${error}`);}finally{await this.schedule()}
