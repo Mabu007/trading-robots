@@ -44,8 +44,54 @@ export class PropDAOLiveService{
   if(!health.connected)return {configured:false,connected:false,deployed:true,running:false,uncertain:true,accountId:grant.accountId,events:[],error:health.error};
   try{
    const state=await this.runtime(grant,'status');
-   return {...state,configured,connected:true,uncertain:state.running===true&&(state.grant?.id!==grant.id||Boolean(grant.revokedAt)),deployed:state.grant?.id===grant.id,running:state.running===true&&state.grant?.id===grant.id&&!grant.revokedAt,accountId:grant.accountId,error:health.error};
+   const matched=state.grant?.id===grant.id;
+   let positions:any[]=[],closedTrades:any[]=[],risk:any=null,accountError:string|undefined;
+   if(matched){
+    try{
+     const account=await this.deps.accounts.accountRisk(uid,grant.accountId);
+     risk={equity:account.risk.equity,roomUsd:account.risk.roomUsd,balance:account.risk.balance,breached:account.risk.breached};
+     positions=account.positions.slice(0,50).map((p:any)=>({
+      id:String(p.id||''),symbol:String(p.symbol||''),side:p.side,qty:Number(p.qty),
+      entry:Number(p.entry),mark:Number(p.mark),unrealizedPnl:Number(p.unrealizedPnl),
+      slPrice:p.slPrice, tpPrice:p.tpPrice,openedAt:Number(p.openedAt)
+     }));
+     closedTrades=await this.deps.accounts.recentTrades(uid,grant.accountId);
+    }catch(e){accountError=e instanceof Error?e.message:'PropDAO account activity unavailable'}
+   }
+   return {...state,configured,connected:true,
+    uncertain:state.running===true&&(!matched||Boolean(grant.revokedAt)),
+    deployed:matched,running:state.running===true&&matched&&!grant.revokedAt,
+    accountId:grant.accountId,positions,closedTrades,risk,accountError,
+    error:health.error};
+
   }catch(e){return {configured:true,deployed:true,running:false,uncertain:true,accountId:grant.accountId,events:[],error:e instanceof Error?e.message:'Worker unavailable. Order status is unknown.'}}
+ }
+ async market(uid:string,botId:string){
+  const grant=await this.grant(uid,botId);
+  if(!grant||grant.revokedAt||Date.now()>=grant.expiresAt)throw Error('No active PropDAO authorization for this bot');
+  const config=parseStrategyConfig(grant.code),tf=config.executionTimeframe;
+  const interval:Record<string,string>={m1:'1m',m5:'5m',m15:'15m',m30:'30m',h1:'1h',h4:'4h'};
+  const seconds:Record<string,number>={m1:60,m5:300,m15:900,m30:1800,h1:3600,h4:14400};
+  if(!interval[tf])throw Error('Unsupported live timeframe');
+  const now=Date.now(),period=seconds[tf]*1000;
+  const response=await this.request('https://api.hyperliquid.xyz/info',{
+   method:'POST',headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({type:'candleSnapshot',req:{coin:grant.coin,interval:interval[tf],startTime:Math.floor(now/period)*period-150*period,endTime:now}}),
+   signal:AbortSignal.timeout(9000)
+  });
+  if(!response.ok)throw Error('Hyperliquid live candles unavailable');
+  const data=await response.json() as any;
+  if(!Array.isArray(data))throw Error('Hyperliquid returned invalid live prices');
+  const candles=data.map((x:any)=>({
+   time:Number(x.t)/1000,open:Number(x.o),high:Number(x.h),low:Number(x.l),
+   close:Number(x.c),volume:Number(x.v)
+  })).filter((c:any)=>Number.isInteger(c.time)&&c.time>0&&c.time<=now/1000&&
+   [c.open,c.high,c.low,c.close,c.volume].every(Number.isFinite)&&c.low>0&&
+   c.high>=Math.max(c.open,c.close)&&c.low<=Math.min(c.open,c.close))
+   .sort((a:any,b:any)=>a.time-b.time).slice(-120);
+  if(!candles.length)throw Error('No live market candles available');
+  return {source:'Hyperliquid',symbol:grant.symbol,timeframe:tf,updatedAt:now,
+   fresh:(now-candles[candles.length-1].time*1000)<Math.max(period,90000),candles};
  }
  async deploy(uid:string,botId:string,req:Request){
   const input=req.body;
@@ -103,6 +149,7 @@ export function propDAOLiveRoutes(app:Express,deps:Dependencies){
  const service=new PropDAOLiveService(deps);
  const route=(fn:(uid:string,id:string,req:Request)=>Promise<unknown>)=>async(req:Request,res:Response)=>{res.setHeader('Cache-Control','no-store');const uid=await deps.uid(req,res);if(!uid)return;const id=String(req.params.botId);if(!safeId(id))return res.status(400).json({error:'Invalid bot ID'});try{return res.json(await fn(uid,id,req))}catch(e){return res.status(400).json({error:e instanceof Error?e.message:'PropDAO live request failed'})}};
  app.get('/api/venues/propdao/bots/:botId/live',route((uid,id)=>service.status(uid,id)));
+ app.get('/api/venues/propdao/bots/:botId/live/market',route((uid,id)=>service.market(uid,id)));
  app.post('/api/venues/propdao/bots/:botId/live',route((uid,id,req)=>req.body?.action==='deploy'?service.deploy(uid,id,req):req.body?.action==='stop'?service.stop(uid,id):Promise.reject(Error('Unknown action'))));
  app.post('/api/internal/propdao/provider',async(req,res)=>{
   res.setHeader('Cache-Control','no-store');
