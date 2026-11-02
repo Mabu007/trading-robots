@@ -90,7 +90,16 @@ function App(){
  const availableAssets=marketAvailability.map(market=>market.asset),assetOptions=availableAssets.length?availableAssets:fallbackAssets,selectedMarket=marketAvailability.find(market=>market.asset===asset),executionTimeframe=(()=>{try{return parseStrategyConfig(code).executionTimeframe}catch{return selectedMarket?.timeframes[0]||'m1'}})(),availableDates=selectedMarket?.datesByTimeframe?.[executionTimeframe]||selectedMarket?.dates||[];
  const activeProfile=(()=>{try{return cloudClient?.getProfile()??null}catch{return null}})(),profileLabel=activeProfile?.displayName||activeProfile?.email||'Profile';
  const simulationKey=`trading-vibes:simulation:${activeProfile?.uid||'local'}:${draftId}:${venue}:${asset}`;
- useEffect(()=>{if(venue!=='propdao'||!cloudClient||!authReady||!created||screen!=='workspace'){setPropLive(null);return}let active=true;const poll=async()=>{try{const value=await sharingRequest<any>(cloudClient,`/api/venues/propdao/bots/${encodeURIComponent(draftId)}/live`);if(active)setPropLive(value)}catch(e){if(active)setPropLive((current:any)=>({...current,running:false,uncertain:true,error:err(e),events:current?.events||[]}))}};void poll();const timer=window.setInterval(()=>void poll(),10000);return()=>{active=false;window.clearInterval(timer)}},[venue,cloudClient,authReady,created,screen,draftId,propLiveRevision]);
+ useEffect(()=>{
+  if(venue!=='propdao'||!cloudClient||!authReady||!created||screen!=='workspace'){setPropLive(null);return}
+  let active=true,timer:number|undefined;
+  const poll=async()=>{
+   try{const state=await sharingRequest<any>(cloudClient,`/api/venues/propdao/bots/${encodeURIComponent(draftId)}/live`);
+    if(active)setPropLive(state);
+   }catch(e){if(active)setPropLive((current:any)=>({...current,running:false,uncertain:true,error:err(e),events:current?.events||[]}))}
+   finally{if(active)timer=window.setTimeout(poll,10000)}
+  };void poll();return()=>{active=false;if(timer)window.clearTimeout(timer)}
+ },[venue,cloudClient,authReady,created,screen,draftId,propLiveRevision]);
  useEffect(()=>{if(!propLiveMode)return;setResult(null);setMoneyReplay(null);setSelectedTrade(null);setView('chart');setTab('chart');setOutputTab(current=>['terminal','live-trading','trades'].includes(current)?current:'live-trading');setTerminalOpen(true)},[propLiveMode,draftId]);
  useEffect(()=>{
   if(!propLiveMode||!cloudClient||screen!=='workspace'){setPropMarket(null);return}
