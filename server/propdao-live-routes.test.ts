@@ -12,7 +12,7 @@ const setup=()=>{
   getPublicMarkets:vi.fn(async()=>({data:[{symbol:'BTCUSDC',coin:'BTC',dex:null,lotStep:0.00001,maxLeverage:2}],fees:{taker:0.00045}})),
   executeOrder:vi.fn(async()=>({intentId:'test',protected:true})),
  };
- const fetcher=vi.fn(async(url:string)=>Response.json({running:String(url).endsWith('/status'),events:['authorized']}));
+ const fetcher=vi.fn(async(url:string)=>String(url).endsWith('/health')?Response.json({ready:true}):Response.json({running:String(url).endsWith('/status'),events:['authorized']}));
  const svc=new PropDAOLiveService({...storage,uid:async()=> 'alice',bot:async()=>({asset:'BTCUSDC',venue:'propdao',code:starterCode}),accounts:accounts as unknown as PropDAOAccounts,request:fetcher as unknown as typeof fetch});
  return {svc,fetcher,accounts,saved,storage};
 };
