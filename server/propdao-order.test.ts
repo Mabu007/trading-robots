@@ -12,7 +12,7 @@ describe('PropDAO protected live order adapter',()=>{
    if(url.endsWith('/accounts'))return Response.json({accounts:[{account_id:'prop-1',status:'active'}]});
    if(url.endsWith('/risk'))return Response.json({equity:1000,roomUsd:50,breached:false,floor:950});
    if(url.endsWith('/positions'))return Response.json({data:placed?[{id:'pos-1',symbol:'BTCUSDC',side:'BUY',qty:1,slPrice:99,tpPrice:103}]:[]});
-   if(url.endsWith('/orders')&&init.method==='POST'){const body=JSON.parse(String(init.body));expect(body).toMatchObject({symbol:'BTCUSDC',side:'BUY',orderType:'market',sl:99,tp:103,intentId:'intent-1234567890'});expect(body.qty).toBeGreaterThan(0);placed=true;return Response.json({status:'FILLED'})}
+   if(url.endsWith('/orders')&&init.method==='POST'){const body=JSON.parse(String(init.body));expect(body).toMatchObject({symbol:'BTCUSDC',side:'BUY',orderType:'limit',tif:'ioc',sl:99,tp:103,intentId:'intent-1234567890'});expect(body.qty).toBeGreaterThan(0);expect(body.limitPrice).toBeCloseTo(100.1);placed=true;return Response.json({status:'FILLED'})}
    if(url.endsWith('/orders'))return Response.json({data:[]});
    return Response.json({error:'unknown'}, {status:404});
   });
