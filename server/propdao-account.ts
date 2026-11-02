@@ -2,14 +2,14 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import type { Express, Request, Response as ExpressResponse } from 'express';
 
 type Storage={read:(key:string)=>Promise<string|null>;write:(key:string,value:string)=>Promise<void>;remove:(key:string)=>Promise<void>};
-const validKey=(v:unknown):v is string=>typeof v==='string' && /^pd_live_[A-Za-z0-9_-]{16,200}$/.test(v);
+const validKey=(v:unknown):v is string=>typeof v==='string' && /^pd_live_[A-Za-z0-9_-]{1,240}$/.test(v);
 const validId=(v:unknown):v is string=>typeof v==='string' && /^[A-Za-z0-9_-]{1,128}$/.test(v);
 function secret(v:string|undefined){if(!v||!/^[A-Za-z0-9+/]{43}=$/.test(v))throw Error('PropDAO credential encryption is not configured.');const k=Buffer.from(v,'base64');if(k.length!==32||k.toString('base64')!==v)throw Error('PropDAO credential encryption is not configured.');return k}
 function path(uid:string){const env=process.env.VERCEL_ENV==='production'?'production':process.env.VERCEL_ENV==='preview'?'preview':'development';return `propdao-credentials/v1/${env}/${Buffer.from(uid).toString('base64url')}.json`}
 export class PropDAOAccounts {
  private storage:Storage; private request:typeof fetch; private key:()=>string|undefined;
  constructor(storage:Storage,request:typeof fetch=fetch,key:()=>string|undefined=()=>process.env.PROPDAO_CREDENTIAL_ENCRYPTION_KEY){this.storage=storage;this.request=request;this.key=key}
- private async get(apiKey:string,endpoint:string){
+ private async get(apiKey:string,endpoint:string):Promise<any>{
   let response:Response;try{response=await this.request(`https://app.propdao.finance/api/v1${endpoint}`,{headers:{Authorization:`Bearer ${apiKey}`,Accept:'application/json'},signal:AbortSignal.timeout(10000)})}catch{throw Error('Could not reach PropDAO.')}
   if(!response.ok)throw Error(response.status===429?'PropDAO rate limit reached. Retry later.':response.status===401?'PropDAO rejected the API key.':'PropDAO account request failed.');
   try{return await response.json()}catch{throw Error('PropDAO returned invalid account data.')}
