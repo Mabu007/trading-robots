@@ -2,6 +2,29 @@ import {describe,expect,it,vi} from 'vitest';
 import {PropDAOAccounts} from './propdao-account.ts';
 
 describe('PropDAO protected live order adapter',()=>{
+ it.each(['timeout','rejected','missing-fill','protection-failed','resting-remainder'])('fails closed after %s without resubmitting',async(mode)=>{
+  const saved=new Map<string,string>();let submitted=0;
+  const fetcher=vi.fn(async(url:string,init:RequestInit={})=>{
+   if(url.endsWith('/accounts'))return Response.json({accounts:[{account_id:'prop-1',status:'active'}]});
+   if(url.endsWith('/markets'))return Response.json({data:[{symbol:'BTCUSDC',lotStep:0.001,maxLeverage:2}],fees:{taker:0.00045}});
+   if(url.endsWith('/risk'))return Response.json({equity:1000,roomUsd:50,breached:false});
+   if(init.method==='POST'){
+    submitted++;
+    if(mode==='timeout')throw new Error('timeout');
+    if(mode==='rejected')return Response.json({error:'Insufficient margin'},{status:400});
+    return Response.json({status:'submitted'});
+   }
+   if(init.method==='PATCH')return Response.json({error:'Cannot attach protection'},{status:400});
+   if(url.endsWith('/positions'))return Response.json({data:submitted&&mode!=='missing-fill'?[{id:'pos-1',symbol:'BTCUSDC',side:'BUY',qty:0.5,slPrice:mode==='protection-failed'?null:99,tpPrice:103}]:[]});
+   if(url.endsWith('/orders'))return Response.json({data:submitted&&mode==='resting-remainder'?[{id:'ord-1',status:'PARTIALLY_FILLED'}]:[]});
+   return Response.json({},{status:404});
+  });
+  const storage={read:async(k:string)=>saved.get(k)??null,write:async(k:string,v:string)=>{saved.set(k,v)},remove:async(k:string)=>{saved.delete(k)}};
+  const accounts=new PropDAOAccounts(storage,fetcher as typeof fetch,()=>Buffer.alloc(32,4).toString('base64'));
+  await accounts.connect('alice','pd_live_test');
+  await expect(accounts.executeOrder('alice','prop-1',{symbol:'BTCUSDC',side:'BUY',price:100,stop:99,target:103,leverage:1,riskUsd:2,intentId:'intent-1234567890',quoteTime:Date.now()})).rejects.toThrow();
+  expect(submitted).toBe(1);
+ });
  it('sends an idempotent order only after reading risk and validates attached bracket',async()=>{
   const stored=new Map<string,string>(),calls:string[]=[];
   const apiKey='pd_live_abcdefghijklmnopqrstuv';
@@ -12,7 +35,7 @@ describe('PropDAO protected live order adapter',()=>{
    if(url.endsWith('/accounts'))return Response.json({accounts:[{account_id:'prop-1',status:'active'}]});
    if(url.endsWith('/risk'))return Response.json({equity:1000,roomUsd:50,breached:false,floor:950});
    if(url.endsWith('/positions'))return Response.json({data:placed?[{id:'pos-1',symbol:'BTCUSDC',side:'BUY',qty:1,slPrice:99,tpPrice:103}]:[]});
-   if(url.endsWith('/orders')&&init.method==='POST'){const body=JSON.parse(String(init.body));expect(body).toMatchObject({symbol:'BTCUSDC',side:'BUY',orderType:'limit',tif:'ioc',sl:99,tp:103,intentId:'intent-1234567890'});expect(body.qty).toBeGreaterThan(0);expect(body.limitPrice).toBeCloseTo(100.1);placed=true;return Response.json({status:'FILLED'})}
+   if(url.endsWith('/orders')&&init.method==='POST'){const body=JSON.parse(String(init.body));expect(body).toMatchObject({symbol:'BTCUSDC',side:'BUY',orderType:'limit',tif:'gtc',sl:99,tp:103,intentId:'intent-1234567890'});expect(body.qty).toBeGreaterThan(0);expect(body.limitPrice).toBeCloseTo(100.1);placed=true;return Response.json({status:'FILLED'})}
    if(url.endsWith('/orders'))return Response.json({data:[]});
    return Response.json({error:'unknown'}, {status:404});
   });

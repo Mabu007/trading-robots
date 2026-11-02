@@ -34,7 +34,7 @@ export class PropDAOLiveBot extends DurableObject<any>{
    const c=result[i];if(c.high<Math.max(c.open,c.close)||c.low>Math.min(c.open,c.close)||c.low<=0||[c.open,c.close,c.high,c.volume].some((n:number)=>!Number.isFinite(n))||(i>0&&c.time<=result[i-1].time))throw Error('Invalid market price series');
   }
   if(result.length<30||!result.length||result[result.length-1].time+duration!==end)throw Error('Latest closed market candle missing');
-  for(let i=Math.max(1,result.length-30);i<result.length;i++)if(result[i].time-result[i-1].time!==duration)throw Error('Recent live candles contain gaps; refusing signal');
+  for(let i=1;i<result.length;i++)if(result[i].time-result[i-1].time!==duration)throw Error('Recent live candles contain gaps; refusing signal');
   return result;
  }
  private async schedule(){
@@ -46,16 +46,18 @@ export class PropDAOLiveBot extends DurableObject<any>{
  }
  async fetch(req:Request){return this.serial(async()=>{try{
   const action=new URL(req.url).pathname.slice(1),existing=await this.ctx.storage.get<Grant>('grant');
-  if(action==='status'&&req.method==='GET')return Response.json({grant:existing?{id:existing.id,botId:existing.botId,accountId:existing.accountId,symbol:existing.symbol,expiresAt:existing.expiresAt}:null,...await this.state(),nextAlarm:await this.ctx.storage.getAlarm()});
+  if(existing&&existing.uid!==req.headers.get('X-TV-UID'))return Response.json({error:'Deployment ownership mismatch'},{status:403});
+  if(action==='status'&&req.method==='GET')return Response.json({grant:existing?{id:existing.id,botId:existing.botId,accountId:existing.accountId,symbol:existing.symbol,expiresAt:existing.expiresAt}:null,...await this.state(),nextAlarm:await this.ctx.storage.getAlarm(),pendingIntent:await this.ctx.storage.get('pendingIntent')});
   if(req.method!=='POST')return Response.json({error:'POST required'},{status:405});
   const input=await req.json<any>();
   if(action==='deploy'){
    if(this.env.PROPDAO_LIVE_ENABLED!=='true'||!this.env.PROPDAO_LIVE_INTERNAL_SECRET)throw Error('Live runtime is disabled');
    const grant=input as Grant;
-   if(!grant?.uid||grant.uid!==req.headers.get('X-TV-UID')||!grant.id||!grant.botId||!grant.code||Date.now()>grant.issuedAt+60000||Date.now()>=grant.expiresAt)throw Error('Invalid or expired deployment');
+   if(!grant?.uid||grant.uid!==req.headers.get('X-TV-UID')||!grant.id||!grant.botId||!grant.code||!Number.isFinite(grant.issuedAt)||!Number.isFinite(grant.expiresAt)||grant.issuedAt>Date.now()+5000||grant.expiresAt>grant.issuedAt+24*3600_000||Date.now()>grant.issuedAt+60000||Date.now()>=grant.expiresAt)throw Error('Invalid or expired deployment');
    if(await hash(grant.code)!==grant.codeHash)throw Error('Strategy identity mismatch');
    if(existing?.uid&&existing.uid!==grant.uid)throw Error('This account belongs to another identity');
    if(existing&&(await this.ctx.storage.get<boolean>('running')))throw Error('Account already has a running robot');
+   if(await this.ctx.storage.get('pendingIntent'))throw Error('Unresolved prior order. Operator reconciliation required before redeployment.');
    parseStrategyConfig(grant.code);
    const account=await this.provider(grant,'snapshot');
    if(!['active','funded'].includes(account.account?.status)||account.risk?.breached||account.positions?.length||account.orders?.length)throw Error('Account not ready for live trading');
@@ -74,6 +76,7 @@ export class PropDAOLiveBot extends DurableObject<any>{
    if(this.env.PROPDAO_LIVE_ENABLED!=='true')throw Error('Worker operator disabled entries');
    const config=parseStrategyConfig(grant.code),period=TF_SECONDS[config.executionTimeframe],close=Math.floor((Date.now()/1000-5)/period)*period,marker=`evaluation:${grant.id}`;
    if((await this.ctx.storage.get<number>(marker)||0)>=close)return;
+   if(await this.ctx.storage.get('pendingIntent'))throw Error('Unresolved order intent. Reconcile the PropDAO account before resuming.');
    const account=await this.provider(grant,'snapshot');
    await this.ctx.storage.put('lastAccount',{time:Date.now(),equity:account.risk?.equity,roomUsd:account.risk?.roomUsd,positions:account.positions?.length??0,orders:account.orders?.length??0,accountStatus:account.account?.status});
    if(account.risk?.breached||!['active','funded'].includes(account.account?.status)){await this.ctx.storage.put('running',false);await this.record('Account ineligible or risk breached. Trading stopped.');return}
@@ -92,10 +95,12 @@ export class PropDAOLiveBot extends DurableObject<any>{
    const stop=Number(decision.stopLoss),target=Number(decision.takeProfit);
    if(!Number.isFinite(stop)||!Number.isFinite(target)||stop<=0||target<=0)throw Error('Missing protective stop or target');
    const intentId=`tv-${grant.id}-${close}`;
+   await this.ctx.storage.put('pendingIntent',{intentId,createdAt:Date.now(),symbol:grant.symbol,side:decision.action,stop,target});
    const order=await this.provider(grant,'execute',{symbol:grant.symbol,side:decision.action,price:last.close,stop,target,quoteTime:Date.now(),candleClose:close,intentId});
    await this.ctx.storage.put('lastOrder',{time:Date.now(),intentId,quantity:order.quantity,plannedLoss:order.plannedLoss,protected:order.protected===true,providerStatus:order.provider?.status||'submitted'});
+   await this.ctx.storage.delete('pendingIntent');
    await this.record(`Submitted ${decision.action} ${grant.symbol} · ${intentId}`);
    await this.ctx.storage.delete('lastError');
-  }catch(e){const error=e instanceof Error?e.message:'Live evaluation failed';await this.ctx.storage.put('lastError',error);await this.record(`Evaluation error: ${error}`);}finally{await this.schedule()}
+  }catch(e){const error=e instanceof Error?e.message:'Live evaluation failed';await this.ctx.storage.put('running',false);await this.ctx.storage.put('lastError',error);await this.record(`Evaluation error: ${error}`);}finally{await this.schedule()}
  })}
 }
