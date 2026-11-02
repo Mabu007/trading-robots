@@ -326,7 +326,7 @@ ${appContext}`;
  const undoCode=()=>{if(!liveLocked&&liveCheck==='ready')editorRef.current?.trigger('toolbar','undo',null)};
  const redoCode=()=>{if(!liveLocked&&liveCheck==='ready')editorRef.current?.trigger('toolbar','redo',null)};
  useEffect(()=>{
-  const priceCandles=result?.candles;
+  const priceCandles:Candle[]=propLiveMode?(propMarket?.candles||[]):(result?.candles||[]);
   if(!created||view!=='chart'||!chartRef.current||!priceCandles?.length)return;
   const el=chartRef.current;
   const chart=createChart(el,{
@@ -338,10 +338,10 @@ ${appContext}`;
    crosshair:{vertLine:{color:'#9bb98877'},horzLine:{color:'#9bb98877'}}
   });
   chartApiRef.current=chart;
-  const series=chart.addSeries(CandlestickSeries,{upColor:'#42d8a4',downColor:'#e9777b',borderVisible:false,wickUpColor:'#42d8a4',wickDownColor:'#e9777b'});
+  const series=chart.addSeries(CandlestickSeries,{upColor:'#42d8a4',downColor:'#e9777b',borderVisible:false,wickUpColor:'#42d8a4',wickDownColor:'#e9777b'});chartSeriesRef.current=series;
   series.setData(priceCandles.map(c=>({time:c.time as any,open:c.open,high:c.high,low:c.low,close:c.close})));
   const currentTime=priceCandles.at(-1)?.time||0;
-  const chartTrades:Trade[]=(propEvaluation?.trades??monetary?.trades??result?.trades??[]);
+  const chartTrades:Trade[]=propLiveMode?[]:(propEvaluation?.trades??monetary?.trades??result?.trades??[]);
   const markers=tradeMarkers(chartTrades,currentTime);
   const markerTrades=new Map<string,Trade>();
   for(const trade of chartTrades){ markerTrades.set(`trade:${trade.id}:entry`,trade); markerTrades.set(`trade:${trade.id}:exit`,trade); }
@@ -368,9 +368,12 @@ ${appContext}`;
   const removeChartTools=installChartTools(el,chart,series,priceCandles,`trading-vibes:drawings:${activeProfile?.uid||'local'}:${draftId}:${asset}`);
   const observer=new ResizeObserver(()=>chart.applyOptions({width:el.clientWidth,height:el.clientHeight}));
   observer.observe(el);
-  return()=>{removeChartTools();chartApiRef.current=null;observer.disconnect();chart.unsubscribeClick(onChartClick);chart.unsubscribeCrosshairMove(onChartHover);hoverHint.remove();chart.remove()};
- },[created,view,result,monetary,propEvaluation,activeProfile?.uid,draftId,asset]);
- useEffect(()=>{if(!focusTrade||view!=='chart'||!result||!chartApiRef.current)return;const index=result.candles.findIndex(c=>c.time>=focusTrade.entryTime);if(index<0)return;const first=result.candles[Math.max(0,index-20)],last=result.candles[Math.min(result.candles.length-1,index+20)];if(first&&last&&first.time<last.time)chartApiRef.current.timeScale().setVisibleRange({from:first.time,to:last.time});setFocusTrade(null)},[focusTrade,view,result]);
+  return()=>{removeChartTools();chartApiRef.current=null;chartSeriesRef.current=null;observer.disconnect();chart.unsubscribeClick(onChartClick);chart.unsubscribeCrosshairMove(onChartHover);hoverHint.remove();chart.remove()};
+ },[created,view,propLiveMode,Boolean(propMarket?.candles?.length),propLiveMode?null:result,propLiveMode?null:monetary,propLiveMode?null:propEvaluation,activeProfile?.uid,draftId,asset]);
+ useEffect(()=>{if(!propLiveMode||!chartSeriesRef.current||!Array.isArray(propMarket?.candles)||!propMarket.candles.length)return;
+  chartSeriesRef.current.setData(propMarket.candles.map((c:Candle)=>({time:c.time as any,open:c.open,high:c.high,low:c.low,close:c.close})));
+ },[propLiveMode,propMarket]);
+ useEffect(()=>{if(propLiveMode||!focusTrade||view!=='chart'||!result||!chartApiRef.current)return;const index=result.candles.findIndex(c=>c.time>=focusTrade.entryTime);if(index<0)return;const first=result.candles[Math.max(0,index-20)],last=result.candles[Math.min(result.candles.length-1,index+20)];if(first&&last&&first.time<last.time)chartApiRef.current.timeScale().setVisibleRange({from:first.time,to:last.time});setFocusTrade(null)},[focusTrade,view,result,propLiveMode]);
  const requiredTimeframes=(()=>{try{return parseStrategyConfig(code).timeframes as string[]}catch{return []}})();const unavailableTimeframes=selectedMarket?requiredTimeframes.filter(tf=>!selectedMarket.timeframes.includes(tf)):[];
  const goToBotList=()=>{const snapshot={created:true,id:draftId,name,prompt,asset,code,view,chat};try{localStorage.setItem('tradefoundry:last-draft',JSON.stringify(snapshot));localStorage.setItem('tradefoundry:draft',JSON.stringify(snapshot))}catch{}setScreen('bots');setMobilePanel(null);if(cloudClient)void cloudClient.listBots().then(setCloudBots).catch(error=>{setCloudStatus('error');setCloudMessage(error instanceof Error?error.message:'Could not refresh your robot library.')})};
  const beginCreateRobot=()=>{botLoadRef.current='';const nextId=makeBotId();hydratedWorkspaceRef.current=nextId;setDraftId(nextId);setName('');setPrompt('');setAsset(assetOptions[0]||'');setCode(starterCode);setCodeHydrated(true);setChat([]);setChatHydrated(true);setChatInput('');setProposal('');setProposalSummary('');setResult(null);clearLogs();setCreated(false);setScreen('create')};
