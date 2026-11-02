@@ -8,12 +8,14 @@ import {PropDAOEvaluationPanel} from './PropDAOEvaluationPanel';
 import type {PropDAOSimulation} from '../propdao-evaluation';
 import type { BotVersion } from '../firebase';
 
-export type OutputTab = 'terminal' | 'results' | 'prop-results' | 'trades' | 'versions';
+export type OutputTab = 'terminal' | 'results' | 'prop-results' | 'live-trading' | 'trades' | 'versions';
 
 type Props = {
   monetary: MonetaryResult | null;
   propEvaluation: PropDAOSimulation | null;
   isPropDAO: boolean;
+  propLive?: any;
+  onPropLiveRefresh?:()=>void;
   asset: string;
   timeframe?: string;
   from: string;
@@ -179,7 +181,7 @@ export function OutputDock(props: Props) {
   const tabs: { id: OutputTab; label: string; count?: number; icon: typeof TerminalIcon }[] = [
     { id: 'terminal', label: 'Terminal', count: props.logs.length, icon: TerminalIcon },
     { id: 'results', label: 'Results', count: props.result ? 1 : 0, icon: Activity },
-    ...(props.isPropDAO ? [{ id: 'prop-results' as const, label: 'Prop Results', count: props.propEvaluation ? 1 : 0, icon: Activity }] : []),
+    ...(props.isPropDAO ? [{ id: 'prop-results' as const, label: 'Prop Results', count: props.propEvaluation ? 1 : 0, icon: Activity },{id:'live-trading' as const,label:'Live Trading',icon:Activity}] : []),
     { id: 'trades', label: 'Trades', count: (props.propEvaluation?.trades.length ?? props.monetary?.trades.length ?? props.result?.trades.length ?? 0), icon: ListChecks },
     { id: 'versions', label: 'Versions', count: props.versions.length, icon: History },
   ];
@@ -198,6 +200,7 @@ export function OutputDock(props: Props) {
       {props.active === 'terminal' && <div className="terminal-content">{props.logs.length ? props.logs.map((line, index) => <div className={`log-line ${line.includes('failed')||line.includes('stopped')?'error':''}`} key={`${index}-${line}`}><span className="log-prompt">›</span>{line}</div>) : <div className="terminal-placeholder"><span>›</span> Backtest activity, market data, and errors appear here.</div>}</div>}
       {props.active === 'results' && <ResultPanel result={props.result} from={props.from} to={props.to} asset={props.asset} monetary={props.monetary} propEvaluation={props.propEvaluation}/>}
       {props.active === 'prop-results' && props.isPropDAO && <div className="output-prop-results"><PropDAOEvaluationPanel simulation={props.propEvaluation}/></div>}
+      {props.active === 'live-trading' && props.isPropDAO && <div className="output-result-panel" style={{height:'100%',overflow:'auto'}}><div className="output-result-heading"><div><span className="output-eyebrow">PROPDAO · ACCOUNT EXECUTION</span><strong>Live Trading</strong><small>Simulated-capital accounts · live market prices</small></div><span className={props.propLive?.running?'green':props.propLive?.uncertain?'red':''}>{props.propLive?.running?'RUNNING':props.propLive?.uncertain?'UNKNOWN':'STOPPED'}</span></div><div className="output-metrics"><div className="output-metric featured"><span>RUNTIME</span><strong>{props.propLive?.configured?'Configured':'Offline'}</strong></div><div className="output-metric"><span>ACCOUNT</span><strong>{props.propLive?.accountId||'—'}</strong></div><div className="output-metric"><span>DEPLOYED</span><strong>{props.propLive?.deployed?'Yes':'No'}</strong></div><div className="output-metric"><span>ACCOUNT EQUITY</span><strong>{Number.isFinite(props.propLive?.lastAccount?.equity)?`${props.propLive.lastAccount.equity.toFixed(2)}`:'—'}</strong></div><div className="output-metric"><span>RISK ROOM</span><strong>{Number.isFinite(props.propLive?.lastAccount?.roomUsd)?`${props.propLive.lastAccount.roomUsd.toFixed(2)}`:'—'}</strong></div><div className="output-metric"><span>OPEN POSITIONS</span><strong>{props.propLive?.lastAccount?.positions??'—'}</strong></div><div className="output-metric"><span>LAST SIGNAL</span><strong>{props.propLive?.lastEvaluation?.action||'—'}</strong></div><div className="output-metric"><span>LAST ORDER</span><strong>{props.propLive?.lastOrder?.providerStatus||'—'}</strong></div></div>{props.propLive?.error&&<p className="output-disclaimer red" role="alert">{props.propLive.error}</p>}<div className="market-buttons"><button className="ghost" onClick={props.onPropLiveRefresh}>Refresh status</button></div><div className="terminal-content" style={{padding:'8px 0'}}>{Array.isArray(props.propLive?.events)&&props.propLive.events.length?props.propLive.events.slice().reverse().map((line:string,i:number)=><div className="log-line" key={i}><span className="log-prompt">›</span>{line}</div>):<p className="output-disclaimer">No live events. Connect a PropDAO developer key, then open Deploy to authorize a robot. A deployed robot runs independently of the browser.</p>}</div></div>}
       {props.active === 'trades' && <TradesPanel props={props}/>}
       {props.active === 'versions' && <VersionsPanel props={props} onRename={beginRename} onDelete={version=>{setDeleteTarget(version);setVersionActionError('')}}/>}
     </div>}

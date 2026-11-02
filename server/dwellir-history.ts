@@ -15,12 +15,13 @@ const number = (n:unknown) => typeof n==='string'||typeof n==='number'?Number(n)
 const upstreamError = (status:number) => status===401||status===403?'Dwellir credentials or historical-data entitlement were rejected.':status===429?'Dwellir historical-data rate limit reached.':`Dwellir historical data returned HTTP ${status}.`;
 
 export class DwellirHistory {
- constructor(
-  private readonly storage:Storage={read:readR2Object,write:writeR2Object},
-  private readonly request:typeof fetch=fetch,
-  private readonly key:()=>string|undefined=()=>process.env.DWELLIR_API_KEY,
-  private readonly now:()=>number=Date.now
- ){}
+ private readonly storage:Storage;
+ private readonly request:typeof fetch;
+ private readonly key:()=>string|undefined;
+ private readonly now:()=>number;
+ constructor(storage:Storage={read:readR2Object,write:writeR2Object},request:typeof fetch=fetch,key:()=>string|undefined=()=>process.env.DWELLIR_API_KEY,now:()=>number=Date.now){
+  this.storage=storage;this.request=request;this.key=key;this.now=now;
+ }
  private async weekly(market:string,base:'1m'|'5m',start:number,end:number):Promise<MarketCandle[]> {
   const cacheKey=`historical/dwellir/v1/${encodeURIComponent(market)}/${base}/${start}.json`;
   const completeWeek=end===start+WEEK;

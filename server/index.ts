@@ -14,6 +14,7 @@ import { ValrMarketData } from './valr-market-data.ts';
 import { VenueMarketData } from './venue-market-data.ts';
 import { DwellirHistory } from './dwellir-history.ts';
 import { PropDAOAccounts, propDAORoutes } from './propdao-account.ts';
+import {propDAOLiveRoutes} from './propdao-live-routes.ts';
 import { valrAccountRoutes } from './valr-routes.ts';
 import { valrPaperRoutes } from './valr-paper-routes.ts';
 import {ValrAccountLock} from './valr-account-lock.ts';
@@ -117,7 +118,8 @@ async function firebaseUidOrReply(req: express.Request, res: express.Response): 
   }
 }
 
-propDAORoutes(app,new PropDAOAccounts({read:readR2Object,write:writeR2Object,remove:deleteR2Object}),firebaseUidOrReply);
+const propdaoAccounts=new PropDAOAccounts({read:readR2Object,write:writeR2Object,remove:deleteR2Object});
+
 const openRouterAccounts = new OpenRouterAccounts({read:readR2Object,write:writeR2Object,remove:deleteR2Object});
 openRouterRoutes(app,openRouterAccounts,firebaseUidOrReply);
 const economy=new BotEconomy(marketplace.store,{read:readR2Object,write:writeR2Object,root:userBotRoot},marketplace);
@@ -125,6 +127,15 @@ const ownedValrBot=async(uid:string,id:string,req:express.Request)=>{
  const [bot,raw]=await Promise.all([FirestoreStore.configured()?marketplace.store.get(`users/${uid}/bots/${id}`):readOwnedBotAsset(uid,id,req.header('authorization')),readR2Object(`${userBotRoot(uid,id)}/current.json`)]);
  if(!bot||!raw)return null;if('venue' in bot && bot.venue!==undefined && bot.venue!=='valr')return null;const saved=JSON.parse(raw);if(saved.userId!==uid||saved.botId!==id||typeof saved.code!=='string'||typeof bot.asset!=='string')return null;return {asset:bot.asset,code:saved.code};
 };
+const ownedPropDAOBot=async(uid:string,id:string,req:express.Request)=>{
+ const [bot,raw]=await Promise.all([FirestoreStore.configured()?marketplace.store.get(`users/${uid}/bots/${id}`):readOwnedBotAsset(uid,id,req.header('authorization')),readR2Object(`${userBotRoot(uid,id)}/current.json`)]);
+ if(!bot||!raw)return null;
+ const saved=JSON.parse(raw);
+ if(saved.venue!=='propdao'||('venue' in bot&&bot.venue&&bot.venue!=='propdao')||saved.userId!==uid||saved.botId!==id||typeof saved.code!=='string'||typeof bot.asset!=='string')return null;
+ return {asset:bot.asset,code:saved.code,venue:'propdao'};
+};
+const propdaoLiveService=propDAOLiveRoutes(app,{uid:firebaseUidOrReply,bot:ownedPropDAOBot,accounts:propdaoAccounts,read:readR2Object,write:writeR2Object,list:listR2Objects});
+propDAORoutes(app,propdaoAccounts,firebaseUidOrReply,uid=>propdaoLiveService.beforeCredentialChange(uid));
 const valrLock=new ValrAccountLock(marketplace.store);
 const valrExclusive=<T>(uid:string,task:()=>Promise<T>)=>FirestoreStore.configured()?valrLock.run(uid,task):task();
 const liveService=valrLiveRoutes(app,{lockReady:()=>FirestoreStore.configured(),exclusive:valrExclusive,uid:firebaseUidOrReply,bot:ownedValrBot,read:readR2Object,write:writeR2Object,remove:deleteR2Object});
