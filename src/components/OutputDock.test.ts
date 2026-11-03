@@ -16,7 +16,7 @@ describe('workspace results presentation',()=>{
  it('shows actual PropDAO positions and closed trades instead of saved backtest results in LIVE mode',()=>{
   const live={running:true,deployed:true,events:['Candle m1 · signal WAIT'],positions:[{id:'pos-1',symbol:'BTCUSDC',side:'BUY',qty:0.01,entry:100,mark:102,unrealizedPnl:0.02,slPrice:90,tpPrice:110}],closedTrades:[{id:'hist-1',symbol:'BTCUSDC',side:'SELL',qty:0.01,entry:110,exit:100,pnl:0.1,closedAt:Date.now(),reason:'Take Profit'}]};
   const markup=renderToStaticMarkup(createElement(OutputDock,{...props,active:'trades',liveMode:true,propLive:live,isPropDAO:true,propEvaluation:null,selectedTrade:null}));
-  expect(markup).toContain('LIVE Trades');expect(markup).toContain('OPEN · BTCUSDC');expect(markup).toContain('CLOSED · BTCUSDC');
+  expect(markup).toContain('LIVE Trades');expect(markup).toContain('OPEN POSITIONS');expect(markup).toContain('CLOSED TRADES');expect(markup).toContain('BTCUSDC');expect(markup).toContain('Inspect open BTCUSDC position pos-1');expect(markup).toContain('Inspect closed BTCUSDC trade hist-1');
   expect(markup).not.toContain('Backtest trades');expect(markup).not.toContain('Delete saved backtest');
  });
 });
