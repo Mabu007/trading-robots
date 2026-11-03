@@ -5,7 +5,7 @@ import {parseStrategyConfig} from '../src/strategy';
 import {TF_SECONDS} from '../shared/trading';
 import {propDAOLiveHistoryBars,propDAOLiveHistoryStats,propDAOLiveRetryAt} from './propdao-live-history';
 type Grant={id:string;uid:string;botId:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;leverage:number;issuedAt:number;expiresAt:number};
-type Status={running:boolean;paused:boolean;lastError?:string;lastEvaluation?:any;lastOrder?:any;lastAccount?:any;events:string[]};
+type Status={running:boolean;paused:boolean;lastError?:string;lastEvaluation?:any;lastOrder?:any;lastAccount?:any;lastMarketData?:any;events:string[]};
 const interval:Record<string,string>={m1:'1m',m5:'5m',m15:'15m',m30:'30m',h1:'1h',h4:'4h',d1:'1d'};
 async function hash(s:string){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s)))).map(v=>v.toString(16).padStart(2,'0')).join('')}
 export class PropDAOLiveBot extends DurableObject<any>{
