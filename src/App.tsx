@@ -306,14 +306,13 @@ ${appContext}`;
   const action=propLive.running?'pause':'resume';setLiveBusy(true);
   try{
    const next=await sharingRequest<any>(cloudClient,`/api/venues/propdao/bots/${encodeURIComponent(draftId)}/live`,'POST',{action});
-   setPropLive((previous:any)=>({...previous,...next,paused:action==='pause',running:action==='resume'}));
+   setPropLive((previous:any)=>({...previous,...next,paused:action==='pause',running:action==='resume',canResume:action==='pause'}));
    setPropMonitorMode(action==='resume');
    if(action==='pause'){setOutputTab('terminal');log('PropDAO · paused. Durable Object alarms stopped. Existing positions remain with PropDAO.');}
    else{setOutputTab('live-trading');setTerminalOpen(true);log('PropDAO · resumed. New entries still require account and market checks.');}
   }catch(e){setOutputTab('terminal');setTerminalOpen(true);log(`PropDAO ${action} not confirmed · ${err(e)}`);}
   finally{setLiveBusy(false);setPropLiveRevision(v=>v+1)}
  };
- const stopPropDAOLive=async()=>{if(!cloudClient||venue!=='propdao')return;setLiveBusy(true);try{await sharingRequest(cloudClient,`/api/venues/propdao/bots/${encodeURIComponent(draftId)}/live`,'POST',{action:'stop'});log('PropDAO · permanently stopped. Reauthorize under Deploy to trade again; positions remain at PropDAO.');setPropLive((current:any)=>({...current,running:false,paused:false,canResume:false}));setPropMonitorMode(false);setOutputTab('terminal');setTerminalOpen(true);setPropLiveRevision(v=>v+1)}catch(e){log(`PropDAO stop failed · ${err(e)}`);setOutputTab('terminal');setTerminalOpen(true)}finally{setLiveBusy(false)}};
  const copyRunningBot=async()=>{if(!cloudClient)return;try{setBusy('copy');const copy=await sharingRequest<CloudBot>(cloudClient,`/api/economy/projects/${encodeURIComponent(draftId)}/copy`,'POST',{});setCloudBots(items=>[copy,...items.filter(item=>item.id!==copy.id)]);await openCloudBot(copy);log('Created an independent strategy copy. The running bot remains unchanged.')}catch(error){log(`Copy failed · ${err(error)}`);setOutputTab('terminal');setTerminalOpen(true)}finally{setBusy('')}};
  const retryFirebase=()=>{setCloudClient(null);setCloudRetry(value=>value+1)};
  const renameRobot=async(bot:CloudBot,nextName:string,localOnly:boolean)=>{
