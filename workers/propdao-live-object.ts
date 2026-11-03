@@ -3,6 +3,7 @@ import {getQuickJSWASMModule} from '@cf-wasm/quickjs/workerd';
 import {evaluateStrategyInSandbox} from './strategy-sandbox';
 import {parseStrategyConfig} from '../src/strategy';
 import {TF_SECONDS} from '../shared/trading';
+import {propDAOLiveHistoryBars,propDAOLiveHistoryStats,propDAOLiveRetryAt} from './propdao-live-history';
 type Grant={id:string;uid:string;botId:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;leverage:number;issuedAt:number;expiresAt:number};
 type Status={running:boolean;paused:boolean;lastError?:string;lastEvaluation?:any;lastOrder?:any;lastAccount?:any;events:string[]};
 const interval:Record<string,string>={m1:'1m',m5:'5m',m15:'15m',m30:'30m',h1:'1h',h4:'4h',d1:'1d'};
@@ -10,7 +11,7 @@ async function hash(s:string){return Array.from(new Uint8Array(await crypto.subt
 export class PropDAOLiveBot extends DurableObject<any>{
  private tail:Promise<unknown>=Promise.resolve();
  private serial<T>(fn:()=>Promise<T>):Promise<T>{const next=this.tail.then(fn,fn);this.tail=next.catch(()=>{});return next}
- private async state():Promise<Status>{return {running:(await this.ctx.storage.get<boolean>('running'))===true,paused:(await this.ctx.storage.get<boolean>('paused'))===true,lastError:await this.ctx.storage.get<string>('lastError'),lastEvaluation:await this.ctx.storage.get('lastEvaluation'),lastOrder:await this.ctx.storage.get('lastOrder'),lastAccount:await this.ctx.storage.get('lastAccount'),events:(await this.ctx.storage.get<string[]>('events'))||[]};}
+ private async state():Promise<Status>{return {running:(await this.ctx.storage.get<boolean>('running'))===true,paused:(await this.ctx.storage.get<boolean>('paused'))===true,lastError:await this.ctx.storage.get<string>('lastError'),lastEvaluation:await this.ctx.storage.get('lastEvaluation'),lastOrder:await this.ctx.storage.get('lastOrder'),lastAccount:await this.ctx.storage.get('lastAccount'),lastMarketData:await this.ctx.storage.get('lastMarketData'),events:(await this.ctx.storage.get<string[]>('events'))||[]};}
  private async record(message:string){const events=(await this.ctx.storage.get<string[]>('events'))||[];events.push(`${new Date().toISOString()} · ${message.slice(0,240)}`);await this.ctx.storage.put('events',events.slice(-100));}
  private async provider(grant:Grant,action:string,payload?:unknown){
   const origin=this.env.PROPDAO_CONTROL_URL;
@@ -22,7 +23,7 @@ export class PropDAOLiveBot extends DurableObject<any>{
   return data;
  }
  private async candles(grant:Grant,timeframe:string,cutoff:number){
-  const duration=TF_SECONDS[timeframe],end=Math.floor(cutoff/duration)*duration,from=(end-210*duration)*1000;
+  const duration=TF_SECONDS[timeframe],end=Math.floor(cutoff/duration)*duration,from=(end-propDAOLiveHistoryBars(timeframe)*duration)*1000;
   if(!duration||!interval[timeframe])throw Error('Unsupported live timeframe');
   const response=await fetch('https://api.hyperliquid.xyz/info',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'candleSnapshot',req:{coin:grant.coin,interval:interval[timeframe],startTime:from,endTime:end*1000-1}}),signal:AbortSignal.timeout(12000)});
   if(!response.ok)throw Error('Hyperliquid live market data unavailable');
@@ -85,11 +86,14 @@ export class PropDAOLiveBot extends DurableObject<any>{
   throw Error('Unknown live action');
  }catch(e){return Response.json({error:e instanceof Error?e.message:'Live runtime failed'},{status:400})}})}
  async alarm(){return this.serial(async()=>{
+  let evaluationClose=0;
+  let retryAlarm:number|null=null;
   const grant=await this.ctx.storage.get<Grant>('grant');if(!grant||!(await this.ctx.storage.get<boolean>('running')))return;
   try{
    if(Date.now()>=grant.expiresAt){await this.ctx.storage.put('running',false);await this.ctx.storage.put('paused',false);await this.record('Authorization expired. New entries stopped.');return;}
    if(this.env.PROPDAO_LIVE_ENABLED!=='true')throw Error('Worker operator disabled entries');
    const config=parseStrategyConfig(grant.code),period=TF_SECONDS[config.executionTimeframe],close=Math.floor((Date.now()/1000-5)/period)*period,marker=`evaluation:${grant.id}`;
+   evaluationClose=close;
    if((await this.ctx.storage.get<number>(marker)||0)>=close)return;
    if(await this.ctx.storage.get('pendingIntent'))throw Error('Unresolved order intent. Reconcile the PropDAO account before resuming.');
    const account=await this.provider(grant,'snapshot');
@@ -98,13 +102,15 @@ export class PropDAOLiveBot extends DurableObject<any>{
    if(account.positions?.length||account.orders?.length){await this.ctx.storage.put(marker,close);await this.record('Existing position/order; awaiting reconciliation and skipping entry.');return}
    const data:Record<string,any[]>={};
    for(const tf of config.timeframes)data[tf]=await this.candles(grant,tf,close);
+   const diagnostics=Object.fromEntries(config.timeframes.map((tf:string)=>[tf,propDAOLiveHistoryStats(tf,data[tf],close)]));
+   await this.ctx.storage.put('lastMarketData',{time:Date.now(),source:'Hyperliquid',executionTimeframe:config.executionTimeframe,closedAt:close,timeframes:diagnostics});
    const execution=data[config.executionTimeframe];
    const vm=await getQuickJSWASMModule();
    const decisions=evaluateStrategyInSandbox(vm,grant.code,data,config as any) as any[];
    const decision=decisions.at(-1);
    await this.ctx.storage.put(marker,close);
-   await this.ctx.storage.put('lastEvaluation',{time:Date.now(),candleClose:close,action:decision?.action||'WAIT'});
-   await this.record(`Candle ${config.executionTimeframe.toUpperCase()} · ${new Date(close*1000).toISOString()} · signal ${decision?.action||'WAIT'}`);
+   await this.ctx.storage.put('lastEvaluation',{time:Date.now(),candleClose:close,action:decision?.action||'WAIT',reason:decision?.reason||'',history:diagnostics});
+   await this.record(`Candle ${config.executionTimeframe.toUpperCase()} · ${new Date(close*1000).toISOString()} · ${decision?.action||'WAIT'}${decision?.reason?' · '+decision.reason:''} · history ${config.timeframes.map((tf:string)=>tf.toUpperCase()+' '+diagnostics[tf].received+'/'+diagnostics[tf].requested).join(', ')}`);
    if(decision?.action!=='BUY'&&decision?.action!=='SELL'){await this.ctx.storage.delete('lastError');return;}
    const last=execution.at(-1);
    if(!last||last.time+period!==close||Date.now()-close*1000>25000)throw Error('Live candle too old for order entry');
@@ -126,10 +132,11 @@ export class PropDAOLiveBot extends DurableObject<any>{
     const previous=await this.ctx.storage.get<string>('lastError');
     await this.ctx.storage.put('lastError','Market data paused · '+error);
     if(previous!=='Market data paused · '+error)await this.record('Awaiting valid market data · '+error);
+    retryAlarm=propDAOLiveRetryAt(Date.now(),evaluationClose,true);
    }else{
     await this.ctx.storage.put('running',false);await this.ctx.storage.put('paused',false);await this.ctx.storage.put('lastError',error);
     await this.record('Execution halted · '+error);
    }
-  }finally{await this.schedule()}
+  }finally{if(retryAlarm&&(await this.ctx.storage.get<boolean>('running')))await this.ctx.storage.setAlarm(retryAlarm);else await this.schedule()}
  })}
 }
