@@ -10,7 +10,7 @@ type Dependencies=Storage&{
  broker:CTraderService;
  request?:typeof fetch;
 };
-type Grant={id:string;uid:string;botId:string;accountId:string;symbol:string;code:string;codeHash:string;
+type Grant={id:string;uid:string;botId:string;accountId:string;symbol:string;symbolId:string;code:string;codeHash:string;
  riskPercent:number;maxDailyLossPercent:number;maxDrawdownPercent:number;maxSpreadPercent:number;
  maxSlippagePrice:number;roundTripCommissionPerUnit:number;environment:'demo'|'live';issuedAt:number;expiresAt:number;revokedAt?:number};
 const digest=(s:string)=>createHash('sha256').update(s).digest('hex');
@@ -58,7 +58,7 @@ export class CTraderLiveService{
  }
  async deploy(uid:string,id:string,req:Request){
   const input=req.body||{},accountId=String(input.accountId||'');
-  if(input.confirm!=='I AUTHORIZE CTRADER AUTOMATED TRADING'||!idOk(accountId)&&!/^[0-9]{1,24}$/.test(accountId))throw Error('Explicit cTrader account authorization required');
+  if(input.confirm!=='I AUTHORIZE CTRADER AUTOMATED TRADING'||!/^[0-9]{1,24}$/.test(accountId))throw Error('Explicit cTrader account authorization required');
   const riskPercent=Number(input.riskPercent),maxDailyLossPercent=Number(input.maxDailyLossPercent||2),
    maxDrawdownPercent=Number(input.maxDrawdownPercent||5),maxSpreadPercent=Number(input.maxSpreadPercent||0.15),
    maxSlippagePrice=Number(input.maxSlippagePrice||0.1),roundTripCommissionPerUnit=Number(input.roundTripCommissionPerUnit||0);
@@ -81,10 +81,12 @@ export class CTraderLiveService{
   if(snap.positions.length||snap.orders.length||snap.accessRights!==0)throw Error('Account has open positions/pending orders or restricted permissions');
   const markets=await this.deps.broker.markets(uid,accountId);
   if(!markets.markets.some(m=>m.symbol===bot.asset))throw Error('Bot symbol is not traded by this broker account');
+  const found=markets.markets.find(m=>m.symbol===bot.asset);
+  if(!found)throw Error('cTrader symbol was not discovered');
   const previous=await this.grant(uid,id);
-  if(previous){const current=await this.status(uid,id);if(current.running||current.paused||current.uncertain)throw Error('Existing cTrader bot must be stopped and reconciled first')}
+  if(previous){const current:any=await this.status(uid,id);if(current.running||current.paused||current.uncertain)throw Error('Existing cTrader bot must be stopped and reconciled first')}
   const now=Date.now();
-  const grant:Grant={id:randomBytes(18).toString('hex'),uid,botId:id,accountId,symbol:bot.asset,
+  const grant:Grant={id:randomBytes(18).toString('hex'),uid,botId:id,accountId,symbol:bot.asset,symbolId:found.symbolId,
    code:bot.code,codeHash:digest(bot.code),riskPercent,maxDailyLossPercent,maxDrawdownPercent,maxSpreadPercent,
    maxSlippagePrice,roundTripCommissionPerUnit,environment,issuedAt:now,expiresAt:now+24*3600_000};
   await this.deps.write(this.grantKey(uid,id),JSON.stringify(grant));
@@ -105,7 +107,7 @@ export class CTraderLiveService{
   const keys=await this.deps.list(prefix,101);if(keys.length>100)throw Error('Cannot verify all cTrader live bots');
   for(const path of keys){const raw=await this.deps.read(path);if(!raw)continue;const g=JSON.parse(raw) as Grant;
    if(g.uid!==uid)throw Error('Live credential ownership mismatch');
-   const state=await this.status(uid,g.botId);
+   const state:any=await this.status(uid,g.botId);
    if(state.running||state.paused||state.uncertain)throw Error('Stop and reconcile all cTrader bots before disconnecting the broker');
    const account=await this.deps.broker.snapshot(uid,g.accountId);
    if(account.positions.length||account.orders.length)throw Error('Resolve cTrader positions and orders before disconnecting');
@@ -122,7 +124,7 @@ export class CTraderLiveService{
    const tf=String(payload?.timeframe||''),end=Number(payload?.end);
    const seconds:Record<string,number>={m1:60,m5:300,m15:900,m30:1800,h1:3600,h4:14400};
    if(!seconds[tf]||!Number.isSafeInteger(end)||end>Math.floor(Date.now()/1000)+2||end<Math.floor(Date.now()/1000)-172800)throw Error('Invalid live candle window');
-   const period=seconds[tf],count=260;
+   const period=seconds[tf],count=Math.min(260,Math.floor(35*86400/period));
    return this.deps.broker.candles(uid,{accountId:g.accountId,asset:g.symbol,timeframe:tf,
     from:new Date((end-count*period)*1000).toISOString(),to:new Date(end*1000).toISOString()});
   }
@@ -130,7 +132,7 @@ export class CTraderLiveService{
    if(g.revokedAt||Date.now()>=g.expiresAt||!enabled(g.environment))throw Error('Live order authorization revoked or expired');
    const marker=Number(payload?.candleClose),side=payload?.side;
    if(!Number.isSafeInteger(marker)||marker<=0||!['BUY','SELL'].includes(side)||!Number.isFinite(Number(payload?.stop))||!Number.isFinite(Number(payload?.target)))throw Error('Invalid strategy order signal');
-   const plan={symbolId:String(payload?.symbolId||''),side,stop:Number(payload.stop),target:Number(payload.target),
+   const plan={symbolId:g.symbolId,side,stop:Number(payload.stop),target:Number(payload.target),
      riskPercent:g.riskPercent,maxDailyLossPercent:g.maxDailyLossPercent,maxDrawdownPercent:g.maxDrawdownPercent,
      maxSpreadPercent:g.maxSpreadPercent,maxSlippagePrice:g.maxSlippagePrice,
      roundTripCommissionPerUnit:g.roundTripCommissionPerUnit,
