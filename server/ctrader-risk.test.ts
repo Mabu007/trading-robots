@@ -7,7 +7,7 @@ describe('cTrader risk and protective checks',()=>{
  it('blocks daily-loss breach',()=>expect(computeCTraderRisk({...good,equity:975}).ok).toBe(false));
  it('blocks too-wide spread',()=>expect(computeCTraderRisk({...good,ask:3020}).ok).toBe(false));
  it('does not force minimum lot when risk too small',()=>expect(computeCTraderRisk({...good,equity:150,freeMargin:150,balance:150,dailyStartEquity:150,peakEquity:150}).ok).toBe(false));
- it('requires broker-side SL and TP',()=>{const pos={tradeData:{symbolId:'123',volume:100},price:3000,stopLoss:2999,takeProfit:3004};
+ it('requires broker-side SL and TP',()=>{const pos={tradeData:{symbolId:'123',volume:100,tradeSide:1},price:3000,stopLoss:2999,takeProfit:3004};
   expect(cTraderProtectionValid(pos,{side:'BUY',stop:2999,target:3004,digits:2,volume:100,symbolId:'123'})).toBe(true);
   expect(cTraderProtectionValid({...pos,stopLoss:null},{side:'BUY',stop:2999,target:3004,digits:2,volume:100,symbolId:'123'})).toBe(false);
  });
