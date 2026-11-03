@@ -35,7 +35,7 @@ export class DwellirHistory {
    if(!Array.isArray(parsed)||!parsed.every(isValidCandle))throw Error('Cached Dwellir history is invalid.');
    return parsed as MarketCandle[];
   }
-  const existing=waiting.get(cacheKey);if(existing)return existing;
+  const waitingKey=objectKey??cacheKey;const existing=waiting.get(waitingKey);if(existing)return existing;
   const task=(async()=>{
    const secret=this.key()?.trim();if(!secret)throw Error('Dwellir historical data is not configured.');
    const period=base==='1m'?60_000:300_000, candles=new Map<number,MarketCandle>();
@@ -70,8 +70,8 @@ export class DwellirHistory {
    }
    throw Error('Dwellir pagination exceeded the allowed page count.');
   })();
-  waiting.set(cacheKey,task);
-  try{return await task}finally{waiting.delete(cacheKey)}
+  waiting.set(waitingKey,task);
+  try{return await task}finally{waiting.delete(waitingKey)}
  }
  async candles(input:{asset:unknown;timeframe:unknown;from:unknown;to:unknown}) {
   const {asset,timeframe,from,to}=input;
