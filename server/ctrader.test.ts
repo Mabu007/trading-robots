@@ -1,5 +1,5 @@
 import {describe,it,expect} from 'vitest';
-import {normalizeCTraderTrendbars} from './ctrader';
+import {normalizeCTraderTrendbars,normalizeCTraderTicks} from './ctrader';
 
 describe('cTrader broker trendbar normalization',()=>{
  it('converts deltas and minute timestamps to deterministic OHLCV',()=>{
@@ -20,5 +20,18 @@ describe('cTrader broker trendbar normalization',()=>{
  });
  it('rejects corrupted range extremes',()=>{
   expect(()=>normalizeCTraderTrendbars([{utcTimestampInMinutes:28443520,low:100000,deltaOpen:200,deltaHigh:100,deltaClose:200}])).toThrow('malformed');
+ });
+});
+
+describe('cTrader tick delta decoding',()=>{
+ it('converts newest-first absolute plus backward time differences to ordered prices',()=>{
+  const end=1700000100000;
+  const out=normalizeCTraderTicks([{timestamp:end,tick:300220000},{timestamp:100,tick:300210000},
+   {timestamp:200,tick:300190000}],end-1000,end+1000,2);
+  expect(out).toEqual([{timeMs:end-300,price:3001.9},{timeMs:end-100,price:3002.1},{timeMs:end,price:3002.2}]);
+ });
+ it('rejects invalid chronology rather than fabricating prices',()=>{
+  const end=1700000100000;
+  expect(()=>normalizeCTraderTicks([{timestamp:end,tick:300200000},{timestamp:-1,tick:300250000}],end-1000,end+1000)).toThrow();
  });
 });
