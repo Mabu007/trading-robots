@@ -103,7 +103,7 @@ export class CTraderService{
  }
  private async trendbars(scope:Awaited<ReturnType<CTraderService['owned']>>,symbolId:string,tf:string,start:number,end:number,depth=0):Promise<any[]>{
   const data=await this.rpc(scope.s,scope.environment,2137,{ctidTraderAccountId:scope.a.ctidTraderAccountId,symbolId,period:TIMEFRAMES[tf].period,fromTimestamp:start,toTimestamp:end-1,count:4000},scope.a.ctidTraderAccountId);
-  if(!Array.isArray(data.trendbar))throw Error('Broker returned an invalid candle page');
+  if(data.trendbar!==undefined&&!Array.isArray(data.trendbar))throw Error('Broker returned an invalid candle page');
   if(data.hasMore===true){
    if(depth>8||end-start<2*TIMEFRAMES[tf].seconds*1000)throw Error('Broker history pagination cannot be resolved');
    const split=Math.floor(((start+end)/2)/(TIMEFRAMES[tf].seconds*1000))*(TIMEFRAMES[tf].seconds*1000);
@@ -111,7 +111,7 @@ export class CTraderService{
    const left=await this.trendbars(scope,symbolId,tf,start,split,depth+1),right=await this.trendbars(scope,symbolId,tf,split,end,depth+1);
    return [...left,...right];
   }
-  return data.trendbar;
+  return data.trendbar||[];
  }
  async candles(uid:string,input:any){
   const asset=String(input?.asset||''),tf=String(input?.timeframe||''),from=Date.parse(String(input?.from||'')),to=Date.parse(String(input?.to||'')),accountId=input?.accountId;
@@ -135,7 +135,8 @@ export class CTraderService{
    all.push(...candles.filter(c=>c.time*1000>=from&&c.time*1000<to&&c.time*1000+periodMs<=now));
   }
   const candles=[...new Map(all.map(c=>[c.time,c])).values()].sort((x,y)=>x.time-y.time);
-  return {asset,accountId:a.ctidTraderAccountId,timeframe:tf,candles,source:`cTrader ${a.brokerTitleShort||environment} · broker-specific R2 M1 archive`,cacheDays,downloadedDays,observedGaps:0,symbol:{symbolId:found.symbolId,digits:meta.digits,lotSize:meta.lotSize,minVolume:meta.minVolume,maxVolume:meta.maxVolume,stepVolume:meta.stepVolume,commission:meta.commission}};
+  const observedGaps=candles.slice(1).reduce((n,c,i)=>n+(c.time-candles[i].time>TIMEFRAMES[tf].seconds?1:0),0);
+  return {asset,accountId:a.ctidTraderAccountId,timeframe:tf,candles,source:`cTrader ${a.brokerTitleShort||environment} · broker-specific R2 M1 archive`,cacheDays,downloadedDays,observedGaps,symbol:{symbolId:found.symbolId,digits:meta.digits,lotSize:meta.lotSize,minVolume:meta.minVolume,maxVolume:meta.maxVolume,stepVolume:meta.stepVolume,commission:meta.commission}};
  }
  async warm(uid:string,input:any){
   const cursor=Number(input?.cursor??0),days=Math.min(3,Math.max(1,Number(input?.days??2)));
