@@ -1,7 +1,7 @@
 import {createCipheriv,createDecipheriv,createHash,hkdfSync,randomBytes} from 'node:crypto';
 import type {Express,Request,Response} from 'express';
 import {commissionPerUnitDeposit} from '../shared/ctrader-commission.ts';
-type R2={read:(path:string)=>Promise<string|null>;write:(path:string,data:string)=>Promise<void>;remove:(path:string)=>Promise<void>};
+type R2={read:(path:string)=>Promise<string|null>;write:(path:string,data:string)=>Promise<void>;remove:(path:string)=>Promise<void>;list?:(prefix:string,limit:number)=>Promise<string[]>};
 type Account={ctidTraderAccountId:string;isLive:boolean;brokerTitleShort?:string;traderLogin?:string};
 type Stored={accessToken:string;refreshToken:string;expiresAt:number;scope:'accounts'|'trading';accounts:Account[]};
 const SHA=(s:string)=>createHash('sha256').update(s).digest('hex');
@@ -297,7 +297,19 @@ export class CTraderService{
   const from=new Date(midnight-(Math.min(90,cursor+days))*dayMs).toISOString();
   const to=new Date(midnight-cursor*dayMs).toISOString();
   const result=await this.candles(uid,{...input,from,to,timeframe:'m1'});
-  return {cursor:Math.min(90,cursor+days),totalDays:90,done:cursor+days>=90,cacheDays:result.cacheDays,downloadedDays:result.downloadedDays,source:result.source};
+  const done=cursor+days>=90;
+  if(done&&this.store.list){
+   // Account environment is resolved from the authenticated grant, never inferred from display text.
+   const owned=await this.owned(uid,input.accountId);
+   const prefix=this.archivePrefix(owned.environment,result.accountId,result.symbol.symbolId,'m1')+'/';
+   const keys=await this.store.list(prefix,200);
+   const oldest=new Date(midnight-90*dayMs).toISOString().slice(0,10);
+   for(const key of keys){
+    const match=key.slice(prefix.length).match(/^(\d{4}-\d{2}-\d{2})\.json$/);
+    if(match&&match[1]<oldest)await this.store.remove(key);
+   }
+  }
+  return {cursor:Math.min(90,cursor+days),totalDays:90,done,cacheDays:result.cacheDays,downloadedDays:result.downloadedDays,source:result.source};
  }
  async disconnect(uid:string){await this.store.remove(root(uid))}
 }
