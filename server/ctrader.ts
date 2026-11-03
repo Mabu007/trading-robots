@@ -34,6 +34,20 @@ export function normalizeCTraderTrendbars(rows:any[],digits=5){
  }
  return [...seen.values()].sort((a,b)=>a.time-b.time);
 }
+export function normalizeCTraderTicks(rows:any[],from:number,to:number,digits=5){
+ const result:{timeMs:number;price:number}[]=[];
+ let timestamp=0,previous=Number.POSITIVE_INFINITY;
+ const factor=10**Math.max(0,Math.min(10,Number(digits)||5));
+ for(const [i,item] of rows.entries()){
+  const encoded=Number(item.timestamp),tick=Number(item.tick);
+  timestamp=i===0?encoded:timestamp-encoded;
+  const price=Math.round((tick/1e5)*factor)/factor;
+  if(!Number.isSafeInteger(timestamp)||timestamp<from||timestamp>to||timestamp>previous||
+     !Number.isFinite(price)||price<=0)throw Error('Broker historical ticks contain invalid chronology or price');
+  previous=timestamp;result.push({timeMs:timestamp,price});
+ }
+ return result.reverse();
+}
 export class CTraderService{
  constructor(private store:R2,private request:typeof fetch=fetch){}
  private async load(uid:string){const raw=await this.store.read(root(uid));return raw?decrypt(uid,raw):null}
@@ -236,6 +250,45 @@ export class CTraderService{
   const observedGaps=candles.slice(1).reduce((n,c,i)=>n+(c.time-candles[i].time>TIMEFRAMES[tf].seconds?1:0),0);
   return {asset,accountId:a.ctidTraderAccountId,timeframe:tf,candles,source:`cTrader ${a.brokerTitleShort||environment} · broker-specific R2 M1 archive`,cacheDays,downloadedDays,observedGaps,symbol:{symbolId:found.symbolId,digits:meta.digits,lotSize:meta.lotSize,minVolume:meta.minVolume,maxVolume:meta.maxVolume,stepVolume:meta.stepVolume,commission:meta.commission}};
  }
+ async ticks(uid:string,input:any){
+  const asset=String(input?.asset||''),accountId=input?.accountId,quoteType=input?.quoteType;
+  const from=Date.parse(String(input?.from||'')),to=Date.parse(String(input?.to||''));
+  if(![1,2].includes(quoteType)||!Number.isSafeInteger(from)||!Number.isSafeInteger(to)||from>=to||
+     to-from>3600_000||to>Date.now()+2000)throw Error('Tick replay requires one broker quote side for a maximum one-hour window');
+  const {s,a,environment,found,meta}=await this.symbol(uid,accountId,asset);
+  const closed=to<Date.now()-60000;
+  const cacheKey=['ctrader-ticks','v1',environment,SHA(a.ctidTraderAccountId).slice(0,24),
+   found.symbolId,quoteType,String(from),String(to)].join('/')+'.json';
+  if(closed){const raw=await this.store.read(cacheKey);if(raw){try{const data=JSON.parse(raw);
+    if(data.schema===1&&data.accountId===a.ctidTraderAccountId&&data.symbolId===found.symbolId&&
+      data.quoteType===quoteType&&Array.isArray(data.ticks))return {...data,cached:true}}catch{}}}
+  const result:{timeMs:number;price:number}[]=[],used=new Set<string>();
+  let end=to;
+  for(let page=0;page<60;page++){
+   const data=await this.rpc(s,environment,2145,{
+    ctidTraderAccountId:a.ctidTraderAccountId,symbolId:found.symbolId,type:quoteType,
+    fromTimestamp:from,toTimestamp:end
+   },a.ctidTraderAccountId);
+   if(data.tickData!==undefined&&!Array.isArray(data.tickData))throw Error('Broker tick payload is invalid');
+   const batch=normalizeCTraderTicks(data.tickData||[],from,end,Number(meta.digits??5));
+   for(const tick of batch){
+    const key=tick.timeMs+':'+tick.price;
+    if(!used.has(key)){result.push(tick);used.add(key)}
+   }
+   if(result.length>100000)throw Error('Tick window exceeds replay size limit; choose a shorter date range');
+   if(data.hasMore!==true)break;
+   if(!batch.length)throw Error('Broker tick pagination cannot advance');
+   const earliest=batch[0].timeMs;
+   if(earliest<=from)break;
+   end=earliest-1;
+   if(page===59)throw Error('Broker tick pagination limit reached');
+  }
+  result.sort((x,y)=>x.timeMs-y.timeMs||x.price-y.price);
+  const output={schema:1,asset,accountId:a.ctidTraderAccountId,symbolId:found.symbolId,quoteType,
+   from,to,ticks:result,source:'cTrader historical bid/ask ticks',cached:false,fetchedAt:Date.now()};
+  if(closed)await this.store.write(cacheKey,JSON.stringify(output));
+  return output;
+ }
  async warm(uid:string,input:any){
   const cursor=Number(input?.cursor??0),days=Math.min(3,Math.max(1,Number(input?.days??2)));
   if(!Number.isInteger(cursor)||cursor<0||cursor>=90)throw Error('Invalid warmup cursor');
@@ -275,6 +328,7 @@ export function ctraderRoutes(app:Express,store:R2,uid:(req:Request,res:Response
  app.get('/api/venues/ctrader/snapshot',handle((id,req)=>service.snapshot(id,req.query.accountId)));
  app.get('/api/venues/ctrader/specification',handle((id,req)=>service.specification(id,req.query.accountId,req.query.asset)));
  app.post('/api/venues/ctrader/candles',handle((id,req)=>service.candles(id,req.body)));
+ app.post('/api/venues/ctrader/ticks',handle((id,req)=>service.ticks(id,req.body)));
  app.post('/api/venues/ctrader/cache/warm',handle((id,req)=>service.warm(id,req.body)));
  app.post('/api/venues/ctrader/disconnect',handle(async(id)=>{if(options?.beforeChange)await options.beforeChange(id);await service.disconnect(id);return {connected:false}}));
  return service;
