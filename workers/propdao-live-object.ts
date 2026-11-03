@@ -68,7 +68,7 @@ export class PropDAOLiveBot extends DurableObject<any>{
   }
   if(!existing||existing.uid!==req.headers.get('X-TV-UID'))throw Error('No authorized deployment');
   if(action==='stop'){await this.ctx.storage.put('running',false);await this.ctx.storage.put('paused',false);await this.ctx.storage.deleteAlarm();await this.record('Stopped automatic entries. Existing positions remain with PropDAO.');return Response.json({running:false,events:(await this.state()).events})}
-  if(action==='pause'){await this.ctx.storage.put('running',false);await this.ctx.storage.put('paused',true);await this.ctx.storage.deleteAlarm();await this.record('Paused automatic entries. Existing positions remain with PropDAO.');return Response.json({running:false,paused:true,events:(await this.state()).events})}
+  if(action==='pause'){if(!(await this.ctx.storage.get<boolean>('running'))&&!(await this.ctx.storage.get<boolean>('paused')))throw Error('Stopped or halted deployment cannot be paused or resumed. Deploy again.');await this.ctx.storage.put('running',false);await this.ctx.storage.put('paused',true);await this.ctx.storage.deleteAlarm();await this.record('Paused automatic entries. Existing positions remain with PropDAO.');return Response.json({running:false,paused:true,events:(await this.state()).events})}
   if(action==='resume'){
    if(this.env.PROPDAO_LIVE_ENABLED!=='true'||!this.env.PROPDAO_LIVE_INTERNAL_SECRET)throw Error('Live runtime is disabled');
    if(Date.now()>=existing.expiresAt)throw Error('Deployment authorization expired. Deploy with new authorization.');
