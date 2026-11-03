@@ -254,7 +254,7 @@ export class CTraderGateway extends DurableObject<Env>{
   const linked=state.positions.filter(p=>p.tradeData?.label===intent.clientOrderId);
   const resting=state.orders.filter(o=>o.clientOrderId===intent.clientOrderId);
   const tradesKey='trades:'+accountId;
-  if(intent.status==='PROTECTED'&&linked.length===0&&resting.length===0&&state.positions.length===0&&state.orders.length===0&&/^[0-9]+$/.test(String(intent.positionId||''))){
+  if(['PROTECTED','EMERGENCY_CLOSE_ATTEMPTED'].includes(String(intent.status))&&linked.length===0&&resting.length===0&&state.positions.length===0&&state.orders.length===0&&/^[0-9]+$/.test(String(intent.positionId||''))){
    const response=await this.send(2179,{ctidTraderAccountId:accountId,positionId:intent.positionId,
     fromTimestamp:intent.createdAt-60000,toTimestamp:Date.now()},2180);
    if(response.payload?.hasMore===true||!Array.isArray(response.payload?.deal))throw Error('Closed broker deals not fully available. Entry remains locked.');
@@ -270,7 +270,7 @@ export class CTraderGateway extends DurableObject<Env>{
     filledVolume:intent.filledVolume,entry:intent.actualEntry,exit:closing.at(-1)?.executionPrice??null,
     pnl:realized,fee:closing.reduce((n,d)=>n+Math.abs(Number(d.commission||0))/10**Number(d.moneyDigits??state.trader.moneyDigits),0),
     openedAt:intent.createdAt,closedAt:Math.max(...closing.map(d=>Number(d.executionTimestamp))),deals:closing.length,
-    reason:'Broker-confirmed closing deals'};
+    reason:intent.status==='EMERGENCY_CLOSE_ATTEMPTED'?'Emergency close — broker deals verified':'Broker-confirmed closing deals'};
    await this.ctx.storage.put(tradesKey,[...old,completed].slice(-100));
    await this.ctx.storage.delete(key);
    return {blocked:false,closedTrade:completed,trades:[...old,completed].slice(-50),positions:0,orders:0};
