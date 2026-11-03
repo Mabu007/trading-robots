@@ -114,7 +114,8 @@ function TradesPanel({ props }: { props: Props }) {
     const positions:any[]=Array.isArray(props.propLive?.positions)?props.propLive.positions:[];
     const closed:any[]=Array.isArray(props.propLive?.closedTrades)?props.propLive.closedTrades:[];
     const selectedLive=liveSelection?.kind==='position'?positions.find(t=>t.id===liveSelection.id):liveSelection?.kind==='closed'?closed.find(t=>t.id===liveSelection.id):null;
-    const money=(value:unknown)=>typeof value==='number'&&Number.isFinite(value)?new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(value):'—';
+    const depositCurrency=props.isPropDAO?'USD':(/^[A-Z]{3}$/.test(String(props.propLive?.depositCurrency||''))?props.propLive.depositCurrency:'USD');
+    const money=(value:unknown)=>typeof value==='number'&&Number.isFinite(value)?new Intl.NumberFormat('en-US',{style:'currency',currency:depositCurrency}).format(value):'—';
     const price=(value:unknown)=>typeof value==='number'&&Number.isFinite(value)?value.toLocaleString('en-US',{maximumFractionDigits:8}):'—';
     const moment=(value:unknown)=>typeof value==='number'&&Number.isFinite(value)&&value>0?new Date(value<1e12?value*1000:value).toLocaleString():'—';
     const isOpen=liveSelection?.kind==='position';

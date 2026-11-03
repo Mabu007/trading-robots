@@ -1,0 +1,38 @@
+name: cTrader integration verification
+on:
+  push:
+    branches:
+      - feat/ctrader-r2-history
+  pull_request:
+    paths:
+      - 'server/ctrader.ts'
+      - 'server/ctrader.test.ts'
+      - 'workers/ctrader-gateway.ts'
+      - 'src/history-cache.ts'
+      - 'src/components/CTraderAccount.tsx'
+      - 'src/App.tsx'
+      - '.github/workflows/ctrader-ci.yml'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Use Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Unit tests
+        run: npm test
+      - name: Typecheck and build frontend/API
+        run: npm run build
+      - name: Typecheck Cloudflare runtime
+        run: npm run check:runtime
