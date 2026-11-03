@@ -135,15 +135,19 @@ export class CTraderService{
  }
  async snapshot(uid:string,accountId:unknown){
   const {s,a,environment}=await this.owned(uid,accountId);
-  const [traderResponse,reconciliation]=await Promise.all([
+  const [traderResponse,reconciliation,assetResponse]=await Promise.all([
    this.rpc(s,environment,2121,{ctidTraderAccountId:a.ctidTraderAccountId},a.ctidTraderAccountId),
-   this.rpc(s,environment,2124,{ctidTraderAccountId:a.ctidTraderAccountId,returnProtectionOrders:false},a.ctidTraderAccountId)
+   this.rpc(s,environment,2124,{ctidTraderAccountId:a.ctidTraderAccountId,returnProtectionOrders:false},a.ctidTraderAccountId),
+   this.rpc(s,environment,2112,{ctidTraderAccountId:a.ctidTraderAccountId},a.ctidTraderAccountId)
   ]);
   const trader=traderResponse.trader;
   if(!trader||String(trader.ctidTraderAccountId)!==a.ctidTraderAccountId||!Array.isArray(reconciliation.position)||!Array.isArray(reconciliation.order))throw Error('Broker account or position state is incomplete');
   const digits=Number(trader.moneyDigits);
   const balance=Number(trader.balance);
+  const currencyEntry=Array.isArray(assetResponse.asset)?assetResponse.asset.find((x:any)=>String(x.assetId)===String(trader.depositAssetId)):null;
+  const depositCurrency=String(currencyEntry?.name||'').toUpperCase();
   return {accountId:a.ctidTraderAccountId,broker:a.brokerTitleShort,isLive:a.isLive,
+   depositCurrency:/^[A-Z]{3}$/.test(depositCurrency)?depositCurrency:null,
    balance:Number.isInteger(digits)&&digits>=0&&digits<=12&&Number.isFinite(balance)?balance/10**digits:null,
    balanceCurrencyAssetId:String(trader.depositAssetId||''),moneyDigits:Number.isInteger(digits)?digits:null,
    accountType:trader.accountType,accessRights:trader.accessRights,leverageInCents:trader.leverageInCents,
