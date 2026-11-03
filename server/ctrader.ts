@@ -84,6 +84,22 @@ export class CTraderService{
   if(!provisional.accounts.length)throw Error('No cTrader accounts were authorized');
   await this.save(session.uid,provisional);
  }
+ async brokerCall(uid:string,accountId:unknown,mode:'trade'|'reconcile'|'quote',input:any){
+  const {s,a,environment}=await this.owned(uid,accountId);
+  if(mode==='trade'&&s.scope!=='trading')throw Error('This cTrader grant does not authorize orders');
+  const endpoint=process.env.CTRADER_GATEWAY_URL,secret=process.env.CTRADER_GATEWAY_SECRET;
+  if(!endpoint||!secret||secret.length<32)throw Error('cTrader gateway is not configured');
+  const path=mode==='trade'?'/trade':mode==='quote'?'/quote':'/reconcile';
+  const response=await this.request(new URL(path,endpoint),{method:'POST',
+   headers:{Authorization:'Bearer '+secret,'Content-Type':'application/json'},
+   body:JSON.stringify({environment,accountId:a.ctidTraderAccountId,accessToken:s.accessToken,...(mode==='trade'?{plan:input}:{payload:input})}),signal:AbortSignal.timeout(30000)});
+  const result=await response.json() as any;
+  if(!response.ok)throw Error(typeof result.error==='string'?result.error:'cTrader broker operation failed');
+  return result.payload;
+ }
+ async quote(uid:string,accountId:unknown,symbolId:string){return this.brokerCall(uid,accountId,'quote',{symbolId})}
+ async reconcile(uid:string,accountId:unknown){return this.brokerCall(uid,accountId,'reconcile',{})}
+ async execute(uid:string,accountId:unknown,plan:any){return this.brokerCall(uid,accountId,'trade',plan)}
  async list(uid:string){const s=await this.load(uid);return {connected:Boolean(s),accounts:s?.accounts||[],scope:s?.scope||null,gatewayConfigured:Boolean(process.env.CTRADER_GATEWAY_URL&&process.env.CTRADER_GATEWAY_SECRET)}}
  private async owned(uid:string,accountId:unknown){
   if(!ACCOUNT.test(String(accountId)))throw Error('Select a valid cTrader account');
