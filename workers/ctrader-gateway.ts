@@ -1,11 +1,12 @@
 import {DurableObject} from 'cloudflare:workers';
+import {computeCTraderRisk,cTraderProtectionValid,type CTraderRiskInput} from '../shared/ctrader-risk';
 
 // Spotware JSON WebSocket: port 5036, NOT the protobuf port 5035.
 // One named Durable Object per environment keeps connections shared across users.
-type Env={CTRADER_GATEWAY_SECRET:string;CTRADER_CLIENT_ID:string;CTRADER_SECRET_KEY:string;GATEWAYS:DurableObjectNamespace;CTRADER_TRADING_ENABLED?:string};
+type Env={CTRADER_GATEWAY_SECRET:string;CTRADER_CLIENT_ID:string;CTRADER_SECRET_KEY:string;GATEWAYS:DurableObjectNamespace;CTRADER_TRADING_ENABLED?:string;CTRADER_DEMO_TRADING_ENABLED?:string;CTRADER_LIVE_TRADING_ENABLED?:string};
 type Reply={payloadType:number;payload?:Record<string,any>;clientMsgId?:string};
-const READ_ONLY=new Set([2149,2114,2116,2121,2124,2133,2137,2139,2145,2112]);
-const RESPONSES:Record<number,number>={2149:2150,2114:2115,2116:2117,2121:2122,2124:2125,2133:2134,2137:2138,2139:2140,2145:2146,2112:2113,2175:2176};
+const READ_ONLY=new Set([2149,2114,2116,2121,2124,2133,2137,2139,2145,2112,2118,2187,2175,2179]);
+const RESPONSES:Record<number,number>={2149:2150,2114:2115,2116:2117,2121:2122,2124:2125,2133:2134,2137:2138,2139:2140,2145:2146,2112:2113,2175:2176,2118:2119,2187:2188,2179:2180};
 const encode=(v:unknown)=>JSON.stringify(v);
 function internalAuth(header:string,secret:string){return secret.length>=32&&header.length<500&&header===`Bearer ${secret}`;}
 export class CTraderGateway extends DurableObject<Env>{
@@ -17,8 +18,12 @@ export class CTraderGateway extends DurableObject<Env>{
  private heartbeat:ReturnType<typeof setInterval>|null=null;
  private sequence=0;
  private nextHistoryAt=0;
+ private subscriptions=new Set<string>();
+ private spots=new Map<string,{bid:number;ask:number;receivedAt:number;timestamp:number}>();
+ private tail:Promise<unknown>=Promise.resolve();
+ private serial<T>(fn:()=>Promise<T>):Promise<T>{const task=this.tail.then(fn,fn);this.tail=task.catch(()=>{});return task}
  private environment:'demo'|'live'='demo';
- private failPending(message:string){for(const [id,p] of this.waiters){clearTimeout(p.timer);p.reject(new Error(message));this.waiters.delete(id)}this.authenticated.clear();this.authenticating.clear();}
+ private failPending(message:string){for(const [id,p] of this.waiters){clearTimeout(p.timer);p.reject(new Error(message));this.waiters.delete(id)}this.authenticated.clear();this.authenticating.clear();this.subscriptions.clear();this.spots.clear();}
  private close(message:string){if(this.heartbeat){clearInterval(this.heartbeat);this.heartbeat=null}this.failPending(message);this.ws=null;this.connecting=null;}
  private async connect(environment:'demo'|'live'){
   if(this.ws?.readyState===WebSocket.OPEN)return;
@@ -34,7 +39,15 @@ export class CTraderGateway extends DurableObject<Env>{
    this.ws=ws;
    ws.addEventListener('message',(event:MessageEvent)=>{
     let reply:Reply;try{reply=JSON.parse(String(event.data))}catch{return}
-    if(reply.payloadType===2147||reply.payloadType===2164){const account=String(reply.payload?.ctidTraderAccountId||'');for(const name of [...this.authenticated])if(!account||name.startsWith(account+':'))this.authenticated.delete(name);return}
+    if(reply.payloadType===2131&&reply.payload){
+      const p=reply.payload,account=String(p.ctidTraderAccountId||''),symbol=String(p.symbolId||'');
+      const k=account+':'+symbol,previous=this.spots.get(k);
+      const bid=Number(p.bid)/100000||previous?.bid||0,ask=Number(p.ask)/100000||previous?.ask||0;
+      const when=Number(p.timestamp||Date.now());
+      if(bid>0&&ask>=bid&&Number.isFinite(when))this.spots.set(k,{bid,ask,receivedAt:Date.now(),timestamp:when});
+      return;
+    }
+    if(reply.payloadType===2147||reply.payloadType===2164){const account=String(reply.payload?.ctidTraderAccountId||'');for(const name of [...this.authenticated])if(!account||name.startsWith(account+':'))this.authenticated.delete(name);this.subscriptions.clear();this.spots.clear();return}
     const id=String(reply.clientMsgId||'');
     const waiter=this.waiters.get(id);if(!waiter)return;
     clearTimeout(waiter.timer);this.waiters.delete(id);
@@ -65,16 +78,157 @@ export class CTraderGateway extends DurableObject<Env>{
   this.authenticating.set(fingerprint,promise);
   try{await promise}finally{this.authenticating.delete(fingerprint)}
  }
+
+ private async quote(accountId:string,symbolId:string,token:string){
+  await this.account(accountId,token);
+  const key=accountId+':'+symbolId;
+  if(!this.subscriptions.has(key)){
+   await this.send(2127,{ctidTraderAccountId:accountId,symbolId:[symbolId],subscribeToSpotTimestamp:true},2128);
+   this.subscriptions.add(key);
+  }
+  for(let i=0;i<12;i++){
+   const q=this.spots.get(key);
+   if(q&&Date.now()-q.receivedAt<=5000&&Date.now()-q.timestamp<=5000&&q.bid>0&&q.ask>=q.bid)return q;
+   await new Promise<void>(resolve=>setTimeout(resolve,250));
+  }
+  throw Error('No fresh broker bid/ask received. Trading blocked');
+ }
+ private async brokerState(accountId:string,token:string){
+  await this.account(accountId,token);
+  const [traderRes,reconcileRes,pnlRes]=await Promise.all([
+   this.send(2121,{ctidTraderAccountId:accountId},2122),
+   this.send(2124,{ctidTraderAccountId:accountId,returnProtectionOrders:false},2125),
+   this.send(2187,{ctidTraderAccountId:accountId},2188)
+  ]);
+  const trader=traderRes.payload?.trader,r=reconcileRes.payload,up=pnlRes.payload;
+  if(!trader||String(trader.ctidTraderAccountId)!==accountId||!Array.isArray(r?.position)||!Array.isArray(r?.order)||!Array.isArray(up?.positionUnrealizedPnL))throw Error('Account reconciliation incomplete');
+  const digits=Number(trader.moneyDigits);
+  if(!Number.isInteger(digits)||digits<0||digits>12)throw Error('Invalid broker moneyDigits');
+  const divisor=10**digits;
+  const balance=Number(trader.balance)/divisor;
+  const unrealized=up.positionUnrealizedPnL.reduce((n:number,p:any)=>n+Number(p.netUnrealizedPnL)/10**Number(up.moneyDigits??digits),0);
+  const margin=r.position.reduce((n:number,p:any)=>n+Number(p.usedMargin||0)/10**Number(p.moneyDigits??digits),0);
+  if(![balance,unrealized,margin].every(Number.isFinite))throw Error('Broker balance, margin or unrealized P&L unavailable');
+  return {trader,positions:r.position as any[],orders:r.order as any[],balance,equity:balance+unrealized,freeMargin:balance+unrealized-margin,margin};
+ }
+ private async currencyConversion(accountId:string,token:string,firstAssetId:string,lastAssetId:string):Promise<number>{
+  if(firstAssetId===lastAssetId)return 1;
+  const chain=await this.send(2118,{ctidTraderAccountId:accountId,firstAssetId,lastAssetId},2119);
+  const symbols=chain.payload?.symbol;
+  if(!Array.isArray(symbols)||symbols.length<1||symbols.length>6)throw Error('Broker conversion chain missing');
+  const adjacency=new Map<string,{to:string,rate:number}[]>();
+  const add=(a:string,b:string,rate:number)=>{const prev=adjacency.get(a)||[];prev.push({to:b,rate});adjacency.set(a,prev)};
+  for(const sym of symbols){
+   const a=String(sym.baseAssetId||''),b=String(sym.quoteAssetId||''),symbolId=String(sym.symbolId||'');
+   if(!a||!b||!symbolId)throw Error('Incomplete broker conversion symbol');
+   const q=await this.quote(accountId,symbolId,token);
+   add(a,b,q.bid);add(b,a,1/q.ask);
+  }
+  const path=[{asset:firstAssetId,rate:1}],visited=new Set<string>();
+  for(let i=0;i<path.length;i++){const current=path[i];if(current.asset===lastAssetId)return current.rate;if(visited.has(current.asset))continue;visited.add(current.asset);for(const edge of adjacency.get(current.asset)||[])if(!visited.has(edge.to))path.push({asset:edge.to,rate:current.rate*edge.rate})}
+  throw Error('Broker currency conversion chain is not valid');
+ }
+ private async execute(body:any){
+  const {accountId,accessToken,environment,plan}=body as {accountId:string;accessToken:string;environment:'demo'|'live';plan:any};
+  if(environment==='demo'&&this.env.CTRADER_DEMO_TRADING_ENABLED!=='true'||environment==='live'&&this.env.CTRADER_LIVE_TRADING_ENABLED!=='true')throw Error('cTrader order execution is disabled');
+  if(!plan||!/^tv-[A-Za-z0-9_-]{6,42}$/.test(String(plan.clientOrderId||''))||!['BUY','SELL'].includes(plan.side)||!/^[0-9]+$/.test(String(plan.symbolId))||!Number.isFinite(plan.stop)||!Number.isFinite(plan.target)||!Number.isFinite(plan.riskPercent)||!Number.isFinite(plan.maxSlippagePrice))throw Error('Invalid authorized order plan');
+  const intentKey='intent:'+accountId,existing=await this.ctx.storage.get<any>(intentKey);
+  if(existing)throw Error('Account has an unresolved/previous order intent. Reconciliation required before another entry');
+  const state=await this.brokerState(accountId,accessToken);
+  if(state.trader.accessRights!==0||state.trader.accountType===2||state.trader.isLimitedRisk===true)throw Error('Broker account has unsupported trading permissions or margin rules');
+  if(state.positions.length||state.orders.length)throw Error('Existing account exposure or pending orders block new automated entries');
+  const [symbols,details]=await Promise.all([
+   this.send(2114,{ctidTraderAccountId:accountId,includeArchivedSymbols:false},2115),
+   this.send(2116,{ctidTraderAccountId:accountId,symbolId:[plan.symbolId]},2117)
+  ]);
+  const light=(symbols.payload?.symbol as any[]|undefined)?.find(x=>String(x.symbolId)===plan.symbolId);
+  const meta=(details.payload?.symbol as any[]|undefined)?.find(x=>String(x.symbolId)===plan.symbolId);
+  if(!light||!meta||meta.tradingMode!==0&&meta.tradingMode!==undefined||plan.side==='SELL'&&meta.enableShortSelling===false)throw Error('Symbol is not available for opening trades');
+  if(!Number.isInteger(Number(meta.minVolume))||!Number.isInteger(Number(meta.stepVolume))||!Number.isInteger(Number(meta.maxVolume)))throw Error('Incomplete symbol volume specifications');
+  const q=await this.quote(accountId,plan.symbolId,accessToken);
+  const currency=await this.currencyConversion(accountId,accessToken,String(light.quoteAssetId||''),String(state.trader.depositAssetId||''));
+  const day=new Date().toISOString().slice(0,10),ledgerKey='risk:'+accountId;
+  const previous=await this.ctx.storage.get<any>(ledgerKey);
+  const ledger=previous&&previous.day===day?previous:{day,dayStartEquity:state.equity,peakEquity:state.equity};
+  ledger.peakEquity=Math.max(ledger.peakEquity,state.equity);
+  await this.ctx.storage.put(ledgerKey,ledger);
+  const risk:CTraderRiskInput={balance:state.balance,equity:state.equity,freeMargin:state.freeMargin,quoteToDeposit:currency,
+   side:plan.side,bid:q.bid,ask:q.ask,stop:plan.stop,target:plan.target,riskPercent:plan.riskPercent,
+   maxDailyLossPercent:Math.min(2,Number(plan.maxDailyLossPercent||2)),dailyStartEquity:ledger.dayStartEquity,
+   maxDrawdownPercent:Math.min(5,Number(plan.maxDrawdownPercent||5)),peakEquity:ledger.peakEquity,
+   maxSpreadPercent:Math.min(0.25,Number(plan.maxSpreadPercent||0.15)),minVolume:Number(meta.minVolume),
+   maxVolume:Number(meta.maxVolume),stepVolume:Number(meta.stepVolume),maxSlippagePrice:plan.maxSlippagePrice,
+   roundTripCommissionPerUnit:Number(plan.roundTripCommissionPerUnit||0),
+   openPositions:state.positions.length,pendingOrders:state.orders.length,maxPositions:1};
+  const verdict=computeCTraderRisk(risk);
+  if(!verdict.ok)throw Error(verdict.reason);
+  const expected=await this.send(2139,{ctidTraderAccountId:accountId,symbolId:plan.symbolId,volume:[verdict.volume]},2140);
+  const m=(expected.payload?.margin as any[]|undefined)?.find(x=>Number(x.volume)===verdict.volume);
+  if(!m)throw Error('Broker expected-margin response did not match order volume');
+  const used=Number(plan.side==='BUY'?m.buyMargin:m.sellMargin)/10**Number(expected.payload?.moneyDigits??state.trader.moneyDigits);
+  if(!Number.isFinite(used)||used<=0||used>state.freeMargin*0.7)throw Error('Insufficient free margin after safety reserve');
+  const entry=verdict.referenceEntry,slDistance=Math.round(Math.abs(entry-plan.stop)*100000),tpDistance=Math.round(Math.abs(entry-plan.target)*100000);
+  if(slDistance<=0||tpDistance<=0)throw Error('Invalid broker relative protection distances');
+  const intent={clientOrderId:plan.clientOrderId,symbolId:plan.symbolId,stop:plan.stop,target:plan.target,side:plan.side,volume:verdict.volume,
+   createdAt:Date.now(),status:'SUBMITTING',plannedRisk:verdict.riskDeposit};
+  await this.ctx.storage.put(intentKey,intent);
+  const payload={ctidTraderAccountId:accountId,symbolId:plan.symbolId,orderType:1,tradeSide:plan.side==='BUY'?1:2,volume:verdict.volume,
+   relativeStopLoss:slDistance,relativeTakeProfit:tpDistance,clientOrderId:plan.clientOrderId,label:plan.clientOrderId,comment:'Trading Vibes'};
+  try{
+   // A timeout never implies rejection: the persistent intent stays locked until reconciliation.
+   await this.send(2106,payload,2126);
+   const deadline=Date.now()+12000;let filled:any=null;
+   while(Date.now()<deadline){
+    const result=await this.send(2124,{ctidTraderAccountId:accountId,returnProtectionOrders:false},2125);
+    const positions=result.payload?.position,orders=result.payload?.order;
+    if(!Array.isArray(positions)||!Array.isArray(orders))throw Error('Cannot reconcile submitted order');
+    const matching=positions.filter((p:any)=>p.tradeData?.label===plan.clientOrderId&&String(p.tradeData?.symbolId)===plan.symbolId);
+    if(matching.length>1)throw Error('Multiple positions linked to one order intent');
+    if(matching.length===1){filled=matching[0];break}
+    if(orders.some((o:any)=>o.clientOrderId===plan.clientOrderId))throw Error('Unresolved working/partial order: entry locked');
+    await new Promise<void>(resolve=>setTimeout(resolve,300));
+   }
+   if(!filled)throw Error('Order fill was not confirmed; intent locked for reconciliation');
+   if(!cTraderProtectionValid(filled,{side:plan.side,stop:plan.stop,target:plan.target,digits:Number(meta.digits),volume:verdict.volume,symbolId:plan.symbolId})){
+    await this.send(2110,{ctidTraderAccountId:accountId,positionId:filled.positionId,stopLoss:plan.stop,takeProfit:plan.target},2126);
+    const recheck=await this.send(2124,{ctidTraderAccountId:accountId,returnProtectionOrders:false},2125);
+    filled=(recheck.payload?.position as any[]|undefined)?.find(p=>String(p.positionId)===String(filled.positionId));
+   }
+   if(!cTraderProtectionValid(filled,{side:plan.side,stop:plan.stop,target:plan.target,digits:Number(meta.digits),volume:verdict.volume,symbolId:plan.symbolId}))throw Error('Broker protective stop and target not confirmed; manual intervention required');
+   await this.ctx.storage.put(intentKey,{...intent,status:'PROTECTED',positionId:String(filled.positionId),actualEntry:Number(filled.price),filledVolume:Number(filled.tradeData?.volume),confirmedAt:Date.now()});
+   return {status:'PROTECTED_FILL',filled:true,protected:true,positionId:String(filled.positionId),volume:Number(filled.tradeData?.volume),actualEntry:Number(filled.price),plannedRisk:verdict.riskDeposit,clientOrderId:plan.clientOrderId};
+  }catch(e){
+   await this.ctx.storage.put(intentKey,{...intent,status:'UNCERTAIN',error:e instanceof Error?e.message:'Uncertain execution',updatedAt:Date.now()});
+   throw Error('Execution uncertain, account locked: '+(e instanceof Error?e.message:'unknown error'));
+  }
+ }
+ private async reconcileIntent(accountId:string,token:string){
+  const key='intent:'+accountId,intent=await this.ctx.storage.get<any>(key),state=await this.brokerState(accountId,token);
+  if(!intent)return {blocked:false,positions:state.positions.length,orders:state.orders.length};
+  const linked=state.positions.filter(p=>p.tradeData?.label===intent.clientOrderId);
+  const resting=state.orders.filter(o=>o.clientOrderId===intent.clientOrderId);
+  if(linked.length!==1||resting.length||!cTraderProtectionValid(linked[0],{side:intent.side,stop:intent.stop,target:intent.target,digits:5,volume:intent.volume,symbolId:intent.symbolId})){
+   return {blocked:true,intent,positions:state.positions.length,orders:state.orders.length,requiresOperator:true};
+  }
+  await this.ctx.storage.put(key,{...intent,status:'PROTECTED',positionId:String(linked[0].positionId),confirmedAt:Date.now()});
+  return {blocked:true,intent:{...intent,status:'PROTECTED'},positions:state.positions.length,orders:state.orders.length};
+ }
+
  async fetch(req:Request){
   if(req.method!=='POST')return Response.json({error:'POST required'},{status:405});
   try{
-   const {environment,payloadType,payload,accountId,accessToken}=await req.json<any>();
+   const {environment,payloadType,payload,accountId,accessToken,mode,plan}=await req.json<any>();
    if(environment!=='demo'&&environment!=='live')throw Error('Invalid environment');
-   if(!READ_ONLY.has(payloadType))throw Error('Trading requests are not enabled on the data gateway');
    if(!accessToken||typeof accessToken!=='string'||accessToken.length>4096)throw Error('Missing account token');
-   if(payloadType!==2149&&(!/^[0-9]{1,24}$/.test(String(accountId))||String(payload?.ctidTraderAccountId)!==String(accountId)))throw Error('Account ID mismatch');
+   if(mode!=='rpc'&&mode!=='quote'&&mode!=='trade'&&mode!=='reconcile')throw Error('Unknown cTrader gateway operation');
+   if((mode!=='rpc'||payloadType!==2149)&&!/^[0-9]{1,24}$/.test(String(accountId)))throw Error('Invalid account ID');
    if(this.ws&&this.environment!==environment)throw Error('Incorrect gateway environment');
    await this.connect(environment);
+   if(mode==='quote'){const value=await this.quote(String(accountId),String(payload?.symbolId),accessToken);return Response.json({payload:value})}
+   if(mode==='trade')return Response.json({payload:await this.serial(()=>this.execute({environment,accountId:String(accountId),accessToken,plan}))});
+   if(mode==='reconcile')return Response.json({payload:await this.serial(()=>this.reconcileIntent(String(accountId),accessToken))});
+   if(!READ_ONLY.has(payloadType))throw Error('This cTrader protocol request is not permitted');
+   if(payloadType!==2149&&String(payload?.ctidTraderAccountId)!==String(accountId))throw Error('Account ID mismatch');
    if(payloadType!==2149)await this.account(String(accountId),accessToken);
    const params=payloadType===2149?{accessToken}:payload;
    if(payloadType===2137||payloadType===2145){const now=Date.now(),delay=Math.max(0,this.nextHistoryAt-now);this.nextHistoryAt=Math.max(now,this.nextHistoryAt)+250;if(delay)await new Promise<void>(resolve=>setTimeout(resolve,delay));}
@@ -85,10 +239,11 @@ export class CTraderGateway extends DurableObject<Env>{
 }
 export default {async fetch(req:Request,env:Env){
  if(!internalAuth(req.headers.get('Authorization')||'',env.CTRADER_GATEWAY_SECRET))return new Response('Unauthorized',{status:401});
- if(new URL(req.url).pathname==='/health')return Response.json({ready:Boolean(env.CTRADER_CLIENT_ID&&env.CTRADER_SECRET_KEY),runtime:'ctrader-json-gateway',tradingEnabled:false});
- if(new URL(req.url).pathname!=='/rpc'||req.method!=='POST')return Response.json({error:'Unknown route'},{status:404});
+ if(new URL(req.url).pathname==='/health')return Response.json({ready:Boolean(env.CTRADER_CLIENT_ID&&env.CTRADER_SECRET_KEY),runtime:'ctrader-json-gateway',demoTradingEnabled:env.CTRADER_DEMO_TRADING_ENABLED==='true',liveTradingEnabled:env.CTRADER_LIVE_TRADING_ENABLED==='true'});
+ if(!['/rpc','/quote','/trade','/reconcile'].includes(new URL(req.url).pathname)||req.method!=='POST')return Response.json({error:'Unknown route'},{status:404});
  const input=await req.text();if(input.length>35000)return new Response('Too large',{status:413});
  let requested:any;try{requested=JSON.parse(input)}catch{return new Response('Malformed JSON',{status:400})}
+ requested.mode=new URL(req.url).pathname.slice(1);
  if(requested.environment!=='demo'&&requested.environment!=='live')return new Response('Invalid environment',{status:400});
- return env.GATEWAYS.get(env.GATEWAYS.idFromName('ctrader-'+requested.environment)).fetch(new Request('https://gateway/request',{method:'POST',body:input,headers:{'Content-Type':'application/json'}}));
+ return env.GATEWAYS.get(env.GATEWAYS.idFromName('ctrader-'+requested.environment)).fetch(new Request('https://gateway/request',{method:'POST',body:JSON.stringify(requested),headers:{'Content-Type':'application/json'}}));
 }} satisfies ExportedHandler<Env>;
