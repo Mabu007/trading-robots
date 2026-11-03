@@ -91,7 +91,8 @@ app.post('/api/venues/propdao/candles', async (req,res) => {
   // discovery on reads so an upstream metadata outage cannot block cached history.
   if(req.body?.asset==='GOLDUSDC'&&req.body?.timeframe==='m1'){
    const data=await dwellirHistory.candles({...req.body,asset:'xyz:GOLD'});
-   return res.json({...data,asset:'GOLDUSDC',source:'Dwellir / Hyperliquid reference (xyz:GOLD) for PropDAO; R2-backed; fills may differ'});
+   if(!data.candles.length)return res.status(422).json({error:'No GOLDUSDC candles are stored in R2 or available from public Hyperliquid for these dates. Try a more recent range; historical gaps are never fabricated.'});
+   return res.json({...data,asset:'GOLDUSDC',source:'R2 archive / public Hyperliquid reference (xyz:GOLD) for PropDAO; fills may differ'});
   }
   const market=(await venueMarketData.propdaoMarkets()).markets.find((m:any)=>m.symbol===req.body?.asset);
   if(!market)return res.status(400).json({error:'Choose an available PropDAO market.'});

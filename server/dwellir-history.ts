@@ -22,6 +22,46 @@ export class DwellirHistory {
  constructor(storage:Storage={read:readR2Object,write:writeR2Object},request:typeof fetch=fetch,key:()=>string|undefined=()=>process.env.DWELLIR_API_KEY,now:()=>number=Date.now){
   this.storage=storage;this.request=request;this.key=key;this.now=now;
  }
+
+ // Public Hyperliquid history is a read-only fallback for GOLDUSDC only.
+ // Reuse the existing Dwellir R2 archive first, then persist finalized public
+ // snapshots separately. Empty/expired windows are not cached as fake candles.
+ private async goldPublic(market:string,timeframe:MarketTimeframe,start:number,end:number):Promise<MarketCandle[]> {
+  const interval:Record<MarketTimeframe,string>={m1:'1m',m5:'5m',m15:'15m',m30:'30m',h1:'1h',h4:'4h',d1:'1d'};
+  const period=intervalMs[timeframe];
+  const key=`historical/hyperliquid/v1/${encodeURIComponent(market)}/${timeframe}/${start}-${end}.json`;
+  const cached=await this.storage.read(key);
+  if(cached!==null){
+   let rows:unknown;try{rows=JSON.parse(cached)}catch{throw Error('Cached Hyperliquid Gold history is corrupt.')}
+   if(!Array.isArray(rows)||!rows.every((c:any)=>isValidCandle(c)&&c.time*1000>=start&&c.time*1000<end&&c.time*1000%period===0))throw Error('Cached Hyperliquid Gold history is invalid.');
+   return rows as MarketCandle[];
+  }
+  // The public API exposes only its latest 5,000 candles per interval.
+  // Historical R2 chunks are still usable beyond this retention horizon.
+  if(end<this.now()-5000*period) return [];
+  const response=await this.request('https://api.hyperliquid.xyz/info',{
+   method:'POST',headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({type:'candleSnapshot',req:{coin:market,interval:interval[timeframe],startTime:start,endTime:end-1}}),
+   signal:AbortSignal.timeout(12000)
+  });
+  if(!response.ok)throw Error(`Public Hyperliquid Gold data returned HTTP ${response.status}.`);
+  let rows:unknown;try{rows=await response.json()}catch{throw Error('Public Hyperliquid Gold data returned invalid JSON.')}
+  if(!Array.isArray(rows)||rows.length>5000)throw Error('Public Hyperliquid Gold candle response is invalid.');
+  const unique=new Map<number,MarketCandle>();
+  for(const row of rows){
+   const r=row as Record<string,unknown>;
+   const ms=number(r.t);
+   const c:MarketCandle={time:ms/1000,open:number(r.o),high:number(r.h),low:number(r.l),close:number(r.c),volume:number(r.v)};
+   if(r.s!==market||r.i!==interval[timeframe]||!Number.isInteger(ms)||ms%period!==0||ms<start||ms>=end||!isValidCandle(c))throw Error('Public Hyperliquid Gold returned mismatched candle data.');
+   const earlier=unique.get(c.time);
+   if(earlier&&JSON.stringify(earlier)!==JSON.stringify(c))throw Error('Public Hyperliquid Gold returned conflicting candles.');
+   unique.set(c.time,c);
+  }
+  const candles=[...unique.values()].sort((a,b)=>a.time-b.time);
+  // Only observed bars are saved. Missing history remains missing, never synthesized.
+  if(candles.length&&end<=Math.floor(this.now()/period)*period)await this.storage.write(key,JSON.stringify(candles));
+  return candles;
+ }
  private async weekly(market:string,base:'1m'|'5m',start:number,end:number):Promise<MarketCandle[]> {
   const cacheKey=`historical/dwellir/v1/${encodeURIComponent(market)}/${base}/${start}.json`;
   const completeWeek=end===start+WEEK;
@@ -37,6 +77,7 @@ export class DwellirHistory {
   }
   const waitingKey=objectKey??cacheKey;const existing=waiting.get(waitingKey);if(existing)return existing;
   const task=(async()=>{
+   if(market==='xyz:GOLD')return this.goldPublic(market,base==='1m'?'m1':'m5',start,end);
    const secret=this.key()?.trim();if(!secret)throw Error('Dwellir historical data is not configured.');
    const period=base==='1m'?60_000:300_000, candles=new Map<number,MarketCandle>();
    let cursor:string|undefined;
@@ -89,8 +130,13 @@ export class DwellirHistory {
   // Limit download work per HTTP request. Longer runs can reuse cached weeks.
   if(chunks.length>32)throw Error('Select a shorter date range (up to 32 history weeks per request).');
   const segments:MarketCandle[][]=new Array(chunks.length);
+  const nativeSegments:MarketCandle[][]=new Array(chunks.length);
   for(let i=0;i<chunks.length;i+=4){
    await Promise.all(chunks.slice(i,i+4).map(async (chunk,j)=>{
+    if(asset==='xyz:GOLD'&&timeframe!=='m1'){
+     const native=await this.goldPublic(asset,timeframe,chunk.start,chunk.end);
+     if(native.length){nativeSegments[i+j]=native;segments[i+j]=[];return;}
+    }
     segments[i+j]=await this.weekly(asset,base,chunk.start,chunk.end);
    }));
   }
@@ -111,7 +157,12 @@ export class DwellirHistory {
     candles.push({time:t/1000,open:group[0].open,high:Math.max(...group.map(c=>c.high)),low:Math.min(...group.map(c=>c.low)),close:group[group.length-1].close,volume:group.reduce((n,c)=>n+c.volume,0)});
    }
   }
+  if(asset==='xyz:GOLD'){
+   const merged=new Map(candles.map(c=>[c.time,c]));
+   for(const native of nativeSegments)if(native)for(const c of native)if(c.time*1000>=start&&c.time*1000<end)merged.set(c.time,c);
+   candles.length=0;candles.push(...[...merged.values()].sort((a,b)=>a.time-b.time));
+  }
   const expectedCandles=(end-start)/period;
-  return {source:`Dwellir Hyperliquid (${asset})`,asset,timeframe,candles,expectedCandles,missingCandles:expectedCandles-candles.length,observedGaps:countObservedGaps(candles,timeframe),endExclusive:true,cache:'R2',sparse:true};
+  return {source:asset==='xyz:GOLD'?'R2 archive + public Hyperliquid (xyz:GOLD)':`Dwellir Hyperliquid (${asset})`,asset,timeframe,candles,expectedCandles,missingCandles:expectedCandles-candles.length,observedGaps:countObservedGaps(candles,timeframe),endExclusive:true,cache:'R2',sparse:true};
  }
 }
