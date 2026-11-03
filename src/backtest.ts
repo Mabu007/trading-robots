@@ -65,7 +65,7 @@ function runInSandbox(
       reject(new Error(message));
     };
     const onAbort = () => finishWithError('Backtest cancelled by user.');
-    const timeout = window.setTimeout(() => finishWithError('Strategy execution exceeded 8 seconds and was stopped.'), 8_000);
+    const timeout = window.setTimeout(() => finishWithError('Strategy execution exceeded 600 seconds and was stopped.'), 600_000);
     const onMessage = (event: MessageEvent) => {
       if (event.source !== iframe.contentWindow) return;
       if (event.data?.type === 'done') {
