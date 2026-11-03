@@ -104,12 +104,14 @@ export class CTraderGateway extends DurableObject<Env>{
    this.send(2187,{ctidTraderAccountId:accountId},2188)
   ]);
   const trader=traderRes.payload?.trader,r=reconcileRes.payload,up=pnlRes.payload;
-  if(!trader||String(trader.ctidTraderAccountId)!==accountId||!Array.isArray(r?.position)||!Array.isArray(r?.order)||!Array.isArray(up?.positionUnrealizedPnL))throw Error('Account reconciliation incomplete');
+  if(!trader||String(trader.ctidTraderAccountId)!==accountId||!Array.isArray(r?.position)||!Array.isArray(r?.order))throw Error('Account reconciliation incomplete');
+  const pnlRows=Array.isArray(up?.positionUnrealizedPnL)?up.positionUnrealizedPnL:r.position.length===0?[]:null;
+  if(!pnlRows)throw Error('Open position P&L is unavailable');
   const digits=Number(trader.moneyDigits);
   if(!Number.isInteger(digits)||digits<0||digits>12)throw Error('Invalid broker moneyDigits');
   const divisor=10**digits;
   const balance=Number(trader.balance)/divisor;
-  const unrealized=up.positionUnrealizedPnL.reduce((n:number,p:any)=>n+Number(p.netUnrealizedPnL)/10**Number(up.moneyDigits??digits),0);
+  const unrealized=pnlRows.reduce((n:number,p:any)=>n+Number(p.netUnrealizedPnL)/10**Number(up.moneyDigits??digits),0);
   const margin=r.position.reduce((n:number,p:any)=>n+Number(p.usedMargin||0)/10**Number(p.moneyDigits??digits),0);
   if(![balance,unrealized,margin].every(Number.isFinite))throw Error('Broker balance, margin or unrealized P&L unavailable');
   return {trader,positions:r.position as any[],orders:r.order as any[],balance,equity:balance+unrealized,freeMargin:balance+unrealized-margin,margin};
@@ -175,7 +177,7 @@ export class CTraderGateway extends DurableObject<Env>{
 
   const day=new Date().toISOString().slice(0,10),ledgerKey='risk:'+accountId;
   const previous=await this.ctx.storage.get<any>(ledgerKey);
-  const ledger=previous&&previous.day===day?previous:{day,dayStartEquity:state.equity,peakEquity:state.equity};
+  const ledger=previous&&previous.day===day?previous:{day,dayStartEquity:state.equity,peakEquity:Math.max(Number(previous?.peakEquity||0),state.equity)};
   ledger.peakEquity=Math.max(ledger.peakEquity,state.equity);
   await this.ctx.storage.put(ledgerKey,ledger);
   const risk:CTraderRiskInput={balance:state.balance,equity:state.equity,freeMargin:state.freeMargin,quoteToDeposit:currency,
