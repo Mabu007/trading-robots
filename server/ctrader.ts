@@ -234,7 +234,8 @@ export class CTraderService{
   const firstDay=Math.floor(from/dayMs),lastDay=Math.floor((to-1)/dayMs),all:any[]=[];
   let cacheDays=0,downloadedDays=0;
   for(let day=firstDay;day<=lastDay;day++){
-   const start=day*dayMs,end=start+dayMs,cacheable=end<now-periodMs&&start>=now-90*dayMs;
+   const start=day*dayMs,end=start+dayMs,utcToday=Math.floor(now/dayMs)*dayMs;
+   const cacheable=end<=utcToday&&start>=utcToday-90*dayMs;
    const name=this.archivePrefix(environment,a.ctidTraderAccountId,found.symbolId,tf)+'/'+new Date(start).toISOString().slice(0,10)+'.json';
    let candles:any[]|null=null;
    if(cacheable){const raw=await this.store.read(name);if(raw){try{const data=JSON.parse(raw);if(data.schema===1&&data.accountId===a.ctidTraderAccountId&&data.symbolId===found.symbolId&&data.tf===tf&&Array.isArray(data.candles)){candles=data.candles;cacheDays++}}catch{}}}
