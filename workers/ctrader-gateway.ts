@@ -4,7 +4,7 @@ import {DurableObject} from 'cloudflare:workers';
 // One named Durable Object per environment keeps connections shared across users.
 type Env={CTRADER_GATEWAY_SECRET:string;CTRADER_CLIENT_ID:string;CTRADER_SECRET_KEY:string;GATEWAYS:DurableObjectNamespace;CTRADER_TRADING_ENABLED?:string};
 type Reply={payloadType:number;payload?:Record<string,any>;clientMsgId?:string};
-const READ_ONLY=new Set([2149,2114,2116,2121,2124,2133,2137,2139,2145,2112,2175]);
+const READ_ONLY=new Set([2149,2114,2116,2121,2124,2133,2137,2139,2145,2112]);
 const RESPONSES:Record<number,number>={2149:2150,2114:2115,2116:2117,2121:2122,2124:2125,2133:2134,2137:2138,2139:2140,2145:2146,2112:2113,2175:2176};
 const encode=(v:unknown)=>JSON.stringify(v);
 function internalAuth(header:string,secret:string){return secret.length>=32&&header.length<500&&header===`Bearer ${secret}`;}
@@ -33,14 +33,15 @@ export class CTraderGateway extends DurableObject<Env>{
    this.ws=ws;
    ws.addEventListener('message',(event:MessageEvent)=>{
     let reply:Reply;try{reply=JSON.parse(String(event.data))}catch{return}
+    if(reply.payloadType===2147||reply.payloadType===2164){const account=String(reply.payload?.ctidTraderAccountId||'');for(const name of [...this.authenticated])if(!account||name.startsWith(account+':'))this.authenticated.delete(name);return}
     const id=String(reply.clientMsgId||'');
     const waiter=this.waiters.get(id);if(!waiter)return;
     clearTimeout(waiter.timer);this.waiters.delete(id);
     if(reply.payloadType===2142||reply.payloadType===50)waiter.reject(Error('cTrader: '+String(reply.payload?.errorCode||reply.payload?.description||'request rejected')));
     else waiter.resolve(reply);
    });
-   ws.addEventListener('close',()=>this.close('cTrader disconnected. Request state is uncertain; reconcile before submitting orders.'));
-   ws.addEventListener('error',()=>this.close('cTrader socket error. Request state is uncertain.'));
+   ws.addEventListener('close',()=>{if(this.ws===ws)this.close('cTrader disconnected. Request state is uncertain; reconcile before submitting orders.')});
+   ws.addEventListener('error',()=>{if(this.ws===ws)this.close('cTrader socket error. Request state is uncertain.')});
    this.heartbeat=setInterval(()=>{if(ws.readyState===WebSocket.OPEN){try{ws.send(encode({payloadType:51,clientMsgId:'hb-'+Date.now(),payload:{}}))}catch{this.close('Heartbeat send failed')}}},10000);
    await this.send(2100,{clientId:this.env.CTRADER_CLIENT_ID,clientSecret:this.env.CTRADER_SECRET_KEY},2101);
   })();
