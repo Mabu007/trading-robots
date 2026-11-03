@@ -138,9 +138,11 @@ export class PropDAOLiveService{
   const status=await this.status(uid,botId);if(status.uncertain||!status.configured||(!status.running&&!status.paused))throw Error('Only a running or already paused robot can be paused. Reauthorize stopped instances in Deploy.');
   return this.runtime(g,'pause',{});
  }
- async resume(uid:string,botId:string){
+ async resume(uid:string,botId:string,req:Request){
   const g=await this.grant(uid,botId);if(!g||g.revokedAt||Date.now()>=g.expiresAt)throw Error('Prior authorization has ended. Open Deploy and authorize again.');
   const status=await this.status(uid,botId);if(!status.configured||!status.canResume||status.uncertain)throw Error('Robot cannot resume safely. Open Deploy or reconcile the account.');
+  const bot=await this.deps.bot(uid,botId,req);
+  if(!bot||bot.venue!=='propdao'||bot.asset!==g.symbol||hash(bot.code)!==g.codeHash)throw Error('Strategy changed since live authorization. Stop and deploy the updated version before restarting.');
   const account=await this.deps.accounts.accountRisk(uid,g.accountId);
   if(!['active','funded'].includes(account.account.status)||account.risk.breached||!Number.isFinite(account.risk.roomUsd)||account.risk.roomUsd<=g.riskUsd*3||account.positions.length||account.orders.length)throw Error('PropDAO account risk or exposure blocks resume.');
   return this.runtime(g,'resume',{});
@@ -164,7 +166,7 @@ export function propDAOLiveRoutes(app:Express,deps:Dependencies){
  const route=(fn:(uid:string,id:string,req:Request)=>Promise<unknown>)=>async(req:Request,res:Response)=>{res.setHeader('Cache-Control','no-store');const uid=await deps.uid(req,res);if(!uid)return;const id=String(req.params.botId);if(!safeId(id))return res.status(400).json({error:'Invalid bot ID'});try{return res.json(await fn(uid,id,req))}catch(e){return res.status(400).json({error:e instanceof Error?e.message:'PropDAO live request failed'})}};
  app.get('/api/venues/propdao/bots/:botId/live',route((uid,id)=>service.status(uid,id)));
  app.get('/api/venues/propdao/bots/:botId/live/market',route((uid,id)=>service.market(uid,id)));
- app.post('/api/venues/propdao/bots/:botId/live',route((uid,id,req)=>req.body?.action==='deploy'?service.deploy(uid,id,req):req.body?.action==='stop'?service.stop(uid,id):req.body?.action==='pause'?service.pause(uid,id):req.body?.action==='resume'?service.resume(uid,id):Promise.reject(Error('Unknown action'))));
+ app.post('/api/venues/propdao/bots/:botId/live',route((uid,id,req)=>req.body?.action==='deploy'?service.deploy(uid,id,req):req.body?.action==='stop'?service.stop(uid,id):req.body?.action==='pause'?service.pause(uid,id):req.body?.action==='resume'?service.resume(uid,id,req):Promise.reject(Error('Unknown action'))));
  app.post('/api/internal/propdao/provider',async(req,res)=>{
   res.setHeader('Cache-Control','no-store');
   const secret=process.env.PROPDAO_LIVE_INTERNAL_SECRET,header=req.header('authorization')||'';
