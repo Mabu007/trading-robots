@@ -13,6 +13,7 @@ import { FirestoreStore } from './firestore-store.ts';
 import { ValrMarketData } from './valr-market-data.ts';
 import { VenueMarketData } from './venue-market-data.ts';
 import { DwellirHistory } from './dwellir-history.ts';
+import {ctraderRoutes} from './ctrader.ts';
 import { PropDAOAccounts, propDAORoutes } from './propdao-account.ts';
 import {propDAOLiveRoutes} from './propdao-live-routes.ts';
 import { valrAccountRoutes } from './valr-routes.ts';
@@ -148,6 +149,7 @@ const valrExclusive=<T>(uid:string,task:()=>Promise<T>)=>FirestoreStore.configur
 const liveService=valrLiveRoutes(app,{lockReady:()=>FirestoreStore.configured(),exclusive:valrExclusive,uid:firebaseUidOrReply,bot:ownedValrBot,read:readR2Object,write:writeR2Object,remove:deleteR2Object});
 valrAccountRoutes(app,{uid:firebaseUidOrReply,read:readR2Object,write:writeR2Object,remove:deleteR2Object,beforeChange:uid=>liveService.beforeKeyChange(uid),mutate:valrExclusive});
 valrPaperRoutes(app,{uid:firebaseUidOrReply,bot:ownedValrBot});
+ctraderRoutes(app,{read:readR2Object,write:writeR2Object,remove:deleteR2Object},firebaseUidOrReply);
 economyRoutes(app,economy,async(req,res)=>{const uid=await firebaseUidOrReply(req,res);return uid?res.locals.identity:null;});
 const publications = sharedBotRoutes(app, { read: readR2Object, write: writeR2Object, remove: deleteR2Object, uid: firebaseUidOrReply, root: userBotRoot,...(FirestoreStore.configured()?{onPublish:(bot:any)=>economy.publishSharedBot(bot),onAcquire:async(uid:string,id:string,bot:any)=>{if(!await marketplace.store.get(`marketplaceBots/${id}`))await marketplace.publish(bot);return economy.acquireSharedBot(uid,bot)},onUnpublish:(uid:string,id:string)=>marketplace.unpublish(uid,id),onView:(bot:any,visitor:string)=>marketplace.view(bot,visitor)}:{}) });
 marketplaceRoutes(app,{uid:firebaseUidOrReply,read:readR2Object,write:writeR2Object,root:userBotRoot});
