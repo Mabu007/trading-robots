@@ -84,12 +84,12 @@ export class CTraderService{
   if(!provisional.accounts.length)throw Error('No cTrader accounts were authorized');
   await this.save(session.uid,provisional);
  }
- async brokerCall(uid:string,accountId:unknown,mode:'trade'|'reconcile'|'quote',input:any){
+ async brokerCall(uid:string,accountId:unknown,mode:'trade'|'reconcile'|'quote'|'conversion',input:any){
   const {s,a,environment}=await this.owned(uid,accountId);
   if(mode==='trade'&&s.scope!=='trading')throw Error('This cTrader grant does not authorize orders');
   const endpoint=process.env.CTRADER_GATEWAY_URL,secret=process.env.CTRADER_GATEWAY_SECRET;
   if(!endpoint||!secret||secret.length<32)throw Error('cTrader gateway is not configured');
-  const path=mode==='trade'?'/trade':mode==='quote'?'/quote':'/reconcile';
+  const path=mode==='trade'?'/trade':mode==='quote'?'/quote':mode==='conversion'?'/conversion':'/reconcile';
   const response=await this.request(new URL(path,endpoint),{method:'POST',
    headers:{Authorization:'Bearer '+secret,'Content-Type':'application/json'},
    body:JSON.stringify({environment,accountId:a.ctidTraderAccountId,accessToken:s.accessToken,...(mode==='trade'?{plan:input}:{payload:input})}),signal:AbortSignal.timeout(30000)});
@@ -150,6 +150,34 @@ export class CTraderService{
    await this.store.write(metaKey,JSON.stringify({accountId:scope.a.ctidTraderAccountId,symbolId:found.symbolId,savedAt:Date.now(),meta}));
   }
   return {...scope,found,meta};
+ }
+ async specification(uid:string,accountId:unknown,name:unknown){
+  const spec=await this.symbol(uid,accountId,name),id=spec.a.ctidTraderAccountId;
+  const meta=spec.meta,light=spec.found;
+  const account=await this.snapshot(uid,id);
+  const basic=await this.rpc(spec.s,spec.environment,2114,{ctidTraderAccountId:id,includeArchivedSymbols:false},id);
+  const symbol=(basic.symbol as any[]|undefined)?.find(x=>String(x.symbolId)===light.symbolId);
+  if(!symbol||!meta||!(Number(meta.lotSize)>0)||!(Number(meta.minVolume)>0)||!(Number(meta.stepVolume)>0))throw Error('Broker contract and volume rules are incomplete');
+  const quote=await this.quote(uid,id,light.symbolId);
+  const quoteAssetId=String(symbol.quoteAssetId||''),depositAssetId=String(account.balanceCurrencyAssetId||'');
+  if(!quoteAssetId||!depositAssetId)throw Error('Broker quote/deposit asset identity is unavailable');
+  const conversion=quoteAssetId===depositAssetId?{rate:1,quoteTime:Date.now()}:
+    await this.brokerCall(uid,id,'conversion',{firstAssetId:quoteAssetId,lastAssetId:depositAssetId});
+  if(!(Number(conversion.rate)>0)||!Number.isFinite(Number(conversion.rate)))throw Error('Broker conversion rate is unavailable');
+  const assets=await this.rpc(spec.s,spec.environment,2112,{ctidTraderAccountId:id},id);
+  const deposit=Array.isArray(assets.asset)?assets.asset.find((a:any)=>String(a.assetId)===depositAssetId):null;
+  const depositCurrency=String(deposit?.name||deposit?.displayName||deposit?.symbol||'').toUpperCase();
+  if(!/^[A-Z]{3}$/.test(depositCurrency))throw Error('Cannot identify broker deposit currency');
+  return {accountId:id,asset:name,symbolId:light.symbolId,depositCurrency,
+    depositAssetId,quoteAssetId,quoteToDeposit:Number(conversion.rate),
+    conversionTime:conversion.quoteTime,conversionType:quoteAssetId===depositAssetId?'identity':'current-market',
+    balance:account.balance,bid:Number(quote.bid),ask:Number(quote.ask),
+    lotSize:Number(meta.lotSize),minVolume:Number(meta.minVolume),
+    maxVolume:Number(meta.maxVolume),stepVolume:Number(meta.stepVolume),
+    commissionType:Number(meta.commissionType),preciseTradingCommissionRate:Number(meta.preciseTradingCommissionRate??0),
+    preciseMinCommission:Number(meta.preciseMinCommission??0),minCommissionAsset:String(meta.minCommissionAsset||''),
+    digits:Number(meta.digits),leverageInCents:Number(account.leverageInCents||0),
+    broker:spec.a.brokerTitleShort};
  }
  private archivePrefix(environment:string,accountId:string,symbolId:string,tf:string){
   return ['ctrader-history','v1',environment,SHA(accountId).slice(0,24),symbolId,tf].join('/');
@@ -228,6 +256,7 @@ export function ctraderRoutes(app:Express,store:R2,uid:(req:Request,res:Response
  app.get('/api/venues/ctrader/accounts',handle(id=>service.list(id)));
  app.get('/api/venues/ctrader/markets',handle((id,req)=>service.markets(id,req.query.accountId)));
  app.get('/api/venues/ctrader/snapshot',handle((id,req)=>service.snapshot(id,req.query.accountId)));
+ app.get('/api/venues/ctrader/specification',handle((id,req)=>service.specification(id,req.query.accountId,req.query.asset)));
  app.post('/api/venues/ctrader/candles',handle((id,req)=>service.candles(id,req.body)));
  app.post('/api/venues/ctrader/cache/warm',handle((id,req)=>service.warm(id,req.body)));
  app.post('/api/venues/ctrader/disconnect',handle(async(id)=>{if(options?.beforeChange)await options.beforeChange(id);await service.disconnect(id);return {connected:false}}));
