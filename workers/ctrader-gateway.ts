@@ -222,7 +222,19 @@ export class CTraderGateway extends DurableObject<Env>{
     const recheck=await this.send(2124,{ctidTraderAccountId:accountId,returnProtectionOrders:false},2125);
     filled=(recheck.payload?.position as any[]|undefined)?.find(p=>String(p.positionId)===String(filled.positionId));
    }
-   if(!cTraderProtectionValid(filled,{side:plan.side,stop:plan.stop,target:plan.target,digits:Number(meta.digits),volume:verdict.volume,symbolId:plan.symbolId}))throw Error('Broker protective stop and target not confirmed; manual intervention required');
+   if(!cTraderProtectionValid(filled,{side:plan.side,stop:plan.stop,target:plan.target,digits:Number(meta.digits),volume:verdict.volume,symbolId:plan.symbolId})){
+    // Never treat the position as safe when a protective order fails. Attempt an emergency close
+    // against the exact position ID and confirmed filled volume; keep the intent locked either way.
+    const id=String(filled?.positionId||''),vol=Number(filled?.tradeData?.volume);
+    if(/^[0-9]+$/.test(id)&&Number.isInteger(vol)&&vol>0&&vol<=verdict.volume){
+     try{await this.send(2111,{ctidTraderAccountId:accountId,positionId:id,volume:vol},2126)}
+     catch{ /* Do not trust send outcomes: reconciliation is authoritative. */ }
+     const final=await this.send(2124,{ctidTraderAccountId:accountId,returnProtectionOrders:false},2125);
+     const stillOpen=(final.payload?.position as any[]|undefined)?.some(p=>String(p.positionId)===id);
+     await this.ctx.storage.put(intentKey,{...intent,status:'EMERGENCY_CLOSE_ATTEMPTED',positionId:id,closeConfirmed:stillOpen===false});
+    }
+    throw Error('Protective SL/TP not confirmed. Emergency close attempted; reconcile broker position and closing deals before resuming');
+   }
    await this.ctx.storage.put(intentKey,{...intent,status:'PROTECTED',positionId:String(filled.positionId),actualEntry:Number(filled.price),filledVolume:Number(filled.tradeData?.volume),confirmedAt:Date.now()});
    return {status:'PROTECTED_FILL',filled:true,protected:true,positionId:String(filled.positionId),volume:Number(filled.tradeData?.volume),actualEntry:Number(filled.price),plannedRisk:verdict.riskDeposit,clientOrderId:plan.clientOrderId};
   }catch(e){
