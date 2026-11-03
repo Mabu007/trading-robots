@@ -248,11 +248,12 @@ export class CTraderGateway extends DurableObject<Env>{
    const {environment,payloadType,payload,accountId,accessToken,mode,plan}=await req.json<any>();
    if(environment!=='demo'&&environment!=='live')throw Error('Invalid environment');
    if(!accessToken||typeof accessToken!=='string'||accessToken.length>4096)throw Error('Missing account token');
-   if(mode!=='rpc'&&mode!=='quote'&&mode!=='trade'&&mode!=='reconcile')throw Error('Unknown cTrader gateway operation');
+   if(mode!=='rpc'&&mode!=='quote'&&mode!=='conversion'&&mode!=='trade'&&mode!=='reconcile')throw Error('Unknown cTrader gateway operation');
    if((mode!=='rpc'||payloadType!==2149)&&!/^[0-9]{1,24}$/.test(String(accountId)))throw Error('Invalid account ID');
    if(this.ws&&this.environment!==environment)throw Error('Incorrect gateway environment');
    await this.connect(environment);
    if(mode==='quote'){const value=await this.quote(String(accountId),String(payload?.symbolId),accessToken);return Response.json({payload:value})}
+   if(mode==='conversion'){const rate=await this.currencyConversion(String(accountId),accessToken,String(payload?.firstAssetId),String(payload?.lastAssetId));return Response.json({payload:{rate,quoteTime:Date.now()}})}
    if(mode==='trade')return Response.json({payload:await this.serial(()=>this.execute({environment,accountId:String(accountId),accessToken,plan}))});
    if(mode==='reconcile')return Response.json({payload:await this.serial(()=>this.reconcileIntent(String(accountId),accessToken))});
    if(!READ_ONLY.has(payloadType))throw Error('This cTrader protocol request is not permitted');
@@ -279,7 +280,7 @@ export default {async fetch(req:Request,env:Env){
    method:req.method,headers:{'X-TV-UID':uid,...(content===undefined?{}:{'Content-Type':'application/json'})},
    ...(content===undefined?{}:{body:content})}));
  }
- if(!['/rpc','/quote','/trade','/reconcile'].includes(new URL(req.url).pathname)||req.method!=='POST')return Response.json({error:'Unknown route'},{status:404});
+ if(!['/rpc','/quote','/conversion','/trade','/reconcile'].includes(new URL(req.url).pathname)||req.method!=='POST')return Response.json({error:'Unknown route'},{status:404});
  const input=await req.text();if(input.length>35000)return new Response('Too large',{status:413});
  let requested:any;try{requested=JSON.parse(input)}catch{return new Response('Malformed JSON',{status:400})}
  requested.mode=new URL(req.url).pathname.slice(1);
