@@ -212,8 +212,11 @@ export class CTraderGateway extends DurableObject<Env>{
     if(!Array.isArray(positions)||!Array.isArray(orders))throw Error('Cannot reconcile submitted order');
     const matching=positions.filter((p:any)=>p.tradeData?.label===plan.clientOrderId&&String(p.tradeData?.symbolId)===plan.symbolId);
     if(matching.length>1)throw Error('Multiple positions linked to one order intent');
+    const working=orders.some((o:any)=>o.clientOrderId===plan.clientOrderId);
+    // A partially filled order can create a position while the remainder is still working.
+    // Confirm there is no outstanding remainder before declaring a protected fill.
+    if(working)throw Error('Unresolved working/partially filled order: entry locked');
     if(matching.length===1){filled=matching[0];break}
-    if(orders.some((o:any)=>o.clientOrderId===plan.clientOrderId))throw Error('Unresolved working/partial order: entry locked');
     await new Promise<void>(resolve=>setTimeout(resolve,300));
    }
    if(!filled)throw Error('Order fill was not confirmed; intent locked for reconciliation');
