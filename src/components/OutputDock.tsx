@@ -100,6 +100,8 @@ function ResultPanel({ result, from, to, asset, monetary, propEvaluation }: { re
 
 function TradesPanel({ props }: { props: Props }) {
   const [copied, setCopied] = useState('');
+  const [liveSelection,setLiveSelection]=useState<{kind:'position'|'closed';id:string}|null>(null);
+  useEffect(()=>{if(!liveSelection)return;const close=(event:KeyboardEvent)=>{if(event.key==='Escape')setLiveSelection(null)};window.addEventListener('keydown',close);return()=>window.removeEventListener('keydown',close)},[liveSelection]);
   const trades:Trade[] = props.propEvaluation?.trades ?? props.monetary?.trades ?? props.result?.trades ?? [];
   const selected = trades.find(trade => trade.id === props.selectedTrade?.id) || null;
   const copyId = async (trade: Trade) => {
@@ -109,22 +111,47 @@ function TradesPanel({ props }: { props: Props }) {
   };
 
   if(props.liveMode){
-    const positions:any[]=props.propLive?.positions||[];
-    const closed:any[]=props.propLive?.closedTrades||[];
-    return <div className="output-trade-list" role="list" aria-label="Actual PropDAO open positions and closed trades">
-      {props.propLive?.accountError&&<p className="output-disclaimer red" role="alert">{props.propLive.accountError}</p>}
-      {positions.map((p:any)=><div className="output-trade-row" key={'pos-'+p.id}>
-        <span className={`output-trade-side ${p.side==='BUY'?'long':'short'}`}>{p.side==='BUY'?'↗':'↘'}</span>
-        <span className="output-trade-main"><strong>OPEN · {p.symbol} · {p.qty} units</strong><small>Entry {p.entry} · Mark {p.mark} · SL {p.slPrice??'—'} · TP {p.tpPrice??'—'}</small></span>
-        <b className={p.unrealizedPnl>=0?'green':'red'}>{Number.isFinite(p.unrealizedPnl)?'$'+p.unrealizedPnl.toFixed(2):'—'}</b>
-      </div>)}
-      {closed.map((t:any)=><div className="output-trade-row" key={'close-'+t.id}>
-        <span className={`output-trade-side ${t.side==='BUY'?'long':'short'}`}>{t.side==='BUY'?'↗':'↘'}</span>
-        <span className="output-trade-main"><strong>CLOSED · {t.symbol} · {t.qty} units</strong><small>{new Date(t.closedAt).toLocaleString()} · {t.reason} · Entry {t.entry} / exit {t.exit}</small></span>
-        <b className={t.pnl>=0?'green':'red'}>{Number.isFinite(t.pnl)?'$'+t.pnl.toFixed(2):'—'}</b>
-      </div>)}
-      {!positions.length&&!closed.length&&<div className="output-empty"><ListChecks size={18}/><strong>No live PropDAO trades yet</strong><span>Open positions and closed trades appear here as the provider reports them.</span></div>}
-    </div>;
+    const positions:any[]=Array.isArray(props.propLive?.positions)?props.propLive.positions:[];
+    const closed:any[]=Array.isArray(props.propLive?.closedTrades)?props.propLive.closedTrades:[];
+    const selectedLive=liveSelection?.kind==='position'?positions.find(t=>t.id===liveSelection.id):liveSelection?.kind==='closed'?closed.find(t=>t.id===liveSelection.id):null;
+    const money=(value:unknown)=>typeof value==='number'&&Number.isFinite(value)?new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(value):'—';
+    const price=(value:unknown)=>typeof value==='number'&&Number.isFinite(value)?value.toLocaleString('en-US',{maximumFractionDigits:8}):'—';
+    const moment=(value:unknown)=>typeof value==='number'&&Number.isFinite(value)&&value>0?new Date(value<1e12?value*1000:value).toLocaleString():'—';
+    const isOpen=liveSelection?.kind==='position';
+    const side=(v:unknown)=>v==='BUY'||v==='LONG'?'BUY':v==='SELL'||v==='SHORT'?'SELL':'—';
+    const selectedFields=selectedLive?[
+      ['Trade / position ID',selectedLive.id],['Instrument',selectedLive.symbol],['Direction',side(selectedLive.side)],
+      ['Quantity',price(selectedLive.qty)],['Entry price',price(selectedLive.entry)],
+      ...(isOpen?[['Current mark',price(selectedLive.mark)],['Stop loss',price(selectedLive.slPrice)],['Take profit',price(selectedLive.tpPrice)],['Unrealized P&L',money(selectedLive.unrealizedPnl)],['Opened',moment(selectedLive.openedAt)]]:
+      [['Exit price',price(selectedLive.exit)],['Realized P&L',money(selectedLive.pnl)],['Trading fee',money(selectedLive.fee)],['Exit reason',selectedLive.reason||'—'],['Opened',moment(selectedLive.openedAt)],['Closed',moment(selectedLive.closedAt)]])
+    ]:[];
+    return <>
+      <div className="prop-live-trades" role="list" aria-label="PropDAO live account trades">
+        <div className="prop-live-trades-head"><div><strong>Account activity</strong><small>Provider-reported positions and completed trades · refreshes automatically</small></div><span>{positions.length} open · {closed.length} closed</span></div>
+        {props.propLive?.accountError&&<p className="output-disclaimer red" role="alert">Provider activity unavailable: {props.propLive.accountError}</p>}
+        {positions.length>0&&<div className="prop-live-trades-section">OPEN POSITIONS</div>}
+        {positions.map((p:any)=><button type="button" role="listitem" className="prop-live-trade-row" key={'pos-'+p.id} onClick={()=>setLiveSelection({kind:'position',id:p.id})} aria-label={`Inspect open ${p.symbol} position ${p.id}`}>
+          <span className={`prop-live-trade-direction ${side(p.side)==='BUY'?'long':'short'}`}>{side(p.side)==='BUY'?'↗':'↘'}</span>
+          <span className="prop-live-trade-main"><strong>{p.symbol} <span className="prop-live-trade-pill">OPEN</span></strong><small>{side(p.side)} · {price(p.qty)} units · Entry {price(p.entry)}</small></span>
+          <span className="prop-live-trade-pnl"><b className={p.unrealizedPnl>=0?'green':'red'}>{money(p.unrealizedPnl)}</b><small>Unrealized</small></span><ChevronRight size={15}/>
+        </button>)}
+        {closed.length>0&&<div className="prop-live-trades-section">CLOSED TRADES</div>}
+        {closed.map((t:any)=><button type="button" role="listitem" className="prop-live-trade-row" key={'closed-'+t.id} onClick={()=>setLiveSelection({kind:'closed',id:t.id})} aria-label={`Inspect closed ${t.symbol} trade ${t.id}`}>
+          <span className={`prop-live-trade-direction ${side(t.side)==='BUY'?'long':'short'}`}>{side(t.side)==='BUY'?'↗':'↘'}</span>
+          <span className="prop-live-trade-main"><strong>{t.symbol} <span className="prop-live-trade-pill closed">CLOSED</span></strong><small>{side(t.side)} · {price(t.qty)} units · {moment(t.closedAt)}</small></span>
+          <span className="prop-live-trade-pnl"><b className={t.pnl>=0?'green':'red'}>{money(t.pnl)}</b><small>Realized</small></span><ChevronRight size={15}/>
+        </button>)}
+        {!positions.length&&!closed.length&&<div className="output-empty"><ListChecks size={18}/><strong>No PropDAO trades yet</strong><span>Open positions and completed trades will appear here when reported by PropDAO.</span></div>}
+      </div>
+      {selectedLive&&createPortal(<div className="trade-modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)setLiveSelection(null)}}>
+        <section className="trade-modal prop-live-trade-detail" role="dialog" aria-modal="true" aria-label={`${isOpen?'Open position':'Closed trade'} metadata`}>
+          <header className="trade-modal-head"><div><span className="output-eyebrow">PROPDAO · {isOpen?'OPEN POSITION':'CLOSED TRADE'}</span><h2>{selectedLive.symbol} · {side(selectedLive.side)}</h2></div><button type="button" className="shadcn-icon-button" aria-label="Close live trade details" onClick={()=>setLiveSelection(null)}><X size={17}/></button></header>
+          <div className="prop-live-detail-summary"><span className={`prop-live-trade-pill ${isOpen?'':'closed'}`}>{isOpen?'OPEN':'CLOSED'}</span><strong className={(isOpen?selectedLive.unrealizedPnl:selectedLive.pnl)>=0?'green':'red'}>{money(isOpen?selectedLive.unrealizedPnl:selectedLive.pnl)}</strong><small>{isOpen?'Unrealized P&L':'Realized P&L'} · USD</small></div>
+          <div className="prop-live-detail-grid">{selectedFields.map(([label,value])=><div key={label}><small>{label}</small><strong>{String(value??'—')}</strong></div>)}</div>
+          <footer className="trade-modal-foot"><span>Actual account metadata returned by PropDAO, not backtest calculations. Pause does not close positions.</span><button type="button" className="ghost" onClick={()=>void copyText(String(selectedLive.id))}><Copy size={14}/> Copy ID</button></footer>
+        </section>
+      </div>,document.body)}
+    </>;
   }
   if (!props.result) return <div className="output-empty"><ListChecks size={18}/><strong>No trades to inspect</strong><span>Run a backtest and each trade will be available here.</span></div>;
   return <>
