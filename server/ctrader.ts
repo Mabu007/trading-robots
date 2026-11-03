@@ -1,4 +1,4 @@
-import {createCipheriv,createDecipheriv,createHash,randomBytes} from 'node:crypto';
+import {createCipheriv,createDecipheriv,createHash,hkdfSync,randomBytes} from 'node:crypto';
 import type {Express,Request,Response} from 'express';
 type R2={read:(path:string)=>Promise<string|null>;write:(path:string,data:string)=>Promise<void>;remove:(path:string)=>Promise<void>};
 type Account={ctidTraderAccountId:string;isLive:boolean;brokerTitleShort?:string;traderLogin?:string};
@@ -10,7 +10,15 @@ const SYMBOL=/^[A-Za-z0-9._/-]{1,64}$/;
 const dayMs=86400000;
 function stage(){return process.env.VERCEL_ENV||'development'}
 function root(uid:string){return 'ctrader-credentials/v1/'+stage()+'/'+Buffer.from(uid).toString('base64url')+'.json'}
-function key(){const value=process.env.CTRADER_CREDENTIAL_ENCRYPTION_KEY||'';const key=Buffer.from(value,'base64');if(key.length!==32||key.toString('base64')!==value)throw Error('CTRADER_CREDENTIAL_ENCRYPTION_KEY must contain 32 base64-encoded random bytes');return key}
+function key(){
+ const direct=process.env.CTRADER_CREDENTIAL_ENCRYPTION_KEY;
+ const existing=direct||process.env.AI_CREDENTIAL_ENCRYPTION_KEY;
+ if(!existing)throw Error('cTrader credential encryption is unavailable');
+ const material=Buffer.from(existing,'base64');
+ if(material.length!==32||material.toString('base64')!==existing)throw Error('Configured encryption secret is not a 32-byte base64 key');
+ // Domain separation prevents using the same encryption key for cTrader and other providers.
+ return Buffer.from(hkdfSync('sha256',material,Buffer.from('Trading Vibes provider keys v1'),Buffer.from('ctrader oauth credentials v1'),32));
+}
 function encrypt(uid:string,stored:Stored){const iv=randomBytes(12),cipher=createCipheriv('aes-256-gcm',key(),iv);cipher.setAAD(Buffer.from('trading-vibes:ctrader:v1:'+uid));const ciphertext=Buffer.concat([cipher.update(JSON.stringify(stored),'utf8'),cipher.final()]);return JSON.stringify({v:1,iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64'),data:ciphertext.toString('base64')})}
 function decrypt(uid:string,data:string):Stored{try{const c=JSON.parse(data);if(c.v!==1)throw Error('version');const cipher=createDecipheriv('aes-256-gcm',key(),Buffer.from(c.iv,'base64'));cipher.setAAD(Buffer.from('trading-vibes:ctrader:v1:'+uid));cipher.setAuthTag(Buffer.from(c.tag,'base64'));return JSON.parse(Buffer.concat([cipher.update(Buffer.from(c.data,'base64')),cipher.final()]).toString('utf8'))}catch{throw Error('Cannot decrypt cTrader account; reconnect your broker')}}
 export function normalizeCTraderTrendbars(rows:any[],digits=5){
