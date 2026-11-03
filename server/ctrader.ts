@@ -202,13 +202,14 @@ export class CTraderService{
  }
  async disconnect(uid:string){await this.store.remove(root(uid))}
 }
-export function ctraderRoutes(app:Express,store:R2,uid:(req:Request,res:Response)=>Promise<string|null>){
- const service=new CTraderService(store);
+export function ctraderRoutes(app:Express,store:R2,uid:(req:Request,res:Response)=>Promise<string|null>,options?:{service?:CTraderService;beforeChange?:(uid:string)=>Promise<void>}){
+ const service=options?.service||new CTraderService(store);
  const handle=(fn:(id:string,req:Request)=>Promise<unknown>)=>async(req:Request,res:Response)=>{
   res.setHeader('Cache-Control','no-store');const id=await uid(req,res);if(!id)return;
   try{return res.json(await fn(id,req))}catch(e){return res.status(400).json({error:e instanceof Error?e.message:'cTrader request failed'})}
  };
  app.get('/api/venues/ctrader/oauth/start',handle(async(id,req)=>{
+  if(options?.beforeChange)await options.beforeChange(id);
   const scope=req.query.scope==='trading'?'trading':'accounts',start=await service.oauthStart(id,scope);
   (req.res as Response).setHeader('Set-Cookie',`tv_ctrader_oauth=${start.nonce}; HttpOnly; Secure; SameSite=Lax; Path=/api/brokers/ctrader/callback; Max-Age=600`);
   return {url:start.url};
@@ -229,6 +230,6 @@ export function ctraderRoutes(app:Express,store:R2,uid:(req:Request,res:Response
  app.get('/api/venues/ctrader/snapshot',handle((id,req)=>service.snapshot(id,req.query.accountId)));
  app.post('/api/venues/ctrader/candles',handle((id,req)=>service.candles(id,req.body)));
  app.post('/api/venues/ctrader/cache/warm',handle((id,req)=>service.warm(id,req.body)));
- app.post('/api/venues/ctrader/disconnect',handle(async(id)=>{await service.disconnect(id);return {connected:false}}));
+ app.post('/api/venues/ctrader/disconnect',handle(async(id)=>{if(options?.beforeChange)await options.beforeChange(id);await service.disconnect(id);return {connected:false}}));
  return service;
 }
