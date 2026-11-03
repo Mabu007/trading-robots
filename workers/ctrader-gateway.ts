@@ -1,9 +1,11 @@
 import {DurableObject} from 'cloudflare:workers';
 import {computeCTraderRisk,cTraderProtectionValid,type CTraderRiskInput} from '../shared/ctrader-risk';
+import {CTraderLiveBot} from './ctrader-live-object';
+export {CTraderLiveBot};
 
 // Spotware JSON WebSocket: port 5036, NOT the protobuf port 5035.
 // One named Durable Object per environment keeps connections shared across users.
-type Env={CTRADER_GATEWAY_SECRET:string;CTRADER_CLIENT_ID:string;CTRADER_SECRET_KEY:string;GATEWAYS:DurableObjectNamespace;CTRADER_TRADING_ENABLED?:string;CTRADER_DEMO_TRADING_ENABLED?:string;CTRADER_LIVE_TRADING_ENABLED?:string};
+type Env={CTRADER_GATEWAY_SECRET:string;CTRADER_CLIENT_ID:string;CTRADER_SECRET_KEY:string;GATEWAYS:DurableObjectNamespace;BOTS:DurableObjectNamespace;CTRADER_CONTROL_URL:string;CTRADER_TRADING_ENABLED?:string;CTRADER_DEMO_TRADING_ENABLED?:string;CTRADER_LIVE_TRADING_ENABLED?:string};
 type Reply={payloadType:number;payload?:Record<string,any>;clientMsgId?:string};
 const READ_ONLY=new Set([2149,2114,2116,2121,2124,2133,2137,2139,2145,2112,2118,2187,2175,2179]);
 const RESPONSES:Record<number,number>={2149:2150,2114:2115,2116:2117,2121:2122,2124:2125,2133:2134,2137:2138,2139:2140,2145:2146,2112:2113,2175:2176,2118:2119,2187:2188,2179:2180};
@@ -239,7 +241,18 @@ export class CTraderGateway extends DurableObject<Env>{
 }
 export default {async fetch(req:Request,env:Env){
  if(!internalAuth(req.headers.get('Authorization')||'',env.CTRADER_GATEWAY_SECRET))return new Response('Unauthorized',{status:401});
- if(new URL(req.url).pathname==='/health')return Response.json({ready:Boolean(env.CTRADER_CLIENT_ID&&env.CTRADER_SECRET_KEY),runtime:'ctrader-json-gateway',demoTradingEnabled:env.CTRADER_DEMO_TRADING_ENABLED==='true',liveTradingEnabled:env.CTRADER_LIVE_TRADING_ENABLED==='true'});
+ if(new URL(req.url).pathname==='/health')return Response.json({ready:Boolean(env.CTRADER_CLIENT_ID&&env.CTRADER_SECRET_KEY&&env.CTRADER_GATEWAY_SECRET&&env.CTRADER_GATEWAY_SECRET.length>=32),runtime:'ctrader-json-gateway',demoTradingEnabled:env.CTRADER_DEMO_TRADING_ENABLED==='true',liveTradingEnabled:env.CTRADER_LIVE_TRADING_ENABLED==='true'});
+ const parts=new URL(req.url).pathname.split('/').filter(Boolean);
+ if(parts.length===3&&parts[0]==='bots'&&/^[a-f0-9]{64}$/.test(parts[1])&&['deploy','pause','resume','stop','status','reconcile'].includes(parts[2])){
+  const uid=req.headers.get('X-TV-UID');
+  if(!uid||uid.length>128)return Response.json({error:'Missing authenticated backend user'},{status:403});
+  if(req.method!==(parts[2]==='status'?'GET':'POST'))return new Response(null,{status:405});
+  const content=req.method==='POST'?await req.text():undefined;
+  if(content&&content.length>200000)return new Response(null,{status:413});
+  return env.BOTS.get(env.BOTS.idFromName(parts[1])).fetch(new Request('https://bot/'+parts[2],{
+   method:req.method,headers:{'X-TV-UID':uid,...(content===undefined?{}:{'Content-Type':'application/json'})},
+   ...(content===undefined?{}:{body:content})}));
+ }
  if(!['/rpc','/quote','/trade','/reconcile'].includes(new URL(req.url).pathname)||req.method!=='POST')return Response.json({error:'Unknown route'},{status:404});
  const input=await req.text();if(input.length>35000)return new Response('Too large',{status:413});
  let requested:any;try{requested=JSON.parse(input)}catch{return new Response('Malformed JSON',{status:400})}
