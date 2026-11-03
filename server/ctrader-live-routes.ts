@@ -24,7 +24,7 @@ export class CTraderLiveService{
  private async grant(uid:string,id:string){const raw=await this.deps.read(this.grantKey(uid,id));if(!raw)return null;
   const g=JSON.parse(raw) as Grant;if(g.uid!==uid||g.botId!==id)throw Error('cTrader grant ownership mismatch');return g}
  private runtimeReady(){return Boolean(process.env.CTRADER_GATEWAY_URL&&process.env.CTRADER_GATEWAY_SECRET&&process.env.CTRADER_GATEWAY_SECRET.length>=32)}
- private async worker(grant:Grant,action:'deploy'|'pause'|'resume'|'stop'|'status',payload?:unknown){
+ private async worker(grant:Grant,action:'deploy'|'pause'|'resume'|'stop'|'status'|'reconcile',payload?:unknown){
   if(!this.runtimeReady())throw Error('cTrader Durable Object gateway is not configured');
   const url=new URL('/bots/'+digest(grant.uid+':'+grant.accountId+':'+grant.botId)+'/'+action,process.env.CTRADER_GATEWAY_URL);
   const res=await this.request(url,{method:action==='status'?'GET':'POST',
