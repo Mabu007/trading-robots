@@ -12,7 +12,7 @@ export default {async fetch(req:Request,env:Env){
  if(!(await authorized(req.headers.get('Authorization')||'',env.PROPDAO_LIVE_INTERNAL_SECRET)))return Response.json({error:'Internal authorization required'},{status:401});
  if(new URL(req.url).pathname==='/health'&&req.method==='GET')return Response.json({ready:Boolean(env.PROPDAO_LIVE_INTERNAL_SECRET&&env.PROPDAO_LIVE_INTERNAL_SECRET.length>=32&&env.PROPDAO_LIVE_ENABLED==='true'),runtime:'propdao-durable-object',version:2});
  const parts=new URL(req.url).pathname.split('/').filter(Boolean);
- if(parts.length!==3||parts[0]!=='live'||!/^[a-f0-9]{64}$/.test(parts[1])||!['deploy','stop','status'].includes(parts[2]))return Response.json({error:'Unknown live route'},{status:404});
+ if(parts.length!==3||parts[0]!=='live'||!/^[a-f0-9]{64}$/.test(parts[1])||!['deploy','stop','status','pause','resume'].includes(parts[2]))return Response.json({error:'Unknown live route'},{status:404});
  const uid=req.headers.get('X-TV-UID');if(!uid||uid.length>128)return Response.json({error:'Missing user identity'},{status:403});
  if(req.method!==(parts[2]==='status'?'GET':'POST'))return new Response(null,{status:405});
  const body=req.method==='POST'?await req.text():undefined;
