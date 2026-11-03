@@ -111,13 +111,13 @@ describe('PropDAO live execution authorization',()=>{
   });
   const paused=await svc.pause('alice','bot-1');expect(paused).toMatchObject({running:false,paused:true});
   const status=await svc.status('alice','bot-1');expect(status.canResume).toBe(true);
-  const resumed=await svc.resume('alice','bot-1');expect(resumed).toMatchObject({running:true,paused:false});
+  const resumed=await svc.resume('alice','bot-1',{} as any);expect(resumed).toMatchObject({running:true,paused:false});
   expect(fetcher.mock.calls.some(([url])=>String(url).endsWith('/resume'))).toBe(true);
   await svc.stop('alice','bot-1');
-  await expect(svc.resume('alice','bot-1')).rejects.toThrow(/authorization has ended/);
+  await expect(svc.resume('alice','bot-1',{} as any)).rejects.toThrow(/authorization has ended/);
  });
  it('rejects pause and resume without an account-scoped grant',async()=>{
   const {svc}=setup();await expect(svc.pause('alice','bot-1')).rejects.toThrow(/No active/);
-  await expect(svc.resume('alice','bot-1')).rejects.toThrow(/authorization has ended/);
+  await expect(svc.resume('alice','bot-1',{} as any)).rejects.toThrow(/authorization has ended/);
  });
 });
