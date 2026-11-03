@@ -48,11 +48,22 @@ export class CTraderLiveService{
   if(!health.configured)return {configured:false,deployed:true,running:false,uncertain:true,accountId:g.accountId,error:health.error,events:[]};
   try{
    const worker=await this.worker(g,'status');
-   const risk=await this.deps.broker.snapshot(uid,g.accountId);
+   const [risk,history]=await Promise.all([this.deps.broker.snapshot(uid,g.accountId),this.deps.broker.reconcile(uid,g.accountId)]);
+   const positions=risk.positions.map((p:any)=>({
+    id:String(p.positionId),positionId:String(p.positionId),symbol:String(p.tradeData?.symbolId)===g.symbolId?g.symbol:'Symbol '+String(p.tradeData?.symbolId||'?'),
+    side:p.tradeData?.tradeSide===1?'BUY':p.tradeData?.tradeSide===2?'SELL':'UNKNOWN',
+    qty:Number(p.tradeData?.volume||0)/100,entry:Number(p.price||0),
+    slPrice:p.stopLoss===undefined?null:Number(p.stopLoss),tpPrice:p.takeProfit===undefined?null:Number(p.takeProfit),
+    openedAt:Number(p.tradeData?.openTimestamp||0),label:p.tradeData?.label||'',commission:Number(p.commission||0),
+    usedMargin:Number(p.usedMargin||0),protected:Number(p.stopLoss)>0&&Number(p.takeProfit)>0
+   }));
+   const closedTrades=(history.trades||[]).map((t:any)=>({...t,id:String(t.positionId),symbol:String(t.symbolId)===g.symbolId?g.symbol:'Symbol '+String(t.symbolId||'?'),
+    side:'—',qty:Number(t.filledVolume||0)/100,openedAt:Number(t.openedAt||0),closedAt:Number(t.closedAt||0)}));
    return {...worker,configured:enabled(g.environment),connected:true,deployed:true,accountId:g.accountId,
-    environment:g.environment,expiresAt:g.expiresAt,positions:risk.positions,orders:risk.orders,
+    environment:g.environment,expiresAt:g.expiresAt,positions,orders:risk.orders,closedTrades,
+    brokerIntent:history.intent,brokerBlocked:history.blocked,brokerRisk:history.ledger,
     balance:risk.balance,isLive:risk.isLive,broker:risk.broker,
-    uncertain:Boolean(worker.pendingIntent&&worker.pendingIntent.status!=='PROTECTED')};
+    uncertain:Boolean(worker.pendingIntent&&worker.pendingIntent.status!=='PROTECTED')||Boolean(history.requiresOperator)};
   }catch(e){return {configured:false,deployed:true,running:false,uncertain:true,accountId:g.accountId,
    error:e instanceof Error?e.message:'Broker status uncertain; inspect cTrader before resuming',events:[]}}
  }
@@ -92,7 +103,7 @@ export class CTraderLiveService{
   await this.deps.write(this.grantKey(uid,id),JSON.stringify(grant));
   return this.worker(grant,'deploy',grant);
  }
- async control(uid:string,id:string,action:'pause'|'resume'|'stop',req:Request){
+ async control(uid:string,id:string,action:'pause'|'resume'|'stop'|'reconcile',req:Request){
   const g=await this.grant(uid,id);if(!g)throw Error('No cTrader deployment');
   if(action==='resume'){
    if(g.revokedAt||Date.now()>=g.expiresAt||!enabled(g.environment))throw Error('cTrader trading authorization expired or disabled');
@@ -101,6 +112,18 @@ export class CTraderLiveService{
   }
   if(action==='stop')await this.deps.write(this.grantKey(uid,id),JSON.stringify({...g,revokedAt:Date.now()}));
   return this.worker(g,action);
+ }
+ async market(uid:string,id:string){
+  const g=await this.grant(uid,id);if(!g)throw Error('No authorized cTrader bot');
+  const config=parseStrategyConfig(g.code),tf=config.executionTimeframe;
+  const seconds:Record<string,number>={m1:60,m5:300,m15:900,m30:1800,h1:3600,h4:14400};
+  const period=seconds[tf];if(!period)throw Error('Unsupported live market timeframe');
+  const end=Math.floor(Date.now()/(period*1000))*period;
+  const count=Math.min(180,Math.floor(30*86400/period));
+  const data=await this.deps.broker.candles(uid,{accountId:g.accountId,asset:g.symbol,timeframe:tf,
+    from:new Date((end-count*period)*1000).toISOString(),to:new Date(end*1000).toISOString()});
+  return {source:data.source,symbol:g.symbol,timeframe:tf,updatedAt:Date.now(),candles:data.candles,
+   fresh:Boolean(data.candles.length&&end-data.candles[data.candles.length-1].time===period)};
  }
  async beforeDisconnect(uid:string){
   const prefix='ctrader-live/v1/'+stage()+'/'+Buffer.from(uid).toString('base64url')+'/';
@@ -118,7 +141,7 @@ export class CTraderLiveService{
   if(typeof uid!=='string'||!idOk(botId)||typeof grantId!=='string')throw Error('Invalid internal cTrader authorization');
   const g=await this.grant(uid,botId);
   if(!g||g.id!==grantId)throw Error('cTrader authorization mismatch');
-  if(action==='snapshot')return this.deps.broker.snapshot(uid,g.accountId);
+  if(action==='snapshot'){await this.deps.broker.reconcile(uid,g.accountId);return this.deps.broker.snapshot(uid,g.accountId)}
   if(action==='reconcile')return this.deps.broker.reconcile(uid,g.accountId);
   if(action==='candles'){
    const tf=String(payload?.timeframe||''),end=Number(payload?.end);
@@ -151,8 +174,9 @@ export function ctraderLiveRoutes(app:Express,deps:Dependencies){
   const id=String(req.params.botId);if(!idOk(id))return res.status(400).json({error:'Invalid robot ID'});
   try{return res.json(await fn(uid,id,req))}catch(e){return res.status(400).json({error:e instanceof Error?e.message:'cTrader live request failed'})}};
  app.get('/api/venues/ctrader/bots/:botId/live',route((uid,id)=>service.status(uid,id)));
+ app.get('/api/venues/ctrader/bots/:botId/live/market',route((uid,id)=>service.market(uid,id)));
  app.post('/api/venues/ctrader/bots/:botId/live',route((uid,id,req)=>req.body?.action==='deploy'?service.deploy(uid,id,req):
-   ['pause','resume','stop'].includes(req.body?.action)?service.control(uid,id,req.body.action,req):Promise.reject(Error('Unknown cTrader live action'))));
+   ['pause','resume','stop','reconcile'].includes(req.body?.action)?service.control(uid,id,req.body.action,req):Promise.reject(Error('Unknown cTrader live action'))));
  app.post('/api/internal/ctrader/provider',async(req,res)=>{
   res.setHeader('Cache-Control','no-store');
   const secret=process.env.CTRADER_GATEWAY_SECRET,header=req.header('Authorization')||'';
