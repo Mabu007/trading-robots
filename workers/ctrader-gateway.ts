@@ -111,7 +111,7 @@ export class CTraderGateway extends DurableObject<Env>{
   if(!Number.isInteger(digits)||digits<0||digits>12)throw Error('Invalid broker moneyDigits');
   const divisor=10**digits;
   const balance=Number(trader.balance)/divisor;
-  const unrealized=pnlRows.reduce((n:number,p:any)=>n+Number(p.netUnrealizedPnL)/10**Number(up.moneyDigits??digits),0);
+  const unrealized=pnlRows.reduce((n:number,p:any)=>n+Number(p.netUnrealizedPnL)/10**Number(up?.moneyDigits??digits),0);
   const margin=r.position.reduce((n:number,p:any)=>n+Number(p.usedMargin||0)/10**Number(p.moneyDigits??digits),0);
   if(![balance,unrealized,margin].every(Number.isFinite))throw Error('Broker balance, margin or unrealized P&L unavailable');
   return {trader,positions:r.position as any[],orders:r.order as any[],balance,equity:balance+unrealized,freeMargin:balance+unrealized-margin,margin};
