@@ -12,6 +12,15 @@ const memory=()=>{const map=new Map<string,string>();return {map,read:async(k:st
 const history=(storage:ReturnType<typeof memory>,fetcher:typeof fetch)=>new DwellirHistory(storage,fetcher,()=> 'test-key',()=>Date.parse('2026-11-02T00:00:00Z'));
 describe('Dwellir historical market data',()=>{
 
+ it('reads an archived GOLDUSDC week directly from R2 even without provider access',async()=>{
+  const storage=memory(),close=2025;
+  const candle={time:(start+60000)/1000,open:close,high:close+1,low:close-1,close,volume:5};
+  storage.map.set(`historical/dwellir/v1/xyz%3AGOLD/1m/${start}.json`,JSON.stringify([candle]));
+  const request=vi.fn() as unknown as typeof fetch;
+  const result=await history(storage,request).candles({asset:'xyz:GOLD',timeframe:'m1',from:new Date(start).toISOString(),to:new Date(start+WEEK).toISOString()});
+  expect(result.candles).toEqual([candle]);
+  expect(request).not.toHaveBeenCalled();
+ });
  it('uses public Hyperliquid for an uncached GOLDUSDC minute week, saves actual bars to R2, and never calls Dwellir',async()=>{
   const storage=memory(),ms=goldStart+60000;
   const fetcher=vi.fn(async(url:string,init:RequestInit)=>{
