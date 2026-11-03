@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "concurrently -k \"npm:server\" \"npm:dev:web\"",
     "dev:web": "vite --host 0.0.0.0",
-    "build": "tsc -b && vite build",
+    "build": "npm run check:runtime && npm test && tsc -b && vite build",
     "test": "vitest run --config vitest.config.ts",
     "server": "node --import tsx server/local.ts",
     "dev:all": "npm run dev",
