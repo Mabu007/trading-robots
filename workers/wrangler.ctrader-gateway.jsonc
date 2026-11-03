@@ -3,8 +3,8 @@
   "main": "ctrader-gateway.ts",
   "compatibility_date": "2026-10-01",
   "workers_dev": true,
-  "durable_objects": {"bindings":[{"name":"GATEWAYS","class_name":"CTraderGateway"}]},
-  "migrations":[{"tag":"v1","new_sqlite_classes":["CTraderGateway"]}],
-  "vars":{"CTRADER_TRADING_ENABLED":"false"},
+  "durable_objects": {"bindings":[{"name":"GATEWAYS","class_name":"CTraderGateway"},{"name":"BOTS","class_name":"CTraderLiveBot"}]},
+  "migrations":[{"tag":"v1","new_sqlite_classes":["CTraderGateway"]},{"tag":"v2","new_sqlite_classes":["CTraderLiveBot"]}],
+  "vars":{"CTRADER_TRADING_ENABLED":"false","CTRADER_DEMO_TRADING_ENABLED":"false","CTRADER_LIVE_TRADING_ENABLED":"false","CTRADER_CONTROL_URL":"https://trading-robots.vercel.app"},
   "observability":{"enabled":true}
 }
