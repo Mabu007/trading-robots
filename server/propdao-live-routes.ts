@@ -135,7 +135,7 @@ export class PropDAOLiveService{
  }
  async pause(uid:string,botId:string){
   const g=await this.grant(uid,botId);if(!g||g.revokedAt||Date.now()>=g.expiresAt)throw Error('No active PropDAO authorization');
-  const status=await this.status(uid,botId);if(status.uncertain||!status.configured)throw Error('Runtime state uncertain; cannot confirm pause');
+  const status=await this.status(uid,botId);if(status.uncertain||!status.configured||(!status.running&&!status.paused))throw Error('Only a running or already paused robot can be paused. Reauthorize stopped instances in Deploy.');
   return this.runtime(g,'pause',{});
  }
  async resume(uid:string,botId:string){
