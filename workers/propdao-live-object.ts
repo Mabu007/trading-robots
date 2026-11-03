@@ -4,13 +4,13 @@ import {evaluateStrategyInSandbox} from './strategy-sandbox';
 import {parseStrategyConfig} from '../src/strategy';
 import {TF_SECONDS} from '../shared/trading';
 type Grant={id:string;uid:string;botId:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;leverage:number;issuedAt:number;expiresAt:number};
-type Status={running:boolean;lastError?:string;lastEvaluation?:any;lastOrder?:any;lastAccount?:any;events:string[]};
+type Status={running:boolean;paused:boolean;lastError?:string;lastEvaluation?:any;lastOrder?:any;lastAccount?:any;events:string[]};
 const interval:Record<string,string>={m1:'1m',m5:'5m',m15:'15m',m30:'30m',h1:'1h',h4:'4h',d1:'1d'};
 async function hash(s:string){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s)))).map(v=>v.toString(16).padStart(2,'0')).join('')}
 export class PropDAOLiveBot extends DurableObject<any>{
  private tail:Promise<unknown>=Promise.resolve();
  private serial<T>(fn:()=>Promise<T>):Promise<T>{const next=this.tail.then(fn,fn);this.tail=next.catch(()=>{});return next}
- private async state():Promise<Status>{return {running:(await this.ctx.storage.get<boolean>('running'))===true,lastError:await this.ctx.storage.get<string>('lastError'),lastEvaluation:await this.ctx.storage.get('lastEvaluation'),lastOrder:await this.ctx.storage.get('lastOrder'),lastAccount:await this.ctx.storage.get('lastAccount'),events:(await this.ctx.storage.get<string[]>('events'))||[]};}
+ private async state():Promise<Status>{return {running:(await this.ctx.storage.get<boolean>('running'))===true,paused:(await this.ctx.storage.get<boolean>('paused'))===true,lastError:await this.ctx.storage.get<string>('lastError'),lastEvaluation:await this.ctx.storage.get('lastEvaluation'),lastOrder:await this.ctx.storage.get('lastOrder'),lastAccount:await this.ctx.storage.get('lastAccount'),events:(await this.ctx.storage.get<string[]>('events'))||[]};}
  private async record(message:string){const events=(await this.ctx.storage.get<string[]>('events'))||[];events.push(`${new Date().toISOString()} · ${message.slice(0,240)}`);await this.ctx.storage.put('events',events.slice(-100));}
  private async provider(grant:Grant,action:string,payload?:unknown){
   const origin=this.env.PROPDAO_CONTROL_URL;
@@ -62,25 +62,39 @@ export class PropDAOLiveBot extends DurableObject<any>{
    parseStrategyConfig(grant.code);
    const account=await this.provider(grant,'snapshot');
    if(!['active','funded'].includes(account.account?.status)||account.risk?.breached||account.positions?.length||account.orders?.length)throw Error('Account not ready for live trading');
-   await this.ctx.storage.put('grant',grant);await this.ctx.storage.put('running',true);await this.ctx.storage.delete('lastError');
+   await this.ctx.storage.put('grant',grant);await this.ctx.storage.put('running',true);await this.ctx.storage.put('paused',false);await this.ctx.storage.delete('lastError');
    await this.record(`Deployed ${grant.symbol} · risk $${grant.riskUsd} · simulated funds`);
    await this.schedule();return Response.json({running:true,events:(await this.state()).events});
   }
   if(!existing||existing.uid!==req.headers.get('X-TV-UID'))throw Error('No authorized deployment');
-  if(action==='stop'){await this.ctx.storage.put('running',false);await this.ctx.storage.deleteAlarm();await this.record('Stopped automatic entries. Existing positions remain with PropDAO.');return Response.json({running:false,events:(await this.state()).events})}
+  if(action==='stop'){await this.ctx.storage.put('running',false);await this.ctx.storage.put('paused',false);await this.ctx.storage.deleteAlarm();await this.record('Stopped automatic entries. Existing positions remain with PropDAO.');return Response.json({running:false,events:(await this.state()).events})}
+  if(action==='pause'){await this.ctx.storage.put('running',false);await this.ctx.storage.put('paused',true);await this.ctx.storage.deleteAlarm();await this.record('Paused automatic entries. Existing positions remain with PropDAO.');return Response.json({running:false,paused:true,events:(await this.state()).events})}
+  if(action==='resume'){
+   if(this.env.PROPDAO_LIVE_ENABLED!=='true'||!this.env.PROPDAO_LIVE_INTERNAL_SECRET)throw Error('Live runtime is disabled');
+   if(Date.now()>=existing.expiresAt)throw Error('Deployment authorization expired. Deploy with new authorization.');
+   if(await this.ctx.storage.get('pendingIntent'))throw Error('An unresolved order blocks resume. Reconcile the position first.');
+   if(await this.ctx.storage.get<boolean>('running'))return Response.json({running:true,paused:false,events:(await this.state()).events});
+   if((await this.ctx.storage.get<boolean>('paused'))!==true)throw Error('Robot was stopped or halted; deploy with new authorization.');
+   const account=await this.provider(existing,'snapshot');
+   if(!['active','funded'].includes(account.account?.status)||account.risk?.breached||!Number.isFinite(account.risk?.roomUsd)||account.risk.roomUsd<=existing.riskUsd*3||account.positions?.length||account.orders?.length)throw Error('PropDAO account is not clear for resume. Check risk room, positions and open orders.');
+   parseStrategyConfig(existing.code);
+   await this.ctx.storage.put('paused',false);await this.ctx.storage.put('running',true);await this.ctx.storage.delete('lastError');
+   await this.record('Resumed authorized robot. Live market and risk checks will run on the next candle.');await this.schedule();
+   return Response.json({running:true,paused:false,events:(await this.state()).events});
+  }
   throw Error('Unknown live action');
  }catch(e){return Response.json({error:e instanceof Error?e.message:'Live runtime failed'},{status:400})}})}
  async alarm(){return this.serial(async()=>{
   const grant=await this.ctx.storage.get<Grant>('grant');if(!grant||!(await this.ctx.storage.get<boolean>('running')))return;
   try{
-   if(Date.now()>=grant.expiresAt){await this.ctx.storage.put('running',false);await this.record('Authorization expired. New entries stopped.');return;}
+   if(Date.now()>=grant.expiresAt){await this.ctx.storage.put('running',false);await this.ctx.storage.put('paused',false);await this.record('Authorization expired. New entries stopped.');return;}
    if(this.env.PROPDAO_LIVE_ENABLED!=='true')throw Error('Worker operator disabled entries');
    const config=parseStrategyConfig(grant.code),period=TF_SECONDS[config.executionTimeframe],close=Math.floor((Date.now()/1000-5)/period)*period,marker=`evaluation:${grant.id}`;
    if((await this.ctx.storage.get<number>(marker)||0)>=close)return;
    if(await this.ctx.storage.get('pendingIntent'))throw Error('Unresolved order intent. Reconcile the PropDAO account before resuming.');
    const account=await this.provider(grant,'snapshot');
    await this.ctx.storage.put('lastAccount',{time:Date.now(),equity:account.risk?.equity,roomUsd:account.risk?.roomUsd,positions:account.positions?.length??0,orders:account.orders?.length??0,accountStatus:account.account?.status});
-   if(account.risk?.breached||!['active','funded'].includes(account.account?.status)){await this.ctx.storage.put('running',false);await this.record('Account ineligible or risk breached. Trading stopped.');return}
+   if(account.risk?.breached||!['active','funded'].includes(account.account?.status)){await this.ctx.storage.put('running',false);await this.ctx.storage.put('paused',false);await this.record('Account ineligible or risk breached. Trading stopped.');return}
    if(account.positions?.length||account.orders?.length){await this.ctx.storage.put(marker,close);await this.record('Existing position/order; awaiting reconciliation and skipping entry.');return}
    const data:Record<string,any[]>={};
    for(const tf of config.timeframes)data[tf]=await this.candles(grant,tf,close);
@@ -113,7 +127,7 @@ export class PropDAOLiveBot extends DurableObject<any>{
     await this.ctx.storage.put('lastError','Market data paused · '+error);
     if(previous!=='Market data paused · '+error)await this.record('Awaiting valid market data · '+error);
    }else{
-    await this.ctx.storage.put('running',false);await this.ctx.storage.put('lastError',error);
+    await this.ctx.storage.put('running',false);await this.ctx.storage.put('paused',false);await this.ctx.storage.put('lastError',error);
     await this.record('Execution halted · '+error);
    }
   }finally{await this.schedule()}
