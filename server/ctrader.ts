@@ -1,5 +1,6 @@
 import {createCipheriv,createDecipheriv,createHash,hkdfSync,randomBytes} from 'node:crypto';
 import type {Express,Request,Response} from 'express';
+import {commissionPerUnitDeposit} from '../shared/ctrader-commission.ts';
 type R2={read:(path:string)=>Promise<string|null>;write:(path:string,data:string)=>Promise<void>;remove:(path:string)=>Promise<void>};
 type Account={ctidTraderAccountId:string;isLive:boolean;brokerTitleShort?:string;traderLogin?:string};
 type Stored={accessToken:string;refreshToken:string;expiresAt:number;scope:'accounts'|'trading';accounts:Account[]};
@@ -167,9 +168,25 @@ export class CTraderService{
   const assets=await this.rpc(spec.s,spec.environment,2112,{ctidTraderAccountId:id},id);
   const deposit=Array.isArray(assets.asset)?assets.asset.find((a:any)=>String(a.assetId)===depositAssetId):null;
   const depositCurrency=String(deposit?.name||deposit?.displayName||deposit?.symbol||'').toUpperCase();
+  const usd=Array.isArray(assets.asset)?assets.asset.find((a:any)=>String(a.name||a.displayName||a.symbol||'').toUpperCase()==='USD'):null;
+  const usdId=String(usd?.assetId||'');
+  const baseId=String(symbol.baseAssetId||'');
+  if(!usdId||!baseId)throw Error('Cannot determine broker USD/base currency identities');
+  const conversionRate=async(first:string,last:string)=>{
+   if(first===last)return 1;
+   const output=await this.brokerCall(uid,id,'conversion',{firstAssetId:first,lastAssetId:last});
+   const rate=Number(output.rate);if(!Number.isFinite(rate)||rate<=0)throw Error('Broker FX conversion unavailable');return rate;
+  };
+  const [usdToDeposit,baseToUsd]=await Promise.all([conversionRate(usdId,depositAssetId),conversionRate(baseId,usdId)]);
+  const roundTripCommissionPerUnit=commissionPerUnitDeposit({
+   commissionType:Number(meta.commissionType??0),preciseTradingCommissionRate:Number(meta.preciseTradingCommissionRate??0),
+   preciseMinCommission:Number(meta.preciseMinCommission??0),minCommissionAsset:String(meta.minCommissionAsset||''),
+   minCommissionType:Number(meta.minCommissionType??0),lotSize:Number(meta.lotSize),minVolume:Number(meta.minVolume),
+   executionPrice:Number(quote.ask),quoteToDeposit:Number(conversion.rate),usdToDeposit,baseToUsd
+  });
   if(!/^[A-Z]{3}$/.test(depositCurrency))throw Error('Cannot identify broker deposit currency');
   return {accountId:id,asset:name,symbolId:light.symbolId,depositCurrency,
-    depositAssetId,quoteAssetId,quoteToDeposit:Number(conversion.rate),
+    depositAssetId,quoteAssetId,quoteToDeposit:Number(conversion.rate),roundTripCommissionPerUnit,usdToDeposit,
     conversionTime:conversion.quoteTime,conversionType:quoteAssetId===depositAssetId?'identity':'current-market',
     balance:account.balance,bid:Number(quote.bid),ask:Number(quote.ask),
     lotSize:Number(meta.lotSize),minVolume:Number(meta.minVolume),
