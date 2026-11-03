@@ -1,5 +1,6 @@
 import {DurableObject} from 'cloudflare:workers';
 import {computeCTraderRisk,cTraderProtectionValid,type CTraderRiskInput} from '../shared/ctrader-risk';
+import {commissionPerUnitDeposit} from '../shared/ctrader-commission';
 import {CTraderLiveBot} from './ctrader-live-object';
 export {CTraderLiveBot};
 
@@ -149,6 +150,29 @@ export class CTraderGateway extends DurableObject<Env>{
   if(!Number.isInteger(Number(meta.minVolume))||!Number.isInteger(Number(meta.stepVolume))||!Number.isInteger(Number(meta.maxVolume)))throw Error('Incomplete symbol volume specifications');
   const q=await this.quote(accountId,plan.symbolId,accessToken);
   const currency=await this.currencyConversion(accountId,accessToken,String(light.quoteAssetId||''),String(state.trader.depositAssetId||''));
+  const quoteAssetId=String(light.quoteAssetId||''),baseAssetId=String(light.baseAssetId||'');
+  const assets=await this.send(2112,{ctidTraderAccountId:accountId},2113);
+  const usd=(assets.payload?.asset as any[]|undefined)?.find(x=>String(x.name||x.displayName||'').toUpperCase()==='USD');
+  const usdId=String(usd?.assetId||'');
+  if(!quoteAssetId||!baseAssetId||!usdId)throw Error('Broker symbol or USD conversion asset unavailable');
+  const usdToDeposit=await this.currencyConversion(accountId,accessToken,usdId,String(state.trader.depositAssetId||''));
+  const baseToUsd=await this.currencyConversion(accountId,accessToken,baseAssetId,usdId);
+  const fee=commissionPerUnitDeposit({commissionType:Number(meta.commissionType??0),
+   preciseTradingCommissionRate:Number(meta.preciseTradingCommissionRate??0),
+   preciseMinCommission:Number(meta.preciseMinCommission??0),
+   minCommissionAsset:String(meta.minCommissionAsset||''),
+   minCommissionType:Number(meta.minCommissionType??0),
+   lotSize:Number(meta.lotSize),minVolume:Number(meta.minVolume),
+   executionPrice:plan.side==='BUY'?q.ask:q.bid,quoteToDeposit:currency,usdToDeposit,baseToUsd});
+  const relativeSL=Math.round(Math.abs((plan.side==='BUY'?q.ask:q.bid)-plan.stop)*1e5);
+  const relativeTP=Math.round(Math.abs((plan.side==='BUY'?q.ask:q.bid)-plan.target)*1e5);
+  if(!Number.isInteger(relativeSL)||!Number.isInteger(relativeTP)||relativeSL<=0||relativeTP<=0)throw Error('Invalid cTrader relative protective distances');
+  const symbolDistance=Number(meta.distanceSetIn),minSL=Number(meta.slDistance||0),minTP=Number(meta.tpDistance||0);
+  const floorSL=symbolDistance===2?(q.ask+q.bid)/2*minSL/10000:minSL/10**Number(meta.digits||5);
+  const floorTP=symbolDistance===2?(q.ask+q.bid)/2*minTP/10000:minTP/10**Number(meta.digits||5);
+  if((Number.isFinite(floorSL)&&Math.abs((plan.side==='BUY'?q.bid:q.ask)-plan.stop)<floorSL)||
+     (Number.isFinite(floorTP)&&Math.abs((plan.side==='BUY'?q.bid:q.ask)-plan.target)<floorTP))throw Error('Stop/target distances violate broker minimum');
+
   const day=new Date().toISOString().slice(0,10),ledgerKey='risk:'+accountId;
   const previous=await this.ctx.storage.get<any>(ledgerKey);
   const ledger=previous&&previous.day===day?previous:{day,dayStartEquity:state.equity,peakEquity:state.equity};
@@ -160,7 +184,7 @@ export class CTraderGateway extends DurableObject<Env>{
    maxDrawdownPercent:Math.min(5,Number(plan.maxDrawdownPercent||5)),peakEquity:ledger.peakEquity,
    maxSpreadPercent:Math.min(0.25,Number(plan.maxSpreadPercent||0.15)),minVolume:Number(meta.minVolume),
    maxVolume:Number(meta.maxVolume),stepVolume:Number(meta.stepVolume),maxSlippagePrice:plan.maxSlippagePrice,
-   roundTripCommissionPerUnit:Number(plan.roundTripCommissionPerUnit||0),
+   roundTripCommissionPerUnit:Math.max(fee,Number(plan.roundTripCommissionPerUnit||0)),
    openPositions:state.positions.length,pendingOrders:state.orders.length,maxPositions:1};
   const verdict=computeCTraderRisk(risk);
   if(!verdict.ok)throw Error(verdict.reason);
@@ -169,7 +193,7 @@ export class CTraderGateway extends DurableObject<Env>{
   if(!m)throw Error('Broker expected-margin response did not match order volume');
   const used=Number(plan.side==='BUY'?m.buyMargin:m.sellMargin)/10**Number(expected.payload?.moneyDigits??state.trader.moneyDigits);
   if(!Number.isFinite(used)||used<=0||used>state.freeMargin*0.7)throw Error('Insufficient free margin after safety reserve');
-  const entry=verdict.referenceEntry,slDistance=Math.round(Math.abs(entry-plan.stop)*100000),tpDistance=Math.round(Math.abs(entry-plan.target)*100000);
+  const entry=verdict.referenceEntry,slDistance=relativeSL,tpDistance=relativeTP;
   if(slDistance<=0||tpDistance<=0)throw Error('Invalid broker relative protection distances');
   const intent={clientOrderId:plan.clientOrderId,symbolId:plan.symbolId,stop:plan.stop,target:plan.target,side:plan.side,volume:verdict.volume,
    createdAt:Date.now(),status:'SUBMITTING',plannedRisk:verdict.riskDeposit,digits:Number(meta.digits)};
