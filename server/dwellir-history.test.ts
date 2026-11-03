@@ -9,6 +9,19 @@ const bar=(time:number,close='101')=>({s:'BTC',i:'5m',t:time,T:time+299999,o:'10
 const memory=()=>{const map=new Map<string,string>();return {map,read:async(k:string)=>map.get(k)??null,write:async(k:string,v:string)=>{map.set(k,v);}}};
 const history=(storage:ReturnType<typeof memory>,fetcher:typeof fetch)=>new DwellirHistory(storage,fetcher,()=> 'test-key',()=>Date.parse('2026-11-02T00:00:00Z'));
 describe('Dwellir historical market data',()=>{
+ it('caches completed GOLDUSDC M1 partial archive weeks without refetching Dwellir',async()=>{
+  const storage=memory();
+  const partialEnd=start+3*86400000;
+  const bar1={...bar(t),s:'xyz:GOLD',i:'1m',t:start+60000,T:start+119999};
+  const request=vi.fn(async()=>Response.json({data:[bar1],hasMore:false})) as unknown as typeof fetch;
+  const input={asset:'xyz:GOLD',timeframe:'m1',from:new Date(start+60000).toISOString(),to:new Date(partialEnd).toISOString()};
+  const result=await history(storage,request).candles(input);
+  expect(result.candles).toHaveLength(1);
+  expect(result.candles[0].time).toBe(bar1.t/1000);
+  expect([...storage.map.keys()]).toEqual([`historical/dwellir/v1/xyz%3AGOLD/1m/${start}-${partialEnd}.json`]);
+  await history(storage,request).candles(input);
+  expect(request).toHaveBeenCalledTimes(1);
+ });
  it('paginates, validates, persists a completed week and reuses the R2 cache',async()=>{
   const storage=memory();
   const request=vi.fn(async(url:string)=>{
