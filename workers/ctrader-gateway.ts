@@ -238,7 +238,10 @@ export class CTraderGateway extends DurableObject<Env>{
    await this.ctx.storage.put(intentKey,{...intent,status:'PROTECTED',positionId:String(filled.positionId),actualEntry:Number(filled.price),filledVolume:Number(filled.tradeData?.volume),confirmedAt:Date.now()});
    return {status:'PROTECTED_FILL',filled:true,protected:true,positionId:String(filled.positionId),volume:Number(filled.tradeData?.volume),actualEntry:Number(filled.price),plannedRisk:verdict.riskDeposit,clientOrderId:plan.clientOrderId};
   }catch(e){
-   await this.ctx.storage.put(intentKey,{...intent,status:'UNCERTAIN',error:e instanceof Error?e.message:'Uncertain execution',updatedAt:Date.now()});
+   const previous=await this.ctx.storage.get<any>(intentKey);
+   await this.ctx.storage.put(intentKey,{...(previous||intent),
+    status:previous?.status==='EMERGENCY_CLOSE_ATTEMPTED'?'EMERGENCY_CLOSE_ATTEMPTED':'UNCERTAIN',
+    error:e instanceof Error?e.message:'Uncertain execution',updatedAt:Date.now()});
    throw Error('Execution uncertain, account locked: '+(e instanceof Error?e.message:'unknown error'));
   }
  }
