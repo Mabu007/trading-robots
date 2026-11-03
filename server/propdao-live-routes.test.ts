@@ -95,4 +95,29 @@ describe('PropDAO live execution authorization',()=>{
   expect(market.candles[0].close).toBe(101);
   await expect(svc.market('bob','bot-1')).rejects.toThrow(/No PropDAO deployment/);
  });
+ it('permits pause/resume only with an unrevoked authorized grant and checked account',async()=>{
+  vi.stubEnv('PROPDAO_LIVE_ENABLED','true');vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
+  const {svc,fetcher,saved}=setup();
+  await svc.deploy('alice','bot-1',{body:{accountId:'prop-1',riskUsd:2,leverage:1,confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'}} as any);
+  const grant=JSON.parse([...saved.values()][0]);
+  fetcher.mockImplementation(async(url:string)=>{
+   const path=String(url);
+   if(path.endsWith('/health'))return Response.json({ready:true});
+   if(path.endsWith('/status'))return Response.json({grant:{id:grant.id},running:false,paused:true,events:[],pendingIntent:null});
+   if(path.endsWith('/pause'))return Response.json({running:false,paused:true});
+   if(path.endsWith('/resume'))return Response.json({running:true,paused:false});
+   if(path.endsWith('/stop'))return Response.json({running:false});
+   return Response.json({error:'Unknown'},{status:404});
+  });
+  const paused=await svc.pause('alice','bot-1');expect(paused).toMatchObject({running:false,paused:true});
+  const status=await svc.status('alice','bot-1');expect(status.canResume).toBe(true);
+  const resumed=await svc.resume('alice','bot-1');expect(resumed).toMatchObject({running:true,paused:false});
+  expect(fetcher.mock.calls.some(([url])=>String(url).endsWith('/resume'))).toBe(true);
+  await svc.stop('alice','bot-1');
+  await expect(svc.resume('alice','bot-1')).rejects.toThrow(/authorization has ended/);
+ });
+ it('rejects pause and resume without an account-scoped grant',async()=>{
+  const {svc}=setup();await expect(svc.pause('alice','bot-1')).rejects.toThrow(/No active/);
+  await expect(svc.resume('alice','bot-1')).rejects.toThrow(/authorization has ended/);
+ });
 });
