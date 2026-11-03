@@ -1,0 +1,10 @@
+{
+  "name": "trading-vibes-ctrader-gateway",
+  "main": "ctrader-gateway.ts",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "durable_objects": {"bindings":[{"name":"GATEWAYS","class_name":"CTraderGateway"}]},
+  "migrations":[{"tag":"v1","new_sqlite_classes":["CTraderGateway"]}],
+  "vars":{"CTRADER_TRADING_ENABLED":"false"},
+  "observability":{"enabled":true}
+}
