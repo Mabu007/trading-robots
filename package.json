@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "concurrently -k \"npm:server\" \"npm:dev:web\"",
     "dev:web": "vite --host 0.0.0.0",
-    "build": "npm run check:runtime && npm test && tsc -b && vite build",
+    "build": "tsc -b && vite build",
     "test": "vitest run --config vitest.config.ts",
     "server": "node --import tsx server/local.ts",
     "dev:all": "npm run dev",
@@ -16,7 +16,9 @@
     "test:valr-live": "node scripts/test-valr-live.mjs",
     "test:valr-live-runtime": "node scripts/test-valr-live-runtime.mjs",
     "worker:valr:live:build": "wrangler deploy --dry-run --config workers/wrangler.valr-live.jsonc",
-    "worker:propdao:live:build": "wrangler deploy --dry-run --config workers/wrangler.propdao-live.jsonc"
+    "worker:propdao:live:build": "wrangler deploy --dry-run --config workers/wrangler.propdao-live.jsonc",
+    "check:ctrader": "npm run check:runtime && npm test && npm run build",
+    "worker:ctrader:build": "wrangler deploy --dry-run --config workers/wrangler.ctrader-gateway.jsonc"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1156.0",
