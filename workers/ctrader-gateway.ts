@@ -45,7 +45,7 @@ export class CTraderGateway extends DurableObject<Env>{
       const p=reply.payload,account=String(p.ctidTraderAccountId||''),symbol=String(p.symbolId||'');
       const k=account+':'+symbol,previous=this.spots.get(k);
       const bid=Number(p.bid)/100000||previous?.bid||0,ask=Number(p.ask)/100000||previous?.ask||0;
-      const when=Number(p.timestamp||Date.now());
+      const rawTime=Number(p.timestamp||Date.now());const when=rawTime<1e12?rawTime*1000:rawTime;
       if(bid>0&&ask>=bid&&Number.isFinite(when))this.spots.set(k,{bid,ask,receivedAt:Date.now(),timestamp:when});
       return;
     }
@@ -172,7 +172,7 @@ export class CTraderGateway extends DurableObject<Env>{
   const entry=verdict.referenceEntry,slDistance=Math.round(Math.abs(entry-plan.stop)*100000),tpDistance=Math.round(Math.abs(entry-plan.target)*100000);
   if(slDistance<=0||tpDistance<=0)throw Error('Invalid broker relative protection distances');
   const intent={clientOrderId:plan.clientOrderId,symbolId:plan.symbolId,stop:plan.stop,target:plan.target,side:plan.side,volume:verdict.volume,
-   createdAt:Date.now(),status:'SUBMITTING',plannedRisk:verdict.riskDeposit};
+   createdAt:Date.now(),status:'SUBMITTING',plannedRisk:verdict.riskDeposit,digits:Number(meta.digits)};
   await this.ctx.storage.put(intentKey,intent);
   const payload={ctidTraderAccountId:accountId,symbolId:plan.symbolId,orderType:1,tradeSide:plan.side==='BUY'?1:2,volume:verdict.volume,
    relativeStopLoss:slDistance,relativeTakeProfit:tpDistance,clientOrderId:plan.clientOrderId,label:plan.clientOrderId,comment:'Trading Vibes'};
@@ -206,14 +206,40 @@ export class CTraderGateway extends DurableObject<Env>{
  }
  private async reconcileIntent(accountId:string,token:string){
   const key='intent:'+accountId,intent=await this.ctx.storage.get<any>(key),state=await this.brokerState(accountId,token);
-  if(!intent)return {blocked:false,positions:state.positions.length,orders:state.orders.length};
+  if(!intent)return {blocked:false,positions:state.positions.length,orders:state.orders.length,trades:((await this.ctx.storage.get<any[]>('trades:'+accountId))||[]).slice(-50)};
   const linked=state.positions.filter(p=>p.tradeData?.label===intent.clientOrderId);
   const resting=state.orders.filter(o=>o.clientOrderId===intent.clientOrderId);
-  if(linked.length!==1||resting.length||!cTraderProtectionValid(linked[0],{side:intent.side,stop:intent.stop,target:intent.target,digits:5,volume:intent.volume,symbolId:intent.symbolId})){
-   return {blocked:true,intent,positions:state.positions.length,orders:state.orders.length,requiresOperator:true};
+  const tradesKey='trades:'+accountId;
+  if(intent.status==='PROTECTED'&&linked.length===0&&resting.length===0&&state.positions.length===0&&state.orders.length===0&&/^[0-9]+$/.test(String(intent.positionId||''))){
+   const response=await this.send(2179,{ctidTraderAccountId:accountId,positionId:intent.positionId,
+    fromTimestamp:intent.createdAt-60000,toTimestamp:Date.now()},2180);
+   if(response.payload?.hasMore===true||!Array.isArray(response.payload?.deal))throw Error('Closed broker deals not fully available. Entry remains locked.');
+   const deals=response.payload.deal as any[],closing=deals.filter(d=>d.closePositionDetail&&Number(d.dealStatus)===2);
+   if(!closing.length)throw Error('Broker has not confirmed a completed closing deal. Entry remains locked.');
+   const realized=closing.reduce((total,d)=>{
+    const c=d.closePositionDetail,digits=Number(c.moneyDigits??d.moneyDigits??state.trader.moneyDigits);
+    const value=(Number(c.grossProfit||0)+Number(c.swap||0)+Number(c.commission||0)-Number(c.pnlConversionFee||0))/10**digits;
+    if(!Number.isFinite(value))throw Error('Broker closing monetary data invalid');return total+value;
+   },0);
+   const old=(await this.ctx.storage.get<any[]>(tradesKey))||[];
+   const completed={clientOrderId:intent.clientOrderId,positionId:intent.positionId,symbolId:intent.symbolId,
+    filledVolume:intent.filledVolume,entry:intent.actualEntry,exit:closing.at(-1)?.executionPrice??null,
+    pnl:realized,fee:closing.reduce((n,d)=>n+Math.abs(Number(d.commission||0))/10**Number(d.moneyDigits??state.trader.moneyDigits),0),
+    openedAt:intent.createdAt,closedAt:Math.max(...closing.map(d=>Number(d.executionTimestamp))),deals:closing.length,
+    reason:'Broker-confirmed closing deals'};
+   await this.ctx.storage.put(tradesKey,[...old,completed].slice(-100));
+   await this.ctx.storage.delete(key);
+   return {blocked:false,closedTrade:completed,trades:[...old,completed].slice(-50),positions:0,orders:0};
   }
-  await this.ctx.storage.put(key,{...intent,status:'PROTECTED',positionId:String(linked[0].positionId),confirmedAt:Date.now()});
-  return {blocked:true,intent:{...intent,status:'PROTECTED'},positions:state.positions.length,orders:state.orders.length};
+  if(linked.length!==1||resting.length||!cTraderProtectionValid(linked[0],{side:intent.side,stop:intent.stop,target:intent.target,
+    digits:Number(intent.digits??5),volume:intent.volume,symbolId:intent.symbolId})){
+   return {blocked:true,intent,positions:state.positions.length,orders:state.orders.length,requiresOperator:true,
+    trades:((await this.ctx.storage.get<any[]>(tradesKey))||[]).slice(-50)};
+  }
+  const confirmed={...intent,status:'PROTECTED',positionId:String(linked[0].positionId),confirmedAt:Date.now()};
+  await this.ctx.storage.put(key,confirmed);
+  return {blocked:true,intent:confirmed,positions:state.positions.length,orders:state.orders.length,
+   trades:((await this.ctx.storage.get<any[]>(tradesKey))||[]).slice(-50)};
  }
 
  async fetch(req:Request){
