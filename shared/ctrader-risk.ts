@@ -37,7 +37,7 @@ export function computeCTraderRisk(x:CTraderRiskInput):CTraderRiskResult{
  return {ok:true,volume,units:volume/100,riskDeposit:volume/100*lossPerUnit,referenceEntry:entry,lossPerUnit};
 }
 export function cTraderProtectionValid(p:any,expected:{side:'BUY'|'SELL';stop:number;target:number;digits:number;volume:number;symbolId:string}):boolean{
- if(!p||String(p.tradeData?.symbolId)!==expected.symbolId||Number(p.tradeData?.volume)<=0)return false;
+ if(!p||String(p.tradeData?.symbolId)!==expected.symbolId||!(Number(p.tradeData?.volume)>0)||Number(p.tradeData?.volume)>expected.volume||Number(p.tradeData?.tradeSide)!==(expected.side==='BUY'?1:2)||!(Number(p.price)>0))return false;
  const tick=10**(-Math.max(0,Math.min(10,expected.digits)));
  return Number.isFinite(Number(p.stopLoss))&&Number.isFinite(Number(p.takeProfit))&&
  Math.abs(Number(p.stopLoss)-expected.stop)<=tick*1.01&&
