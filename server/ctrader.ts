@@ -91,7 +91,7 @@ export class CTraderService{
  }
  private async symbol(uid:string,accountId:unknown,name:unknown){
   if(typeof name!=='string'||!SYMBOL.test(name))throw Error('Select a valid broker market');
-  const scope=await this.owned(uid,accountId),market=await this.markets(uid,accountId),found=market.markets.find(x=>x.symbol===name);
+  const scope=await this.owned(uid,accountId),market=await this.markets(uid,accountId),found=market.markets.find((x:{symbol:string;symbolId:string})=>x.symbol===name);
   if(!found)throw Error('Market is not available on your broker account');
   const full=await this.rpc(scope.s,scope.environment,2116,{ctidTraderAccountId:scope.a.ctidTraderAccountId,symbolId:[found.symbolId]},scope.a.ctidTraderAccountId);
   const meta=Array.isArray(full.symbol)?full.symbol.find((x:any)=>String(x.symbolId)===found.symbolId):null;
