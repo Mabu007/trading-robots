@@ -18,7 +18,8 @@
     "worker:valr:live:build": "wrangler deploy --dry-run --config workers/wrangler.valr-live.jsonc",
     "worker:propdao:live:build": "wrangler deploy --dry-run --config workers/wrangler.propdao-live.jsonc",
     "check:ctrader": "npm run check:runtime && npm test && npm run build",
-    "worker:ctrader:build": "wrangler deploy --dry-run --config workers/wrangler.ctrader-gateway.jsonc"
+    "worker:ctrader:build": "wrangler deploy --dry-run --config workers/wrangler.ctrader-gateway.jsonc",
+    "worker:ctrader:deploy": "wrangler deploy --config workers/wrangler.ctrader-gateway.jsonc"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1156.0",
