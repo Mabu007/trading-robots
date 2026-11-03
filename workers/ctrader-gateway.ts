@@ -28,7 +28,7 @@ export class CTraderGateway extends DurableObject<Env>{
  private environment:'demo'|'live'='demo';
  private failPending(message:string){for(const [id,p] of this.waiters){clearTimeout(p.timer);p.reject(new Error(message));this.waiters.delete(id)}this.authenticated.clear();this.authenticating.clear();this.subscriptions.clear();this.spots.clear();}
  private close(message:string){if(this.heartbeat){clearInterval(this.heartbeat);this.heartbeat=null}this.failPending(message);this.ws=null;this.connecting=null;}
- private async connect(environment:'demo'|'live'){
+ private async connectBroker(environment:'demo'|'live'){
   if(this.ws?.readyState===WebSocket.OPEN)return;
   if(this.connecting)return this.connecting;
   this.environment=environment;
@@ -289,7 +289,7 @@ export class CTraderGateway extends DurableObject<Env>{
    if(mode!=='rpc'&&mode!=='quote'&&mode!=='conversion'&&mode!=='trade'&&mode!=='reconcile')throw Error('Unknown cTrader gateway operation');
    if((mode!=='rpc'||payloadType!==2149)&&!/^[0-9]{1,24}$/.test(String(accountId)))throw Error('Invalid account ID');
    if(this.ws&&this.environment!==environment)throw Error('Incorrect gateway environment');
-   await this.connect(environment);
+   await this.connectBroker(environment);
    if(mode==='quote'){const value=await this.quote(String(accountId),String(payload?.symbolId),accessToken);return Response.json({payload:value})}
    if(mode==='conversion'){const rate=await this.currencyConversion(String(accountId),accessToken,String(payload?.firstAssetId),String(payload?.lastAssetId));return Response.json({payload:{rate,quoteTime:Date.now()}})}
    if(mode==='trade')return Response.json({payload:await this.serial(()=>this.execute({environment,accountId:String(accountId),accessToken,plan}))});
