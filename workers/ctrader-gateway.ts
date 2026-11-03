@@ -16,6 +16,7 @@ export class CTraderGateway extends DurableObject<Env>{
  private waiters=new Map<string,{resolve:(v:Reply)=>void;reject:(e:Error)=>void;timer:ReturnType<typeof setTimeout>}>();
  private heartbeat:ReturnType<typeof setInterval>|null=null;
  private sequence=0;
+ private nextHistoryAt=0;
  private environment:'demo'|'live'='demo';
  private failPending(message:string){for(const [id,p] of this.waiters){clearTimeout(p.timer);p.reject(new Error(message));this.waiters.delete(id)}this.authenticated.clear();this.authenticating.clear();}
  private close(message:string){if(this.heartbeat){clearInterval(this.heartbeat);this.heartbeat=null}this.failPending(message);this.ws=null;this.connecting=null;}
@@ -76,6 +77,7 @@ export class CTraderGateway extends DurableObject<Env>{
    await this.connect(environment);
    if(payloadType!==2149)await this.account(String(accountId),accessToken);
    const params=payloadType===2149?{accessToken}:payload;
+   if(payloadType===2137||payloadType===2145){const now=Date.now(),delay=Math.max(0,this.nextHistoryAt-now);this.nextHistoryAt=Math.max(now,this.nextHistoryAt)+250;if(delay)await new Promise<void>(resolve=>setTimeout(resolve,delay));}
    const reply=await this.send(payloadType,params,RESPONSES[payloadType]);
    return Response.json({payload:reply.payload||{}},{headers:{'Cache-Control':'no-store'}});
   }catch(e){return Response.json({error:e instanceof Error?e.message:'cTrader gateway request failed'},{status:502})}
