@@ -87,9 +87,9 @@ app.get('/api/venues/hyperliquid/markets', async (_req,res) => {
 });
 app.post('/api/venues/propdao/candles', async (req,res) => {
  try {
-  // GOLDUSDC M1 is an immutable R2-backed historical dataset. Avoid live market
-  // discovery on reads so an upstream metadata outage cannot block cached history.
-  if(req.body?.asset==='GOLDUSDC'&&req.body?.timeframe==='m1'){
+  // GOLDUSDC history is R2-backed for all supported timeframes. Skip live
+  // market discovery so upstream metadata outages cannot block cached candles.
+  if(req.body?.asset==='GOLDUSDC'){
    const data=await dwellirHistory.candles({...req.body,asset:'xyz:GOLD'});
    if(!data.candles.length)return res.status(422).json({error:'No GOLDUSDC candles are stored in R2 or available from public Hyperliquid for these dates. Try a more recent range; historical gaps are never fabricated.'});
    return res.json({...data,asset:'GOLDUSDC',source:'R2 archive / public Hyperliquid reference (xyz:GOLD) for PropDAO; fills may differ'});
