@@ -82,7 +82,7 @@ export class CTraderLiveService{
   const bot=await this.deps.bot(uid,id,req);
   if(!bot||bot.venue!=='ctrader')throw Error('Save a cTrader bot before deploying');
   const config=parseStrategyConfig(bot.code);
-  if(config.timeframes.some(tf=>!['m1','m5','m15','m30','h1','h4'].includes(tf)))throw Error('Unsupported cTrader live timeframe');
+  if(config.timeframes.some((tf:string)=>!['m1','m5','m15','m30','h1','h4'].includes(tf)))throw Error('Unsupported cTrader live timeframe');
   const details=await this.deps.broker.list(uid),account=details.accounts.find(x=>x.ctidTraderAccountId===accountId);
   if(!account||details.scope!=='trading')throw Error('Authorize this broker account with full cTrader trading scope');
   const environment=account.isLive?'live':'demo';
