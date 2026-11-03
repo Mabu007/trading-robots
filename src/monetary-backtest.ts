@@ -13,7 +13,7 @@ export type MonetaryResult = {
   startingBalance: number; endingBalance: number; netProfit: number; returnPercent: number;
   maxDrawdown: number; maxDrawdownPercent: number; trades: MonetaryTrade[];
   rejected: { time: number; reason: string }[]; equity: { time: number; value: number; tradeId?: number }[];
-  assumptions: MonetaryAssumptions; riskPercent: number;
+  assumptions: MonetaryAssumptions; riskPercent: number; currency?:string;source?:string;
 };
 
 export function validateMonetaryAssumptions(a: MonetaryAssumptions): string | null {
