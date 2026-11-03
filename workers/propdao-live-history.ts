@@ -17,7 +17,7 @@ export function propDAOLiveHistoryStats(tf:string,rows:{time:number}[],at:number
  const newest=rows.at(-1)?.time??null,oldest=rows[0]?.time??null;
  const recentGap=rows.length>1&&rows[rows.length-1].time-rows[rows.length-2].time!==seconds;
  return {requested,received:rows.length,oldest,newest,recentGap,
-  ready:rows.length>=30&&newest!==null&&newest+seconds===at&&!recentGap};
+  ready:rows.length>=30&&newest!==null&&newest+seconds===Math.floor(at/seconds)*seconds&&!recentGap};
 }
 export function propDAOLiveRetryAt(nowMs:number,closedAtSeconds:number,transient:boolean):number|null{
  const elapsed=nowMs-closedAtSeconds*1000;
