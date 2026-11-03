@@ -87,6 +87,12 @@ app.get('/api/venues/hyperliquid/markets', async (_req,res) => {
 });
 app.post('/api/venues/propdao/candles', async (req,res) => {
  try {
+  // GOLDUSDC M1 is an immutable R2-backed historical dataset. Avoid live market
+  // discovery on reads so an upstream metadata outage cannot block cached history.
+  if(req.body?.asset==='GOLDUSDC'&&req.body?.timeframe==='m1'){
+   const data=await dwellirHistory.candles({...req.body,asset:'xyz:GOLD'});
+   return res.json({...data,asset:'GOLDUSDC',source:'Dwellir / Hyperliquid reference (xyz:GOLD) for PropDAO; R2-backed; fills may differ'});
+  }
   const market=(await venueMarketData.propdaoMarkets()).markets.find((m:any)=>m.symbol===req.body?.asset);
   if(!market)return res.status(400).json({error:'Choose an available PropDAO market.'});
   const coin=market.dex?(market.coin.includes(':')?market.coin:`${market.dex}:${market.coin}`):market.coin;

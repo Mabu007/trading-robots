@@ -25,7 +25,11 @@ export class DwellirHistory {
  private async weekly(market:string,base:'1m'|'5m',start:number,end:number):Promise<MarketCandle[]> {
   const cacheKey=`historical/dwellir/v1/${encodeURIComponent(market)}/${base}/${start}.json`;
   const completeWeek=end===start+WEEK;
-  const cached=completeWeek?await this.storage.read(cacheKey):null;
+  // Persist closed, partial GOLDUSDC M1 archive weeks as immutable R2 objects.
+  // Other markets retain their existing full-week-only caching behavior.
+  const archivedGold=market==='xyz:GOLD'&&base==='1m'&&end<=Date.parse('2026-11-03T00:00:00Z');
+  const objectKey=completeWeek?cacheKey:archivedGold?`historical/dwellir/v1/${encodeURIComponent(market)}/${base}/${start}-${end}.json`:null;
+  const cached=objectKey?await this.storage.read(objectKey):null;
   if(cached!==null){
    let parsed:unknown;try{parsed=JSON.parse(cached)}catch{throw Error('Cached Dwellir history is corrupt.')}
    if(!Array.isArray(parsed)||!parsed.every(isValidCandle))throw Error('Cached Dwellir history is invalid.');
@@ -58,7 +62,7 @@ export class DwellirHistory {
     }
     if(!value.hasMore) {
      const result=[...candles.values()].sort((a,b)=>a.time-b.time);
-     if(completeWeek)await this.storage.write(cacheKey,JSON.stringify(result));
+     if(objectKey)await this.storage.write(objectKey,JSON.stringify(result));
      return result;
     }
     if(typeof value.nextCursor!=='string'||!value.nextCursor||cursors.has(value.nextCursor))throw Error('Dwellir pagination did not advance.');
@@ -81,7 +85,7 @@ export class DwellirHistory {
   if(!Number.isFinite(start)||!Number.isFinite(end)||start>=end||start%period!==0||end%period!==0||start<FIRST_HISTORY||originalEnd<start)throw Error('Choose a valid aligned historical date range after July 27, 2025.');
   if((end-start)/period>50_000)throw Error('Choose at most 50,000 candles per request.');
   const chunks:{start:number;end:number}[]=[];
-  for(let t=Math.floor(start/WEEK)*WEEK;t<end;t+=WEEK)chunks.push({start:t,end:Math.min(t+WEEK,now)});
+  for(let t=Math.floor(start/WEEK)*WEEK;t<end;t+=WEEK)chunks.push({start:t,end:Math.min(t+WEEK,asset==='xyz:GOLD'&&timeframe==='m1'?end:now,now)});
   // Limit download work per HTTP request. Longer runs can reuse cached weeks.
   if(chunks.length>32)throw Error('Select a shorter date range (up to 32 history weeks per request).');
   const segments:MarketCandle[][]=new Array(chunks.length);
