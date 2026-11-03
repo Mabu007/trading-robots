@@ -13,7 +13,8 @@ import { FirestoreStore } from './firestore-store.ts';
 import { ValrMarketData } from './valr-market-data.ts';
 import { VenueMarketData } from './venue-market-data.ts';
 import { DwellirHistory } from './dwellir-history.ts';
-import {ctraderRoutes} from './ctrader.ts';
+import {ctraderRoutes,CTraderService} from './ctrader.ts';
+import {ctraderLiveRoutes} from './ctrader-live-routes.ts';
 import { PropDAOAccounts, propDAORoutes } from './propdao-account.ts';
 import {propDAOLiveRoutes} from './propdao-live-routes.ts';
 import { valrAccountRoutes } from './valr-routes.ts';
@@ -149,7 +150,18 @@ const valrExclusive=<T>(uid:string,task:()=>Promise<T>)=>FirestoreStore.configur
 const liveService=valrLiveRoutes(app,{lockReady:()=>FirestoreStore.configured(),exclusive:valrExclusive,uid:firebaseUidOrReply,bot:ownedValrBot,read:readR2Object,write:writeR2Object,remove:deleteR2Object});
 valrAccountRoutes(app,{uid:firebaseUidOrReply,read:readR2Object,write:writeR2Object,remove:deleteR2Object,beforeChange:uid=>liveService.beforeKeyChange(uid),mutate:valrExclusive});
 valrPaperRoutes(app,{uid:firebaseUidOrReply,bot:ownedValrBot});
-ctraderRoutes(app,{read:readR2Object,write:writeR2Object,remove:deleteR2Object},firebaseUidOrReply);
+const ctraderStore={read:readR2Object,write:writeR2Object,remove:deleteR2Object,list:listR2Objects};
+const ctraderBroker=new CTraderService(ctraderStore);
+const ownedCTraderBot=async(uid:string,id:string,req:express.Request)=>{
+ const [bot,raw]=await Promise.all([FirestoreStore.configured()?marketplace.store.get(`users/${uid}/bots/${id}`):readOwnedBotAsset(uid,id,req.header('authorization')),readR2Object(`${userBotRoot(uid,id)}/current.json`)]);
+ if(!bot||!raw)return null;
+ const saved=JSON.parse(raw);
+ if(saved.venue!=='ctrader'||('venue'in bot&&bot.venue&&bot.venue!=='ctrader')||saved.userId!==uid||saved.botId!==id||typeof saved.code!=='string'||typeof bot.asset!=='string')return null;
+ return {asset:bot.asset,code:saved.code,venue:'ctrader'};
+};
+const ctraderLive=ctraderLiveRoutes(app,{uid:firebaseUidOrReply,bot:ownedCTraderBot,broker:ctraderBroker,
+ read:readR2Object,write:writeR2Object,list:listR2Objects});
+ctraderRoutes(app,ctraderStore,firebaseUidOrReply,{service:ctraderBroker,beforeChange:uid=>ctraderLive.beforeDisconnect(uid)});
 economyRoutes(app,economy,async(req,res)=>{const uid=await firebaseUidOrReply(req,res);return uid?res.locals.identity:null;});
 const publications = sharedBotRoutes(app, { read: readR2Object, write: writeR2Object, remove: deleteR2Object, uid: firebaseUidOrReply, root: userBotRoot,...(FirestoreStore.configured()?{onPublish:(bot:any)=>economy.publishSharedBot(bot),onAcquire:async(uid:string,id:string,bot:any)=>{if(!await marketplace.store.get(`marketplaceBots/${id}`))await marketplace.publish(bot);return economy.acquireSharedBot(uid,bot)},onUnpublish:(uid:string,id:string)=>marketplace.unpublish(uid,id),onView:(bot:any,visitor:string)=>marketplace.view(bot,visitor)}:{}) });
 marketplaceRoutes(app,{uid:firebaseUidOrReply,read:readR2Object,write:writeR2Object,root:userBotRoot});
