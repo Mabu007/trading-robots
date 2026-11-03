@@ -62,7 +62,7 @@ export class CTraderLiveService{
    return {...worker,configured:enabled(g.environment),connected:true,deployed:true,accountId:g.accountId,
     environment:g.environment,expiresAt:g.expiresAt,positions,orders:risk.orders,closedTrades,
     brokerIntent:history.intent,brokerBlocked:history.blocked,brokerRisk:history.ledger,
-    balance:risk.balance,isLive:risk.isLive,broker:risk.broker,
+    balance:risk.balance,depositCurrency:risk.depositCurrency,isLive:risk.isLive,broker:risk.broker,
     uncertain:Boolean(worker.pendingIntent&&worker.pendingIntent.status!=='PROTECTED')||Boolean(history.requiresOperator)};
   }catch(e){return {configured:false,deployed:true,running:false,uncertain:true,accountId:g.accountId,
    error:e instanceof Error?e.message:'Broker status uncertain; inspect cTrader before resuming',events:[]}}
