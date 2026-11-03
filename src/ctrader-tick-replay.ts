@@ -17,7 +17,10 @@ export function simulateCTraderTickReplay(candles:Candle[],decisions:any[],bids:
  let cursor=0,scheduledFor=-1;
  const tickInRange=(tick:CTraderTick)=>Number.isSafeInteger(tick.timeMs)&&Number.isFinite(tick.price)&&tick.price>0;
  if(!ordered.every(tickInRange))throw Error('Malformed broker tick data');
- const start=candles[0].time*1000,last=(candles.at(-1)!.time+60)*1000;
+ const durations=candles.slice(1).map((c,i)=>c.time-candles[i].time).filter(v=>Number.isSafeInteger(v)&&v>0);
+ const period=durations.length?Math.min(...durations):60;
+ if(period<60||period>86400)throw Error('Unsupported broker candle period');
+ const start=candles[0].time*1000,last=(candles.at(-1)!.time+period)*1000;
  const unitsStep=spec.stepVolume/100,minUnits=spec.minVolume/100,maxUnits=spec.maxVolume/100;
  const observe=(value:number)=>{peak=Math.max(peak,value);const dd=peak-value;maxDrawdown=Math.max(maxDrawdown,dd);maxDrawdownPercent=Math.max(maxDrawdownPercent,peak>0?dd/peak*100:0)};
  const close=(timeMs:number,rawExit:number,reason:Trade['reason'])=>{
