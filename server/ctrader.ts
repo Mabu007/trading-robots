@@ -85,17 +85,29 @@ export class CTraderService{
  }
  async markets(uid:string,accountId:unknown){
   const {s,a,environment}=await this.owned(uid,accountId);
+  const cacheKey='ctrader-market-meta/v1/'+environment+'/'+SHA(a.ctidTraderAccountId).slice(0,24)+'/markets.json';
+  const previous=await this.store.read(cacheKey);
+  if(previous){try{const cached=JSON.parse(previous);if(cached.accountId===a.ctidTraderAccountId&&Date.now()-cached.savedAt<6*3600_000&&Array.isArray(cached.markets))return {markets:cached.markets,accountId:a.ctidTraderAccountId,broker:a.brokerTitleShort,environment}}catch{}}
   const data=await this.rpc(s,environment,2114,{ctidTraderAccountId:a.ctidTraderAccountId,includeArchivedSymbols:false},a.ctidTraderAccountId);
   if(!Array.isArray(data.symbol))throw Error('Broker symbol discovery returned invalid data');
-  return {markets:data.symbol.filter((x:any)=>x.enabled!==false&&SYMBOL.test(String(x.symbolName||''))).map((x:any)=>({symbol:String(x.symbolName),symbolId:String(x.symbolId),timeframes:Object.keys(TIMEFRAMES)})),accountId:a.ctidTraderAccountId,broker:a.brokerTitleShort,environment};
+  const markets=data.symbol.filter((x:any)=>x.enabled!==false&&SYMBOL.test(String(x.symbolName||''))).map((x:any)=>({symbol:String(x.symbolName),symbolId:String(x.symbolId),timeframes:Object.keys(TIMEFRAMES)}));
+  await this.store.write(cacheKey,JSON.stringify({accountId:a.ctidTraderAccountId,savedAt:Date.now(),markets}));
+  return {markets,accountId:a.ctidTraderAccountId,broker:a.brokerTitleShort,environment};
  }
  private async symbol(uid:string,accountId:unknown,name:unknown){
   if(typeof name!=='string'||!SYMBOL.test(name))throw Error('Select a valid broker market');
   const scope=await this.owned(uid,accountId),market=await this.markets(uid,accountId),found=market.markets.find((x:{symbol:string;symbolId:string})=>x.symbol===name);
   if(!found)throw Error('Market is not available on your broker account');
-  const full=await this.rpc(scope.s,scope.environment,2116,{ctidTraderAccountId:scope.a.ctidTraderAccountId,symbolId:[found.symbolId]},scope.a.ctidTraderAccountId);
-  const meta=Array.isArray(full.symbol)?full.symbol.find((x:any)=>String(x.symbolId)===found.symbolId):null;
-  if(!meta)throw Error('Broker symbol specifications are unavailable');
+  const metaKey='ctrader-market-meta/v1/'+scope.environment+'/'+SHA(scope.a.ctidTraderAccountId).slice(0,24)+'/'+found.symbolId+'.json';
+  const previous=await this.store.read(metaKey);
+  let meta:any=null;
+  if(previous){try{const cached=JSON.parse(previous);if(cached.accountId===scope.a.ctidTraderAccountId&&cached.symbolId===found.symbolId&&Date.now()-cached.savedAt<6*3600_000)meta=cached.meta}catch{}}
+  if(!meta){
+   const full=await this.rpc(scope.s,scope.environment,2116,{ctidTraderAccountId:scope.a.ctidTraderAccountId,symbolId:[found.symbolId]},scope.a.ctidTraderAccountId);
+   meta=Array.isArray(full.symbol)?full.symbol.find((x:any)=>String(x.symbolId)===found.symbolId):null;
+   if(!meta)throw Error('Broker symbol specifications are unavailable');
+   await this.store.write(metaKey,JSON.stringify({accountId:scope.a.ctidTraderAccountId,symbolId:found.symbolId,savedAt:Date.now(),meta}));
+  }
   return {...scope,found,meta};
  }
  private archivePrefix(environment:string,accountId:string,symbolId:string,tf:string){
