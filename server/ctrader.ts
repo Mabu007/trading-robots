@@ -94,6 +94,23 @@ export class CTraderService{
   await this.store.write(cacheKey,JSON.stringify({accountId:a.ctidTraderAccountId,savedAt:Date.now(),markets}));
   return {markets,accountId:a.ctidTraderAccountId,broker:a.brokerTitleShort,environment};
  }
+ async snapshot(uid:string,accountId:unknown){
+  const {s,a,environment}=await this.owned(uid,accountId);
+  const [traderResponse,reconciliation]=await Promise.all([
+   this.rpc(s,environment,2121,{ctidTraderAccountId:a.ctidTraderAccountId},a.ctidTraderAccountId),
+   this.rpc(s,environment,2124,{ctidTraderAccountId:a.ctidTraderAccountId,returnProtectionOrders:false},a.ctidTraderAccountId)
+  ]);
+  const trader=traderResponse.trader;
+  if(!trader||String(trader.ctidTraderAccountId)!==a.ctidTraderAccountId||!Array.isArray(reconciliation.position)||!Array.isArray(reconciliation.order))throw Error('Broker account or position state is incomplete');
+  const digits=Number(trader.moneyDigits);
+  const balance=Number(trader.balance);
+  return {accountId:a.ctidTraderAccountId,broker:a.brokerTitleShort,isLive:a.isLive,
+   balance:Number.isInteger(digits)&&digits>=0&&digits<=12&&Number.isFinite(balance)?balance/10**digits:null,
+   balanceCurrencyAssetId:String(trader.depositAssetId||''),moneyDigits:Number.isInteger(digits)?digits:null,
+   accountType:trader.accountType,accessRights:trader.accessRights,leverageInCents:trader.leverageInCents,
+   positions:reconciliation.position,orders:reconciliation.order,
+   snapshotAt:new Date().toISOString(),tradingEnabled:false};
+ }
  private async symbol(uid:string,accountId:unknown,name:unknown){
   if(typeof name!=='string'||!SYMBOL.test(name))throw Error('Select a valid broker market');
   const scope=await this.owned(uid,accountId),market=await this.markets(uid,accountId),found=market.markets.find((x:{symbol:string;symbolId:string})=>x.symbol===name);
@@ -185,6 +202,7 @@ export function ctraderRoutes(app:Express,store:R2,uid:(req:Request,res:Response
  });
  app.get('/api/venues/ctrader/accounts',handle(id=>service.list(id)));
  app.get('/api/venues/ctrader/markets',handle((id,req)=>service.markets(id,req.query.accountId)));
+ app.get('/api/venues/ctrader/snapshot',handle((id,req)=>service.snapshot(id,req.query.accountId)));
  app.post('/api/venues/ctrader/candles',handle((id,req)=>service.candles(id,req.body)));
  app.post('/api/venues/ctrader/cache/warm',handle((id,req)=>service.warm(id,req.body)));
  app.post('/api/venues/ctrader/disconnect',handle(async(id)=>{await service.disconnect(id);return {connected:false}}));
