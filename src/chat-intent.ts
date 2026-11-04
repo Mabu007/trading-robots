@@ -12,8 +12,7 @@
 export type ChatTurn = {role:string;content:string};
 
 const command = '(?:write|generate|create|build|code|rewrite|edit|update|change|modify|fix|implement|add|remove|replace|refactor|adjust|make|turn|convert|transform)';
-const subject = '(?:strategy(?:\\.js)?|script|source code|code|onCandle|config|trading rules?|entry (?:rules?|logic|conditions?)|exit (?:rules?|logic|conditions?)|entry|entries|exit|exits|signals?|indicators?|stop(?:[ -]?loss)?|take[ -]?profit|targets?|risk[ -]?(?:reward|management)?|trailing stop|breakout|reversal|scalping|scalper|trend[ -]?following|liquidity[ -]?sweep|algorithm|algo|robot|bot|timeframes?|filters?|conditions?|ema\d*|rsi|macd|atr|bollinger|moving average)';
-const action = new RegExp('\\b'+command+'\\b','i');
+const subject = '(?:strategy(?:\\.js)?|script|source code|code|onCandle|config|trading rules?|entry (?:rules?|logic|conditions?)|exit (?:rules?|logic|conditions?)|entry|entries|exit|exits|signals?|indicators?|stop(?:[ -]?loss)?|take[ -]?profit|targets?|risk[ -]?(?:reward|management)?|trailing stop|breakout|reversal|scalping|scalper|trend[ -]?following|liquidity[ -]?sweep|algorithm|algo|robot|bot|timeframes?|filters?|conditions?|ema\\d*|rsi|macd|atr|bollinger|moving average)';
 const target = new RegExp('\\b'+subject+'\\b','i');
 const productOnly = /\b(?:app|website|platform|ui|ux|interface|chatbot|chat|assistant|api|backend|cloudflare|worker|durable object|deployment|deploy button|account|database|firestore|vercel|connectivity|data provider|data feed|historical data|market data)\b/i;
 
