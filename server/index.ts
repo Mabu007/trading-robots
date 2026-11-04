@@ -141,7 +141,7 @@ const ownedPropDAOBot=async(uid:string,id:string,req:express.Request)=>{
  if(saved.venue!=='propdao'||('venue' in bot&&bot.venue&&bot.venue!=='propdao')||saved.userId!==uid||saved.botId!==id||typeof saved.code!=='string'||typeof bot.asset!=='string')return null;
  return {asset:bot.asset,code:saved.code,venue:'propdao'};
 };
-const propdaoLiveService=propDAOLiveRoutes(app,{uid:firebaseUidOrReply,bot:ownedPropDAOBot,accounts:propdaoAccounts,read:readR2Object,write:writeR2Object,list:listR2Objects});
+const propdaoLiveService=propDAOLiveRoutes(app,{uid:firebaseUidOrReply,bot:ownedPropDAOBot,accounts:propdaoAccounts,read:readR2Object,write:writeR2Object,remove:deleteR2Object,list:listR2Objects});
 propDAORoutes(app,propdaoAccounts,firebaseUidOrReply,uid=>propdaoLiveService.beforeCredentialChange(uid));
 const valrLock=new ValrAccountLock(marketplace.store);
 const valrExclusive=<T>(uid:string,task:()=>Promise<T>)=>FirestoreStore.configured()?valrLock.run(uid,task):task();
