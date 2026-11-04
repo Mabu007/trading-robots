@@ -18,7 +18,10 @@ export class PropDAOLiveBot extends DurableObject<any>{
   if(url.protocol!=='https:'&&!(url.protocol==='http:'&&url.hostname==='127.0.0.1'))throw Error('Invalid control origin');
   const response=await fetch(url,{method:'POST',headers:{Authorization:`Bearer ${this.env.PROPDAO_LIVE_INTERNAL_SECRET}`,'Content-Type':'application/json'},body:JSON.stringify({uid:grant.uid,botId:grant.botId,grantId:grant.id,action,payload}),signal:AbortSignal.timeout(16000)});
   const data=await response.json<any>();
-  if(!response.ok)throw Error(data?.error||'Live provider unavailable');
+  if(!response.ok){const error=Error(data?.error||'Live provider unavailable') as Error&{notSubmitted?:boolean};
+   if(data?.notSubmitted===true)error.notSubmitted=true;
+   throw error;
+  }
   return data;
  }
  private async candles(grant:Grant,timeframe:string,cutoff:number){
@@ -179,13 +182,12 @@ export class PropDAOLiveBot extends DurableObject<any>{
    try{
     order=await this.provider(grant,'execute',{symbol:grant.symbol,side:decision.action,price:last.close,stop,target,quoteTime:Date.now(),candleClose:close,intentId});
    }catch(error){
-    // Provider rejected entry *before* order submission because another bot
-    // acquired exposure in the interval after the earlier account snapshot.
-    // This particular preflight error cannot have submitted an order.
-    if(error instanceof Error&&/Account has open positions or resting orders/.test(error.message)){
+    // Only an explicit server-side confirmation that the HTTP POST was never
+    // attempted allows this bot to release its pending execution lock.
+    if(error instanceof Error&&(error as Error&{notSubmitted?:boolean}).notSubmitted===true){
      await this.executionLock(grant,'release',intentId);
      await this.ctx.storage.delete('pendingIntent');
-     await this.record('Another bot has an open position or order; skipped entry without submission.');
+     await this.record('Pre-submit validation rejected entry without placing an order · '+error.message);
      return;
     }
     // All other execution failures remain ambiguous and require reconciliation.
