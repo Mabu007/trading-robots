@@ -12,7 +12,7 @@
 export type ChatTurn = {role:string;content:string};
 
 const command = '(?:write|generate|create|build|code|rewrite|edit|update|change|modify|fix|implement|add|remove|replace|refactor|adjust|make|turn|convert|transform)';
-const subject = '(?:strategy(?:\\.js)?|script|source code|code|onCandle|config|trading rules?|entry (?:rules?|logic|conditions?)|exit (?:rules?|logic|conditions?)|entry|entries|exit|exits|signals?|indicators?|stop(?:[ -]?loss)?|take[ -]?profit|targets?|risk[ -]?(?:reward|management)?|trailing stop|breakout|reversal|scalping|scalper|trend[ -]?following|liquidity[ -]?sweep|algorithm|algo|robot|bot)';
+const subject = '(?:strategy(?:\\.js)?|script|source code|code|onCandle|config|trading rules?|entry (?:rules?|logic|conditions?)|exit (?:rules?|logic|conditions?)|entry|entries|exit|exits|signals?|indicators?|stop(?:[ -]?loss)?|take[ -]?profit|targets?|risk[ -]?(?:reward|management)?|trailing stop|breakout|reversal|scalping|scalper|trend[ -]?following|liquidity[ -]?sweep|algorithm|algo|robot|bot|timeframes?|filters?|conditions?|ema\d*|rsi|macd|atr|bollinger|moving average)';
 const action = new RegExp('\\b'+command+'\\b','i');
 const target = new RegExp('\\b'+subject+'\\b','i');
 const productOnly = /\b(?:app|website|platform|ui|ux|interface|chatbot|chat|assistant|api|backend|cloudflare|worker|durable object|deployment|deploy button|account|database|firestore|vercel|connectivity|data provider|data feed|historical data|market data)\b/i;
@@ -44,13 +44,12 @@ export function requestsCodeChange(message:string,history:ChatTurn[]=[]):boolean
  // not an instruction, even if it includes words like "make" and "change".
  if(isDiscussion(text))return false;
 
- const explicitAddress=/^\s*(?:(?:please|hey|hi)[,\s]+)?(?:can|could|would|will)\s+you\s+(?:please\s+)?/i.test(text);
- const directCommand=new RegExp('^\\s*(?:please[\\s,]+)?'+command+'\\b','i').test(text);
- const directive=/^\s*(?:i(?:'d| would) like|i want|i need)\s+(?:you|the ai|the assistant|chatgpt)\s+to\s+/i.test(text)
-   ||/^\s*(?:let'?s|we (?:need|have) to)\s+/i.test(text);
- const now=/\b(?:please\s+(?:write|rewrite|edit|modify|update|change|implement|add|remove|fix)|go ahead and (?:write|rewrite|edit|modify|update|change|implement|add|remove|fix))\b/i.test(text);
-
- if(!(explicitAddress||directCommand||directive||now))return false;
+ const explicitAddress=/^\s*(?:(?:please|hey|hi)[,\s]+)?(?:can|could|would|will)\s+you\s+(?:please\s+)?/i;
+ const directive=/^\s*(?:i(?:'d| would) like|i want|i need)\s+(?:you|the ai|the assistant|chatgpt)\s+to\s+|^\s*(?:let'?s|we (?:need|have) to)\s+/i;
+ const start=text.replace(explicitAddress,'').replace(directive,'').replace(/^\s*(?:please[\s,]+|go ahead and\s+)/i,'');
+ // The first instruction verb must be a code action. "Can you explain how
+ // to change the strategy?" is a question, not an edit request.
+ if(!new RegExp('^'+command+'\\b','i').test(start))return false;
 
  // Changing the *platform* is not the same as changing the strategy file.
  const explicitCode=/\b(?:strategy(?:\.js)?|script|source code|code|onCandle|trading rules?|entry (?:rules?|logic)|exit (?:rules?|logic))\b/i.test(text);
@@ -58,7 +57,6 @@ export function requestsCodeChange(message:string,history:ChatTurn[]=[]):boolean
  if(!target.test(text))return false;
 
  // Ensure the action is actually present in a direct user instruction.
- if(!action.test(text))return false;
  // Reject instructions which quote a code-edit request as an example.
  if(/^\s*(?:quote|for example|example:|someone said|the message said)\b/i.test(text))return false;
  return true;
