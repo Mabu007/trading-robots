@@ -40,7 +40,22 @@ export class PropDAOLiveService{
  }
  async status(uid:string,botId:string,selectedAccount?:string){
   const grant=await this.grant(uid,botId);const health=await this.health();const configured=health.configured;
-  if(!grant)return {configured,connected:health.connected,deployed:false,running:false,accountId:null,events:[],error:configured?'Connect a PropDAO account and authorize a deployment.':health.error||'Live runtime is not available.'};
+  if(!grant){
+   if(selectedAccount&&safeId(selectedAccount)&&health.connected){
+    try{
+     // The Durable Object is scoped to the account, not the local robot ID.
+     // Validate ownership before querying an abandoned prior deployment.
+     await this.deps.accounts.accountRisk(uid,selectedAccount);
+     const target={uid,accountId:selectedAccount} as PropGrant;
+     const state=await this.runtime(target,'status');
+     return {...state,configured,connected:true,deployed:false,running:false,
+      accountOccupied:state.running===true,uncertain:state.running===true,
+      blockingBotId:state.grant?.botId||null,accountId:selectedAccount,
+      error:state.pendingIntent?'Unresolved order on this account. Reconcile before deploying.':health.error};
+    }catch(e){return {configured,connected:true,deployed:false,running:false,accountId:selectedAccount,events:[],statusUnavailable:true,error:e instanceof Error?e.message:'Could not verify account live status.'}}
+   }
+   return {configured,connected:health.connected,deployed:false,running:false,accountId:null,events:[],error:configured?'Connect a PropDAO account and authorize a deployment.':health.error||'Live runtime is not available.'};
+  }
   if(!health.connected)return {configured:false,connected:false,deployed:true,running:false,uncertain:true,accountId:grant.accountId,events:[],error:health.error};
   try{
    const state=await this.runtime(grant,'status');
