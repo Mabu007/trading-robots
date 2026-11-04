@@ -76,8 +76,8 @@ describe('API response diagnostics', () => {
   });
 
   it('preserves truncated streamed text as a resumable error', async () => {
-    const body = 'data: {"choices":[{"delta":{"content":"partial strategy"},"finish_reason":null}]}\\n\\n' +
-      'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\\n\\n' + 'data: [DONE]\\n\\n';
+    const body = 'data: {"choices":[{"delta":{"content":"partial strategy"},"finish_reason":null}]}\n\n' +
+      'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n' + 'data: [DONE]\n\n';
     const mock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(body));
     try {
       await expect(postApiStream('/api/ai', {}, 'OpenRouter', () => undefined))
