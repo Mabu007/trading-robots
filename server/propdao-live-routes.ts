@@ -5,7 +5,7 @@ import {PropDAOAccounts} from './propdao-account.ts';
 
 type Storage={read:(key:string)=>Promise<string|null>;write:(key:string,value:string)=>Promise<void>;remove?:(key:string)=>Promise<void>;list?:(prefix:string,limit:number)=>Promise<string[]>};
 type Dependencies=Storage&{uid:(req:Request,res:Response)=>Promise<string|null>;bot:(uid:string,id:string,req:Request)=>Promise<{asset:string;code:string;venue?:string}|null>;accounts:PropDAOAccounts;request?:typeof fetch};
-export type PropGrant={id:string;uid:string;botId:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;leverage:number;issuedAt:number;expiresAt:number;revokedAt?:number;runtimeScope?:'bot'};
+export type PropGrant={id:string;uid:string;botId:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;leverage:number;issuedAt:number;expiresAt:number;revokedAt?:number;runtimeScope?:'bot'|'lock'};
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 const safeId=(value:string)=>/^[A-Za-z0-9_-]{1,128}$/.test(value);
 export class PropDAOLiveService{
@@ -18,7 +18,7 @@ export class PropDAOLiveService{
  private async runtime(g:PropGrant,action:'deploy'|'stop'|'status'|'pause'|'resume'|'reconcile',body?:unknown){
   const base=process.env.PROPDAO_LIVE_RUNTIME_URL,secret=process.env.PROPDAO_LIVE_INTERNAL_SECRET;
   if(!base||!secret||secret.length<32)throw Error('PropDAO Durable Object runtime is not configured');
-  const runtimeId=g.runtimeScope==='bot'?hash(g.uid+':'+g.accountId+':'+g.botId):hash(g.uid+':'+g.accountId);
+  const runtimeId=g.runtimeScope==='bot'?hash(g.uid+':'+g.accountId+':'+g.botId):g.runtimeScope==='lock'?hash('propdao-execution:'+g.uid+':'+g.accountId):hash(g.uid+':'+g.accountId);
   const url=new URL(`/live/${runtimeId}/${action}`,base);
   if(url.protocol!=='https:'&&!(url.protocol==='http:'&&url.hostname==='127.0.0.1'))throw Error('Live runtime requires HTTPS');
   const response=await this.request(url,{method:action==='status'?'GET':'POST',headers:{Authorization:`Bearer ${secret}`,'X-TV-UID':g.uid,'Content-Type':'application/json'},...(action==='status'?{}:{body:JSON.stringify(body??{})}),signal:AbortSignal.timeout(20000)});
@@ -139,6 +139,9 @@ export class PropDAOLiveService{
   const legacy={...grant,runtimeScope:undefined};
   const legacyState=await this.runtime(legacy,'status');
   if(legacyState.pendingIntent)throw Error('Unresolved prior order on the legacy account runtime. Reconcile the affected older bot before deploying.');
+  const lockState=await this.runtime({...grant,runtimeScope:'lock'},'status');
+  if(lockState.accountLock?.intentId)
+   throw Error('Another bot has an unresolved order on this account. Stop and reconcile that bot before starting new live orders.');
   const priorState=await this.runtime(grant,'status');
   if(priorState.pendingIntent)throw Error('Unresolved prior order on this PropDAO account. Use Reconcile pending order in Deploy after checking your PropDAO account.');
   if(priorState.running||priorState.paused)throw Error('This robot is already running. Stop it before deploying a new strategy version.');
