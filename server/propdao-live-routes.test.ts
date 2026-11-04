@@ -28,7 +28,7 @@ describe('PropDAO live execution authorization',()=>{
  it('isolates bots on the same account while keeping order submission separately gated',async()=>{
   vi.stubEnv('PROPDAO_LIVE_ENABLED','true');vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
   const {svc,fetcher,accounts,saved}=setup();
-  accounts.accountRisk.mockResolvedValue({account:{status:'active'},risk:{equity:1000,roomUsd:50,breached:false},positions:[{id:'other-position'}],orders:[]});
+  accounts.accountRisk.mockResolvedValue({account:{status:'active'},risk:{equity:1000,roomUsd:50,breached:false},positions:[{id:'other-position'}],orders:[]} as any);
   await svc.deploy('alice','bot-1',{body:{accountId:'prop-1',riskUsd:2,leverage:1,confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'}} as any);
   await svc.deploy('alice','bot-2',{body:{accountId:'prop-1',riskUsd:2,leverage:1,confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'}} as any);
   const grants=[...saved.values()].map(raw=>JSON.parse(raw));
