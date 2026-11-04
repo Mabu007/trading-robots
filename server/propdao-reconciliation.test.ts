@@ -6,7 +6,7 @@ afterEach(()=>vi.restoreAllMocks());
 const setup=(orders:any[]=[])=>{
  const stored=new Map<string,string>();
  const storage={read:async(k:string)=>stored.get(k)||null,write:async(k:string,v:string)=>{stored.set(k,v)},remove:async(k:string)=>{stored.delete(k)}};
- const fetcher=vi.fn(async(request:RequestInfo|URL)=>{
+ const fetcher=vi.fn(async(request:string|URL,init?:{method?:string})=>{
   const url=String(request);
   if(url.endsWith('/accounts'))return Response.json({accounts:[{account_id:'prop-1',status:'active'}]});
   if(url.endsWith('/accounts/prop-1/risk'))return Response.json({equity:1000,roomUsd:40,breached:false});
