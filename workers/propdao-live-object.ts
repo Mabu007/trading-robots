@@ -3,6 +3,7 @@ import {getQuickJSWASMModule} from '@cf-wasm/quickjs/workerd';
 import {evaluateStrategyInSandbox} from './strategy-sandbox';
 import {parseStrategyConfig} from '../src/strategy';
 import {TF_SECONDS} from '../shared/trading';
+import {parseUpstreamJson,TemporaryReadError,retryableReadError} from './propdao-upstream-response';
 type Grant={id:string;uid:string;botId:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;leverage:number;issuedAt:number;expiresAt:number};
 type Status={running:boolean;paused:boolean;lastError?:string;lastEvaluation?:any;lastOrder?:any;lastAccount?:any;events:string[];lastReconciliation?:any};
 const interval:Record<string,string>={m1:'1m',m5:'5m',m15:'15m',m30:'30m',h1:'1h',h4:'4h',d1:'1d'};
@@ -16,21 +17,26 @@ export class PropDAOLiveBot extends DurableObject<any>{
   const origin=this.env.PROPDAO_CONTROL_URL;
   const url=new URL('/api/internal/propdao/provider',origin);
   if(url.protocol!=='https:'&&!(url.protocol==='http:'&&url.hostname==='127.0.0.1'))throw Error('Invalid control origin');
-  const response=await fetch(url,{method:'POST',headers:{Authorization:`Bearer ${this.env.PROPDAO_LIVE_INTERNAL_SECRET}`,'Content-Type':'application/json'},body:JSON.stringify({uid:grant.uid,botId:grant.botId,grantId:grant.id,action,payload}),signal:AbortSignal.timeout(16000)});
-  const data=await response.json<any>();
-  if(!response.ok){const error=Error(data?.error||'Live provider unavailable') as Error&{notSubmitted?:boolean};
-   if(data?.notSubmitted===true)error.notSubmitted=true;
-   throw error;
+  let response:Response;
+  try{
+   response=await fetch(url,{method:'POST',headers:{Authorization:`Bearer ${this.env.PROPDAO_LIVE_INTERNAL_SECRET}`,'Content-Type':'application/json'},body:JSON.stringify({uid:grant.uid,botId:grant.botId,grantId:grant.id,action,payload}),signal:AbortSignal.timeout(16000)});
+  }catch{
+   if(action==='execute')throw Error('Control API connection failed after possible order submission. Outcome unknown; reconcile before retrying.');
+   throw new TemporaryReadError('Control API connection temporarily unavailable.');
   }
-  return data;
+  return parseUpstreamJson(response,'Control API',{mayHaveSubmittedOrder:action==='execute'});
  }
  private async candles(grant:Grant,timeframe:string,cutoff:number){
   const duration=TF_SECONDS[timeframe],end=Math.floor(cutoff/duration)*duration,from=(end-210*duration)*1000;
   if(!duration||!interval[timeframe])throw Error('Unsupported live timeframe');
-  const response=await fetch('https://api.hyperliquid.xyz/info',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'candleSnapshot',req:{coin:grant.coin,interval:interval[timeframe],startTime:from,endTime:end*1000-1}}),signal:AbortSignal.timeout(12000)});
-  if(!response.ok)throw Error('Hyperliquid live market data unavailable');
-  const rows=await response.json<any>();
-  if(!Array.isArray(rows))throw Error('Invalid Hyperliquid candles');
+  let response:Response;
+  try{
+   response=await fetch('https://api.hyperliquid.xyz/info',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'candleSnapshot',req:{coin:grant.coin,interval:interval[timeframe],startTime:from,endTime:end*1000-1}}),signal:AbortSignal.timeout(12000)});
+  }catch{
+   throw new TemporaryReadError('Hyperliquid market data connection temporarily unavailable.');
+  }
+  const rows=await parseUpstreamJson(response,'Hyperliquid market data');
+  if(!Array.isArray(rows))throw new TemporaryReadError('Hyperliquid returned an invalid candle response.');
   const result=rows.map((r:any)=>{if(r.s!==grant.coin||r.i!==interval[timeframe])throw Error('Market-data symbol/timeframe mismatch');return {time:Number(r.t)/1000,open:Number(r.o),high:Number(r.h),low:Number(r.l),close:Number(r.c),volume:Number(r.v)}}).filter((r:any)=>Number.isFinite(r.time)&&r.time>=from/1000&&r.time<end);
   result.sort((a:any,b:any)=>a.time-b.time);
   for(let i=0;i<result.length;i++){
@@ -202,11 +208,11 @@ export class PropDAOLiveBot extends DurableObject<any>{
    await this.ctx.storage.delete('lastError');
   }catch(e){const error=e instanceof Error?e.message:'Live evaluation failed';
    const transient=!(await this.ctx.storage.get('pendingIntent')) &&
-    /Latest closed market candle missing|Recent live candles contain gaps|Hyperliquid live market data unavailable|Invalid Hyperliquid candles|Could not reach PropDAO|PropDAO rate limit reached|PropDAO account request failed|Live provider unavailable/.test(error);
+    (retryableReadError(e)||/Latest closed market candle missing|Recent live candles contain gaps|Invalid Hyperliquid candles|Could not reach PropDAO|PropDAO rate limit reached|PropDAO account request failed|Live provider unavailable/.test(error));
    if(transient){
     const previous=await this.ctx.storage.get<string>('lastError');
-    await this.ctx.storage.put('lastError','Market data paused · '+error);
-    if(previous!=='Market data paused · '+error)await this.record('Awaiting valid market data · '+error);
+    await this.ctx.storage.put('lastError','Temporary upstream outage · '+error);
+    if(previous!=='Temporary upstream outage · '+error)await this.record('Retrying on next candle · '+error);
    }else{
     await this.ctx.storage.put('running',false);await this.ctx.storage.put('paused',false);await this.ctx.storage.put('lastError',error);
     await this.record('Execution halted · '+error);
