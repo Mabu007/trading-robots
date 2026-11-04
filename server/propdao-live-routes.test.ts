@@ -38,6 +38,18 @@ describe('PropDAO live execution authorization',()=>{
   expect(deployed).toHaveLength(2);expect(deployed[0]).not.toBe(deployed[1]);
   expect(accounts.executeOrder).not.toHaveBeenCalled();
  });
+ it('blocks only when the account-wide execution lock is genuinely unresolved',async()=>{
+  vi.stubEnv('PROPDAO_LIVE_ENABLED','true');vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
+  const {svc,fetcher,saved}=setup();
+  const lockId=(await import('node:crypto')).createHash('sha256').update('propdao-execution:alice:prop-1').digest('hex');
+  fetcher.mockImplementation(async(url:string)=>{
+   if(String(url).endsWith('/health'))return Response.json({ready:true});
+   if(String(url).includes(lockId))return Response.json({running:false,accountLock:{intentId:'tv-prior-1700000000',botId:'bot-other'}});
+   return Response.json({running:false,paused:false,pendingIntent:null});
+  });
+  await expect(svc.deploy('alice','bot-1',{body:{accountId:'prop-1',riskUsd:1,leverage:1,confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'}} as any)).rejects.toThrow(/unresolved order/);
+  expect(saved.size).toBe(0);
+ });
  it('Stop deletes the old grant and fresh Deploy creates a new identity',async()=>{
   vi.stubEnv('PROPDAO_LIVE_ENABLED','true');vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
   const {svc,saved}=setup();
