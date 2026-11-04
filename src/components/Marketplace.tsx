@@ -45,11 +45,16 @@ function PropDAOAccount({client,onClose}:{client:CloudClient;onClose:()=>void}){
 export function PropDAODeployDialog({client,botId,onClose,onLog}:{client:CloudClient;botId:string;onClose:()=>void;onLog:(line:string)=>void}){
  const [accounts,setAccounts]=useState<{accountId:string;status:string}[]>([]);
  const [accountId,setAccountId]=useState(''),[riskUsd,setRiskUsd]=useState('2'),[leverage,setLeverage]=useState('1'),[confirmed,setConfirmed]=useState(false),[reconcileConfirmed,setReconcileConfirmed]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[status,setStatus]=useState<any>(null);
- const load=async()=>{setBusy(true);setError('');try{
-  const [accountsResult,liveResult]=await Promise.all([sharingRequest<any>(client,'/api/venues/propdao/accounts'),sharingRequest<any>(client,`/api/venues/propdao/bots/${encodeURIComponent(botId)}/live`).then(data=>({data})).catch(reason=>({error:message(reason)}))]);
-  const live='data'in liveResult?liveResult.data:{configured:false,error:liveResult.error,statusUnavailable:true};const list=accountsResult.accounts||[];setAccounts(list);setStatus(live);
+ const load=async(accountOverride?:string)=>{setBusy(true);setError('');try{
+  const accountsResult=await sharingRequest<any>(client,'/api/venues/propdao/accounts');
+  const list=accountsResult.accounts||[];setAccounts(list);
   let saved='';try{saved=localStorage.getItem('trading-vibes:propdao:selected-account')||''}catch{}
-  setAccountId(old=>list.some((a:any)=>a.accountId===old)?old:list.some((a:any)=>a.accountId===saved)?saved:live.accountId||'');
+  const preferred=list.some((a:any)=>a.accountId===accountOverride)?accountOverride!:list.some((a:any)=>a.accountId===accountId)?accountId:list.some((a:any)=>a.accountId===saved)?saved:'';
+  const endpoint=`/api/venues/propdao/bots/${encodeURIComponent(botId)}/live${preferred?`?accountId=${encodeURIComponent(preferred)}`:''}`;
+  const liveResult=await sharingRequest<any>(client,endpoint).then(data=>({data})).catch(reason=>({error:message(reason)}));
+  const live='data'in liveResult?liveResult.data:{configured:false,error:liveResult.error,statusUnavailable:true};
+  setStatus(live);
+  setAccountId(preferred||live.accountId||'');
  }catch(e){setError(message(e))}finally{setBusy(false)}};
  useEffect(()=>{void load()},[client,botId]);
  const deploy=async()=>{
@@ -63,11 +68,11 @@ export function PropDAODeployDialog({client,botId,onClose,onLog}:{client:CloudCl
   if(!reconcileConfirmed||!status?.pendingIntent)return;
   setBusy(true);setError('');
   try{
-   await sharingRequest<any>(client,`/api/venues/propdao/bots/${encodeURIComponent(botId)}/live`,'POST',{action:'reconcile',confirm:'I VERIFIED PROPDAO HAS NO OPEN ORDERS OR POSITIONS'});
+   await sharingRequest<any>(client,`/api/venues/propdao/bots/${encodeURIComponent(botId)}/live`,'POST',{action:'reconcile',accountId,confirm:'I VERIFIED PROPDAO HAS NO OPEN ORDERS OR POSITIONS'});
    setReconcileConfirmed(false);
    onLog('PropDAO · pending order reconciled against account positions and order history; authorization remains stopped.');
    await load();
-  }catch(e){setError(message(e));await load().catch(()=>undefined)}
+  }catch(e){await load().catch(()=>undefined);setError(message(e))}
   finally{setBusy(false)}
  };
  const control=async(action:'pause'|'resume'|'stop')=>{
@@ -84,7 +89,7 @@ export function PropDAODeployDialog({client,botId,onClose,onLog}:{client:CloudCl
   <div className="market-status"><strong>{status?.pendingIntent?'Unresolved order · deployment locked':status?.running?'Running · LIVE':status?.paused?'Paused · authorized':status?.deployed?'Stopped · authorize to restart':status?.configured?'Runtime connected · ready to authorize':'Runtime not configured'}</strong><span>{status?.error||'Strategy scheduling uses a Cloudflare Durable Object. Stop disables new entries, not existing positions.'}</span></div>
   {status?.pendingIntent&&<div className="market-status" role="alert"><strong>Reconciliation required</strong><span>Intent: {status.pendingIntent.intentId||'Unknown'} · {status.pendingIntent.symbol||'Unknown symbol'}</span><span>Open your PropDAO terminal first and verify that no positions or resting orders remain. Reconciliation checks account history and two fresh snapshots; it never submits a new order or cancels an existing one.</span><label className="warning-remember"><input type="checkbox" checked={reconcileConfirmed} disabled={busy} onChange={e=>setReconcileConfirmed(e.target.checked)}/>I have checked the selected PropDAO account and it has no open positions or orders.</label><div className="market-buttons"><button type="button" className="ghost" disabled={busy||!reconcileConfirmed} onClick={()=>void reconcile()}>{busy?'Verifying…':'Reconcile pending order'}</button></div></div>}
   {status?.blockingBotId&&<p className="output-disclaimer">This account was previously deployed from bot {status.blockingBotId}. Its stored order intent is account-scoped.</p>}
-  {accounts.length?<label>PropDAO account<select disabled={busy||Boolean(status?.running||status?.paused)} value={accountId} onChange={e=>setAccountId(e.target.value)}><option value="">Choose account</option>{accounts.map(a=><option key={a.accountId} value={a.accountId}>{a.accountId} · {a.status}</option>)}</select></label>:<p>Connect your PropDAO API key in Account settings before deploying.</p>}
+  {accounts.length?<label>PropDAO account<select disabled={busy||Boolean(status?.running||status?.paused)} value={accountId} onChange={e=>{setAccountId(e.target.value);void load(e.target.value)}}><option value="">Choose account</option>{accounts.map(a=><option key={a.accountId} value={a.accountId}>{a.accountId} · {a.status}</option>)}</select></label>:<p>Connect your PropDAO API key in Account settings before deploying.</p>}
   <div className="field-row"><label>Risk per trade (USDC)<select disabled={busy||Boolean(status?.running||status?.paused)} value={riskUsd} onChange={e=>setRiskUsd(e.target.value)}>{['0.5','1','2','3','5'].map(x=><option key={x} value={x}>${x}</option>)}</select></label><label>Leverage<select disabled={busy||Boolean(status?.running||status?.paused)} value={leverage} onChange={e=>setLeverage(e.target.value)}><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label></div>
   <p className="output-disclaimer">The runtime rejects a new order if account risk, existing exposure, market lot rules or protective stop/target checks fail. A stop-loss cannot guarantee a specific fill price.</p>
   {!status?.running&&!status?.paused&&<label className="warning-remember"><input type="checkbox" disabled={busy||!status?.configured} checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>I authorize automated orders on my selected simulated-capital PropDAO evaluation or funded account.</label>}
