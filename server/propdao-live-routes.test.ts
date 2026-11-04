@@ -79,8 +79,8 @@ describe('PropDAO live execution authorization',()=>{
   vi.stubEnv('PROPDAO_LIVE_ENABLED','true');vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
   const {svc,fetcher,saved}=setup();
   fetcher.mockImplementation(async(url:string)=>{
-   if(url.endsWith('/health'))return Response.json({ready:true});
-   if(url.endsWith('/status'))return Response.json({running:false,paused:false,pendingIntent:{intentId:'tv-old-1700000000'}});
+   if(String(url).endsWith('/health'))return Response.json({ready:true});
+   if(String(url).endsWith('/status'))return Response.json({running:false,paused:false,pendingIntent:{intentId:'tv-old-1700000000'}});
    return Response.json({error:'unexpected deploy'},{status:400});
   });
   await expect(svc.deploy('alice','bot-1',{body:{accountId:'prop-1',riskUsd:2,leverage:1,confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'}} as any)).rejects.toThrow(/Unresolved prior order/);
@@ -91,8 +91,8 @@ describe('PropDAO live execution authorization',()=>{
   vi.stubEnv('PROPDAO_LIVE_ENABLED','true');vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
   const {svc,fetcher,saved,storage}=setup();
   fetcher.mockImplementation(async(url:string)=>{
-   if(url.endsWith('/health'))return Response.json({ready:true});
-   if(url.endsWith('/status'))return Response.json({running:false,paused:false,pendingIntent:null});
+   if(String(url).endsWith('/health'))return Response.json({ready:true});
+   if(String(url).endsWith('/status'))return Response.json({running:false,paused:false,pendingIntent:null});
    return Response.json({error:'Unresolved prior order. Operator reconciliation required before redeployment.'},{status:400});
   });
   await expect(svc.deploy('alice','bot-1',{body:{accountId:'prop-1',riskUsd:2,leverage:1,confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'}} as any)).rejects.toThrow(/Unresolved prior order/);
