@@ -26,7 +26,13 @@ export async function parseUpstreamJson(
   if(!mayHaveSubmittedOrder)throw new TemporaryReadError(message);
   throw Error(message+' Order submission outcome is unknown; reconcile first.');
  }
- const raw=await response.text();
+ let raw:string;
+ try{raw=await response.text()}
+ catch{
+  const message=label+' response body interrupted (HTTP '+status+').';
+  if(!mayHaveSubmittedOrder)throw new TemporaryReadError(message);
+  throw Error(message+' Order submission outcome is unknown; reconcile first.');
+ }
  let body:any;
  try{body=JSON.parse(raw)}
  catch{
