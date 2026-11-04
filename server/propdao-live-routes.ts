@@ -1,7 +1,7 @@
 import {createHash,timingSafeEqual,randomBytes} from 'node:crypto';
 import type {Express,Request,Response} from 'express';
 import {parseStrategyConfig} from '../src/strategy.ts';
-import {PropDAOAccounts} from './propdao-account.ts';
+import {PropDAOAccounts,PropDAONoSubmissionError} from './propdao-account.ts';
 
 type Storage={read:(key:string)=>Promise<string|null>;write:(key:string,value:string)=>Promise<void>;remove?:(key:string)=>Promise<void>;list?:(prefix:string,limit:number)=>Promise<string[]>};
 type Dependencies=Storage&{uid:(req:Request,res:Response)=>Promise<string|null>;bot:(uid:string,id:string,req:Request)=>Promise<{asset:string;code:string;venue?:string}|null>;accounts:PropDAOAccounts;request?:typeof fetch};
@@ -243,7 +243,7 @@ export function propDAOLiveRoutes(app:Express,deps:Dependencies){
   res.setHeader('Cache-Control','no-store');
   const secret=process.env.PROPDAO_LIVE_INTERNAL_SECRET,header=req.header('authorization')||'';
   if(!secret||secret.length<32||header.length>512||!timingSafeEqual(Buffer.from(hash(header)),Buffer.from(hash(`Bearer ${secret}`))))return res.status(401).json({error:'Internal authorization required'});
-  try{return res.json(await service.provider(req.body))}catch(e){return res.status(400).json({error:e instanceof Error?e.message:'Provider rejected request'})}
+  try{return res.json(await service.provider(req.body))}catch(e){return res.status(400).json({error:e instanceof Error?e.message:'Provider rejected request',notSubmitted:e instanceof PropDAONoSubmissionError})}
  });
  return service;
 }
