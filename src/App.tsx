@@ -1,5 +1,6 @@
 import {venueOf,venueLabel,type Venue} from '../shared/venues';
 import {BotMutationQueue} from './bot-mutations';
+import {requestsCodeChange} from './chat-intent';
 import {ValrLiveQuote} from './components/ValrLiveQuote';
 import {OpenRouterDialog} from './components/OpenRouterDialog';
 import { useCallback,useEffect,useMemo,useRef,useState,type FormEvent } from 'react';
@@ -29,7 +30,13 @@ import {ValrDeployment} from './components/ValrDeployment';
 type ChatContext={kind:'trade-audit';label:string;data:Record<string,any>};
 type Chat={role:'user'|'assistant';content:string;context?:ChatContext};
 function ChatText({content}:{content:string}){
- const inline=(line:string)=>line.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((part,i)=>part.startsWith('**')&&part.endsWith('**')?<strong key={i}>{part.slice(2,-2)}</strong>:part.startsWith('`')&&part.endsWith('`')?<code key={i}>{part.slice(1,-1)}</code>:part);
+ const inline=(line:string)=>line.split(/(\[[^\]\n]{1,100}\]\(https:\/\/[^\s)]+\)|\*\*[^*]+\*\*|`[^`]+`)/g).map((part,i)=>{
+  const link=part.match(/^\[([^\]\n]{1,100})\]\((https:\/\/[^\s)]+)\)$/);
+  if(link)return <a key={i} href={link[2]} target="_blank" rel="noopener noreferrer" className="chat-citation-link">{link[1]}</a>;
+  if(part.startsWith('**')&&part.endsWith('**'))return <strong key={i}>{part.slice(2,-2)}</strong>;
+  if(part.startsWith('`')&&part.endsWith('`'))return <code key={i}>{part.slice(1,-1)}</code>;
+  return part;
+ });
  return <>{content.split(/\n+/).filter(Boolean).map((line,i)=>{
   const trimmed=line.trim();
   if(/^#{1,3}\s/.test(trimmed))return <h4 key={i}>{inline(trimmed.replace(/^#{1,3}\s+/,''))}</h4>;
@@ -207,7 +214,10 @@ Latest backtest metrics: ${result?JSON.stringify(result.metrics):'No completed b
 
 INTENT RULES:
 - Greetings, casual conversation, preferences, and general questions get a natural, concise chat reply. Do not output code for these.
-- Questions about the strategy or script are discussion requests by default: explain or review the current code accurately in plain language. Do not return a full replacement script unless the user explicitly asks to write, edit, fix, change, implement, or rewrite it.
+- Questions about the strategy, candles, indicators, warm-up, API feeds, infrastructure and script behavior are discussion requests by default. Answer the question with a direct explanation. Never output a code patch or a draft merely because a question includes words such as "make", "add", "change", "logic" or "indicator".
+- Treat a strategy edit as requested only if the user explicitly instructs YOU to modify strategy.js or trading rules. "Why doesn't the bot preload candles?" and "Can it use previous data?" are not edit requests. Product/runtime bug reports are not changes to the strategy source.
+- If the user clarifies "I am asking a question, not asking to change the strategy", acknowledge that and answer their question without entering editing mode.
+- PropDAO runtime fact: on evaluation after the next completed execution candle, the Worker requests roughly 210 already-completed historical candles for each configured strategy timeframe from Hyperliquid. It can calculate indicators from these immediately; it does not have to wait 210 new live bars. Strategies needing more warm-up, or incomplete/stale market data, can still fail to calculate or produce WAIT. Do not confuse preloading with a signal guarantee, and do not claim this implementation for other venues without evidence.
 - For an explicit code change, modify the supplied current file, preserve its contract, and return a short English summary followed by the complete updated JavaScript in one fenced \`js code block. Finish the entire strategy; never abbreviate or stop mid-script. The app hides the code payload from chat and applies it to the editor only when the user presses Apply. Do not claim it was already applied.
 - If the requested action is genuinely ambiguous, ask one short clarifying question instead of guessing or writing a script.
 - Never invent prices, candles, trades, results, or strategy behavior. Distinguish evidence in the supplied data from inference. Never claim profitability.
@@ -225,7 +235,7 @@ ${appContext}`;
     return {role:item.role,content};
    });
    let lastChatPaint=0;
-   const text=await ai([{role:'system',content:system},...history],asset,fullText=>{if(performance.now()-lastChatPaint<70)return;lastChatPaint=performance.now();const safeText=wantsCode?'Preparing a strategy edit…':conciseAssistantText(fullText);setChat([...next,{role:'assistant',content:safeText||'Thinking…'}])},wantsCode?6000:1800);
+   const text=await ai([{role:'system',content:system},...history],asset,fullText=>{if(performance.now()-lastChatPaint<70)return;lastChatPaint=performance.now();const safeText=wantsCode?'Preparing a strategy edit…':conciseAssistantText(fullText);setChat([...next,{role:'assistant',content:safeText||'Thinking…'}])},wantsCode?6000:1800,false,!wantsCode);
    const proposed=wantsCode?extractCodeIfPresent(text):'';let proposalError='';
    if(wantsCode&&proposed&&proposed!==code){try{if(editorIdentityRef.current.draftId!==requestedEditor.draftId||editorIdentityRef.current.code!==requestedEditor.code)throw new Error('The editor changed while the response was being prepared');const proposedConfig=parseStrategyConfig(proposed);if(selectedMarket&&proposedConfig.timeframes.some((tf:string)=>!selectedMarket.timeframes.includes(tf)))throw new Error(`Available history is ${selectedMarket.timeframes.join(', ')} only.`);if(!/export\s+function\s+onCandle\s*\(/.test(proposed))throw new Error('Missing onCandle(ctx) export');validateStrategySyntax(proposed);setProposal(proposed);setProposalSummary(conciseAssistantText(text)||'A strategy update is ready. Apply it to load the changes into the code editor.');log('AI prepared a strategy edit · review and apply to the code editor.')}catch(error){proposalError=`The strategy edit was incomplete (${err(error)}). Retry to prepare a complete editor update.`;log(`AI code was not staged · ${err(error)} Ask AI to try again.`)}}
    const finalText=wantsCode?(proposed&&proposed!==code&&!proposalError?'Strategy edit ready. Review the summary below, then apply it to the code editor.':proposalError||'I couldn’t prepare a complete strategy edit. Retry, or describe the change another way.'):conciseAssistantText(text)||'I could not form a useful response. Please rephrase your request.';
@@ -247,13 +257,13 @@ ${appContext}`;
   setSelectedTrade(null);setChatCollapsed(false);if(window.innerWidth<=640){setChatCollapsed(false);setMobilePanel('chat');}
   void sendChat('Audit this trade using the attached prices and strategy. Report only conclusions supported by this context.',context);
  };
- async function ai(messages:any[],selectedAsset:string,onText:(fullText:string)=>void,maxTokens=1200,includeMarketContext=false):Promise<string>{
+ async function ai(messages:any[],selectedAsset:string,onText:(fullText:string)=>void,maxTokens=1200,includeMarketContext=false,allowWebResearch=false):Promise<string>{
   let collected='',currentMessages=messages;
   for(let attempt=0;attempt<3;attempt++){
    const controller=new AbortController(),timer=window.setTimeout(()=>controller.abort(),55_000);
    try{
     const token=await cloudClient!.getIdToken();
-    const segment=await postApiStream('/api/ai',{messages:currentMessages,asset:selectedAsset,maxTokens,includeMarketContext:attempt===0&&includeMarketContext},'OpenRouter',(_chunk,partial)=>onText(joinAiContinuation(collected,partial)),controller.signal,token);
+    const segment=await postApiStream('/api/ai',{messages:currentMessages,asset:selectedAsset,maxTokens,includeMarketContext:attempt===0&&includeMarketContext,researchMode:attempt===0&&allowWebResearch},'OpenRouter',(_chunk,partial)=>onText(joinAiContinuation(collected,partial)),controller.signal,token);
     return joinAiContinuation(collected,segment);
    }catch(error){
     if(!(error instanceof AiOutputLimitError)||!error.partialText.trim())throw error;
@@ -537,7 +547,6 @@ function ChatContextModal({context,onClose}:{context:ChatContext|null;onClose:()
  if(!context)return null;const data=context.data;const rows=[['Trade ID',data.tradeId],['Market / timeframe',`${data.asset} · ${data.timeframe}`],['Side',data.side],['Entry',`${data.entry} · ${data.entryTime}`],['Exit',`${data.exit} · ${data.exitTime}`],['Stop / target',`${data.stopLoss} / ${data.takeProfit}`],['Result',`${data.pnlR}R · ${data.exitReason}`]];
  return <div className="trade-modal-backdrop context-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)onClose()}}><section className="trade-modal context-modal" role="dialog" aria-modal="true" aria-labelledby="context-title"><header><div><span className="context-eyebrow">AI AUDIT CONTEXT</span><h2 id="context-title">{context.label}</h2></div><button className="icon-button" onClick={onClose} aria-label="Close context"><X size={17}/></button></header><div className="context-modal-body"><div className="context-facts">{rows.map(([label,value])=><div key={label}><span>{label}</span><strong>{String(value??'—')}</strong></div>)}</div><p className="context-limit">{data.contextLimit}</p><details><summary>Price candles · before, during and after</summary><pre>{JSON.stringify(data.contextCandles,null,2)}</pre></details><details><summary>Strategy source</summary><pre>{data.strategy}</pre></details><details><summary>Backtest metrics</summary><pre>{JSON.stringify(data.backtestMetrics,null,2)}</pre></details></div></section></div>
 }
-function requestsCodeChange(message:string,history:Chat[]=[]){const action='write|generate|create|edit|change|modify|update|fix|rewrite|implement|add|remove|replace|refactor|adjust|move|set|make|turn|convert|transform|build|improve';const subject='code|script|strategy|function|rules?|filters?|entries|entry|exits?|stop(?:-loss)?|targets?|risk|indicators?|logic|signal';const direct=new RegExp(`\\b(?:${action})\\b.{0,100}\\b(?:my\\s+|the\\s+|this\\s+|it\\s+into\\s+|it\\s+as\\s+|a\\s+|an\\s+)?(?:${subject})\\b|\\b(?:${subject})\\b.{0,100}\\b(?:${action})\\b`,'i').test(message);const transformation=/\b(?:turn|convert|transform)\s+(?:it|this|that)\s+into\b|\bmake\s+(?:it|this|that)\s+(?:a|an)\b/i.test(message);const strategyIdea=/\b(?:write|rewrite|create|build|make|turn|convert|transform)\b.{0,100}\b(?:liquidity|sweep|reversal|breakout|trend|scalp)\b/i.test(message);if(direct||transformation||strategyIdea)return true;const affirmative=/^\s*(?:y|yes|yeah|yep|sure|please|do it|go ahead|okay|ok)\s*[.!]?\s*$/i.test(message);const previous=history.at(-1);return Boolean(affirmative&&previous?.role==='assistant'&&/\b(?:rewrite|edit|update|change|implement|add|modify|apply)\b/i.test(previous.content))}
 function hasLastDraft(){try{return Boolean(localStorage.getItem('tradefoundry:last-draft'))}catch{return false}}
 function conciseAssistantText(text:string,maxLength=2400){let prose=text.replace(/```[\s\S]*?(?:```|$)/g,'');const rawCodeStart=prose.search(/^\s*(?:export\s+(?:const|function|class)|(?:async\s+)?function\s+[A-Za-z_$]|(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=|import\s+.*\s+from\s+['"])/m);if(rawCodeStart>=0)prose=prose.slice(0,rawCodeStart);const codeLine=/^\s*(?:export\s+|async\s+)?(?:const|let|var|function|return|if\s*\(|else\b|for\s*\(|while\s*\(|switch\s*\(|case\b|break;|continue;|\/\/|\/\*|\*\/|[{}]\s*[,;]?$)|=>|\b(?:stopLoss|takeProfit|timeframes|executionTimeframe)\s*:/;const clean=prose.split('\n').filter(line=>!codeLine.test(line)).join('\n').replace(/^\s*[{}[\],;]+\s*$/gm,'').replace(/\n{3,}/g,'\n\n').trim();if(clean.length<=maxLength)return clean;const head=clean.slice(0,maxLength-1);const boundary=Math.max(head.lastIndexOf('. '),head.lastIndexOf('! '),head.lastIndexOf('? '),head.lastIndexOf('\n\n'));return `${head.slice(0,boundary>maxLength*0.55?boundary+1:head.lastIndexOf(' ')).trimEnd()}…`}
 function validateStrategySyntax(source:string){try{new Function(source.replace(/^\s*export\s+/gm,''))}catch(error){throw new Error(`Strategy code has a syntax error: ${error instanceof Error?error.message:'invalid JavaScript'}`)}}function err(e:unknown){return e instanceof Error?e.message:'Unknown error'}function extractCode(text:string){return extractCodeIfPresent(text)||text.slice(text.search(/export\s+const\s+config\b/)>=0?text.search(/export\s+const\s+config\b/):0).trim()}function extractCodeIfPresent(text:string){const match=text.match(/```(?:javascript|js)?\s*([\s\S]*?)```/i);if(match)return match[1].trim();const start=text.search(/export\s+const\s+config\b/);return start>=0?text.slice(start).trim():''}
