@@ -1,4 +1,5 @@
 import type { Candle, Side, Trade } from './types';
+import {nextOpenRewardGuard} from './entry-fill-guard';
 
 /** All prices are in the instrument quote currency; conversion is ZAR per quote unit. */
 export type MonetaryAssumptions = {
@@ -27,7 +28,7 @@ export function validateMonetaryAssumptions(a: MonetaryAssumptions): string | nu
 }
 
 /** Independent simulation: replays the same signals so rejected entries do not block later signals. */
-export function simulateMoney(candles: Candle[], decisions: any[], startingBalance: number, riskPercent: number, a: MonetaryAssumptions): MonetaryResult {
+export function simulateMoney(candles: Candle[], decisions: any[], startingBalance: number, riskPercent: number, a: MonetaryAssumptions, configuredRR?:number): MonetaryResult {
   const invalid = validateMonetaryAssumptions(a);
   if (invalid) throw new Error(invalid);
   if (!Number.isFinite(startingBalance) || startingBalance <= 0 || !Number.isFinite(riskPercent) || riskPercent <= 0 || riskPercent > 10) throw new Error('Starting balance and risk percentage must be positive.');
@@ -69,7 +70,8 @@ export function simulateMoney(candles: Candle[], decisions: any[], startingBalan
         const entry = c.open + direction * (a.spread + a.slippage);
         const signalClose = candles[i - 1].close;
         const valid = Number.isFinite(stop) && Number.isFinite(target) && stop > 0 && target > 0 && (long ? stop < signalClose && target > signalClose && stop < entry && entry < target : stop > signalClose && target < signalClose && target < entry && entry < stop);
-        if (!valid) rejected.push({time: c.time, reason: 'Invalid stop/target or next fill outside levels'});
+        const rewardGuard=valid?nextOpenRewardGuard(signalClose,entry,stop,target,action,configuredRR):'Invalid stop/target or next fill outside levels';
+        if (rewardGuard) rejected.push({time: c.time, reason: rewardGuard});
         else {
           const intendedRisk = Math.max(0, equity) * (riskPercent / 100);
           const lossPerLot = (Math.abs(entry - stop) + a.slippage) * valuePerUnit + a.commissionPerLotZar;
