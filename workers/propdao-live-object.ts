@@ -47,7 +47,7 @@ export class PropDAOLiveBot extends DurableObject<any>{
   const response=await stub.fetch(new Request('https://bot/'+action,{method:'POST',
    headers:{'X-TV-UID':grant.uid,'Content-Type':'application/json'},
    body:JSON.stringify({intentId,accountId:grant.accountId,botId:grant.botId})}));
-  const body=await response.json<any>();
+  const body=await response.json() as any;
   if(!response.ok)throw Error(body?.error||'Account execution lock unavailable');
   return body?.acquired===true;
  }
