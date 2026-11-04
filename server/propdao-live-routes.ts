@@ -177,7 +177,7 @@ export class PropDAOLiveService{
    if(g.uid!==uid)throw Error('Live authorization ownership mismatch');
    if(g.expiresAt<Date.now())continue;
    const current=await this.status(uid,g.botId);
-   if(current.running||current.paused||current.uncertain||!current.configured)throw Error('Stop and reconcile all PropDAO live robots before changing API keys');
+   if(current.running||current.paused||current.uncertain||!current.configured||!current.deployed||current.accountOccupied||current.pendingIntent||current.statusUnavailable)throw Error('Stop and reconcile all PropDAO live robots before changing API keys');
    const live=await this.deps.accounts.accountRisk(uid,g.accountId);
    if(live.positions.length||live.orders.length)throw Error('Close or cancel PropDAO orders and positions before disconnecting');
   }
