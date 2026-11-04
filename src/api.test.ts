@@ -20,7 +20,7 @@ describe('API response diagnostics', () => {
 
   it('explains non-JSON gateway output', async () => {
     await expect(readApiJson(new Response('<html>proxy error</html>', { status: 502 }), 'Market data'))
-      .rejects.toThrow('Market data returned an invalid response (HTTP 502). Check the API server logs.');
+      .rejects.toThrow('Market data returned an invalid response (HTTP 502). Check the API service status.');
   });
 
   it('assembles streamed OpenRouter deltas across network chunks', async () => {
@@ -69,7 +69,7 @@ describe('API response diagnostics', () => {
     }), { headers: { 'Content-Type': 'text/event-stream' } }));
     try {
       await expect(postApiStream('/api/ai', { messages: [] }, 'OpenRouter', () => undefined))
-        .rejects.toThrow('connection ended before the response was complete');
+        .rejects.toThrow('stream disconnected before completion');
     } finally { fetchMock.mockRestore(); }
   });
   it('rejects a response that hits the output limit even after DONE', async () => {
