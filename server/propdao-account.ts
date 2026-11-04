@@ -124,6 +124,42 @@ export class PropDAOAccounts {
   })).filter((t:any)=>t.id&&t.symbol&&['BUY','SELL'].includes(t.side)&&
    [t.qty,t.entry,t.exit,t.pnl,t.openedAt,t.closedAt,t.fee].every(Number.isFinite));
  }
+ /**
+  * Read-only two-stage operator reconciliation. Never retries the ambiguous order.
+  * PropDAO's current API does not expose a definitive lookup of all historical
+  * intents, so require explicit user confirmation, elapsed settlement time,
+  * the entire account history, and two independently fetched flat snapshots.
+  */
+ async verifyFlatReconciliation(uid:string,id:string,pending:{intentId:string;createdAt:number;symbol:string;side:string}){
+  if(!validId(id)||typeof pending?.intentId!=='string'||!/^[a-zA-Z0-9_-]{10,128}$/.test(pending.intentId)||
+     !Number.isFinite(pending.createdAt)||!Number.isInteger(pending.createdAt)||pending.createdAt>Date.now()-120_000||
+     pending.createdAt<Date.now()-30*86_400_000||!['BUY','SELL'].includes(pending.side)||
+     typeof pending.symbol!=='string'||!/^[A-Z0-9]{2,40}$/.test(pending.symbol))
+   throw Error('The pending order is too recent or its identity cannot be verified. No authorization was cleared.');
+  const apiKey=await this.load(uid);if(!apiKey)throw Error('Connect your PropDAO key first');
+  const accountPath=`/accounts/${encodeURIComponent(id)}`;
+  const flat=async()=>{
+   const [live,details]=await Promise.all([this.accountRisk(uid,id),this.get(apiKey,accountPath)]);
+   if(!['active','funded'].includes(live.account.status)||live.risk.breached)
+    throw Error('The PropDAO account cannot resume trading; review its account status.');
+   if(!Array.isArray(details?.openPositions)||!Array.isArray(details?.pendingOrders)||
+      !Array.isArray(details?.twapOrders)||!Array.isArray(details?.tradeHistory))
+    throw Error('PropDAO did not provide complete order, position and trade history; reconciliation remains locked.');
+   if(live.positions.length||live.orders.length||details.openPositions.length||
+      details.pendingOrders.length||details.twapOrders.length)
+    throw Error('PropDAO still reports an order or open position; inspect/cancel it on PropDAO before reconciliation.');
+   return details.tradeHistory as any[];
+  };
+  const first=await flat();
+  await new Promise(resolve=>setTimeout(resolve,800));
+  const second=await flat();
+  const activeHistory=second.filter(t=>t?.symbol===pending.symbol&&t?.side===pending.side&&
+    Number(t?.openedAt)>=pending.createdAt-60_000);
+  return {verified:true,accountId:id,intentId:pending.intentId,snapshots:2,checkedAt:Date.now(),
+   closedTradesSinceIntent:activeHistory.length,historyEntries:second.length,
+   previousHistoryEntries:first.length,openPositions:0,restingOrders:0,twapOrders:0,
+   verification:'OPERATOR_CONFIRMED_ACCOUNT_FLAT'};
+ }
  async disconnect(uid:string){await this.storage.remove(path(uid));return {connected:false};}
 }
 export function propDAORoutes(app:Express,accounts:PropDAOAccounts,uid:(req:Request,res:ExpressResponse)=>Promise<string|null>,beforeChange?:(uid:string)=>Promise<void>){
