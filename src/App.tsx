@@ -11,7 +11,7 @@ import {compressBacktest,decompressBacktest,isCompressedBacktest} from './backte
 import { runBacktest } from './backtest';import { starterCode,parseStrategyConfig } from './strategy';import type { Candle,Result,Trade } from './types';
 import { demoBots, type DemoBot } from './demos';
 import { connectFirebase, firebaseConfigured, readableFirebaseError, type BotVersion, type CloudBot, type CloudClient } from './firebase';
-import { postApiJson, postApiStream, readApiJson } from './api';
+import { AiOutputLimitError, joinAiContinuation, postApiJson, postApiStream, readApiJson } from './api';
 import { DateRangePicker } from './components/ui/DateRangePicker';
 import { installChartTools } from './chart-tools';
 import { MonetaryControls, type SimulationSettings } from './components/MonetaryControls';
@@ -202,19 +202,19 @@ TRADE AUDITS: when an attached trade context is present, inspect its exact strat
 
 CURRENT WORKSPACE CONTEXT:
 ${appContext}`;
-   const history=next.slice(-10).map((item,index)=>{
+   const history=next.slice(-6).map((item,index)=>{
     let content=item.content;
-    if(item.role==='assistant'&&index<next.slice(-10).length-1&&/```(?:js|javascript)/i.test(content))content='[Earlier assistant message contained a code proposal; the current strategy is provided in system context.]';
-    if(item.context){content+=index===next.slice(-10).length-1?`\n\nAttached trade context (authoritative JSON): ${JSON.stringify(item.context.data)}`:`\n[Previous message carried ${item.context.label}.]`;}
+    if(item.role==='assistant'&&index<next.slice(-6).length-1&&/```(?:js|javascript)/i.test(content))content='[Earlier assistant message contained a code proposal; the current strategy is provided in system context.]';
+    if(item.context){content+=index===next.slice(-6).length-1?`\n\nAttached trade context (authoritative JSON): ${JSON.stringify(item.context.data)}`:`\n[Previous message carried ${item.context.label}.]`;}
     return {role:item.role,content};
    });
    let lastChatPaint=0;
-   const text=await ai([{role:'system',content:system},...history],asset,fullText=>{if(performance.now()-lastChatPaint<70)return;lastChatPaint=performance.now();const safeText=wantsCode?'Preparing a strategy edit…':conciseAssistantText(fullText);setChat([...next,{role:'assistant',content:safeText||'Thinking…'}])},wantsCode?6000:1200);
+   const text=await ai([{role:'system',content:system},...history],asset,fullText=>{if(performance.now()-lastChatPaint<70)return;lastChatPaint=performance.now();const safeText=wantsCode?'Preparing a strategy edit…':conciseAssistantText(fullText);setChat([...next,{role:'assistant',content:safeText||'Thinking…'}])},wantsCode?6000:1800);
    const proposed=wantsCode?extractCodeIfPresent(text):'';let proposalError='';
    if(wantsCode&&proposed&&proposed!==code){try{if(editorIdentityRef.current.draftId!==requestedEditor.draftId||editorIdentityRef.current.code!==requestedEditor.code)throw new Error('The editor changed while the response was being prepared');const proposedConfig=parseStrategyConfig(proposed);if(selectedMarket&&proposedConfig.timeframes.some((tf:string)=>!selectedMarket.timeframes.includes(tf)))throw new Error(`Available history is ${selectedMarket.timeframes.join(', ')} only.`);if(!/export\s+function\s+onCandle\s*\(/.test(proposed))throw new Error('Missing onCandle(ctx) export');validateStrategySyntax(proposed);setProposal(proposed);setProposalSummary(conciseAssistantText(text)||'A strategy update is ready. Apply it to load the changes into the code editor.');log('AI prepared a strategy edit · review and apply to the code editor.')}catch(error){proposalError=`The strategy edit was incomplete (${err(error)}). Retry to prepare a complete editor update.`;log(`AI code was not staged · ${err(error)} Ask AI to try again.`)}}
    const finalText=wantsCode?(proposed&&proposed!==code&&!proposalError?'Strategy edit ready. Review the summary below, then apply it to the code editor.':proposalError||'I couldn’t prepare a complete strategy edit. Retry, or describe the change another way.'):conciseAssistantText(text)||'I could not form a useful response. Please rephrase your request.';
    setAiError(proposalError||(wantsCode&&!proposed?'The response did not include a complete strategy edit. Retry your request.':''));setChat([...next,{role:'assistant',content:finalText}]);
-  }catch(error){const errorMessage=error instanceof Error&&error.name==='AbortError'?'AI response timed out. Retry your message.':err(error);setAiError(errorMessage);setChatInput(message);setChat([...next,{role:'assistant',content:`Could not reach AI: ${errorMessage}`}])}
+  }catch(error){if(error instanceof AiOutputLimitError){const notice='The free model reached its output limit after multiple continuation attempts.';setAiError(notice);setChat([...next,{role:'assistant',content:wantsCode?'The strategy edit could not be completed and was not applied. Try a smaller edit or choose a model with a larger output allowance.':(conciseAssistantText(error.partialText)||'Partial answer unavailable.')+'\n\n'+notice+' Ask me to continue for the remainder.'}]);}else{const errorMessage=error instanceof Error&&error.name==='AbortError'?'AI response timed out. Retry your message.':err(error);setAiError(errorMessage);setChatInput(message);setChat([...next,{role:'assistant',content:`Could not reach AI: ${errorMessage}`}])}}
   finally{setBusy('')}
  };
  const askAiToAuditTrade=(trade:Trade)=>{
@@ -227,13 +227,33 @@ ${appContext}`;
   const after=exitIndex+1<result.candles.length?result.candles.slice(exitIndex+1,Math.min(result.candles.length,exitIndex+11)):[];
   const tradeId=createTradeId(asset,result.timeframe,trade);
   const audit={tradeId,asset,timeframe:result.timeframe,side:trade.side,entryTime:new Date(trade.entryTime*1000).toISOString(),exitTime:new Date(trade.exitTime*1000).toISOString(),entry:trade.entry,exit:trade.exit,stopLoss:trade.stop,takeProfit:trade.target,pnlR:trade.pnl,exitReason:trade.reason,contextCandles:{beforeEntry:before,duringTrade:inTrade,afterExit:after},contextLimit:inTrade.length<exitIndex-entryIndex+1?'The supplied OHLC bars do not cover the full trade; do not infer missing bars.':'All available trade bars are included.'};
-  const context:ChatContext={kind:'trade-audit',label:`Trade context · ${tradeId}`,data:{...audit,strategy:lastBacktestCode||code,backtestMetrics:result.metrics}};
+  const context:ChatContext={kind:'trade-audit',label:`Trade context · ${tradeId}`,data:{...audit,strategy:(lastBacktestCode||code).slice(0,18000),strategyTruncated:(lastBacktestCode||code).length>18000,backtestMetrics:result.metrics}};
   setSelectedTrade(null);setChatCollapsed(false);if(window.innerWidth<=640){setChatCollapsed(false);setMobilePanel('chat');}
   void sendChat('Audit this trade using the attached prices and strategy. Report only conclusions supported by this context.',context);
  };
- function ai(messages:any[],selectedAsset:string,onText:(fullText:string)=>void,maxTokens=1200,includeMarketContext=false){
-  const controller=new AbortController();const timer=window.setTimeout(()=>controller.abort(),55_000);
-  return cloudClient!.getIdToken().then(token=>postApiStream('/api/ai',{messages,asset:selectedAsset,maxTokens,includeMarketContext},'OpenRouter',(_chunk,fullText)=>onText(fullText),controller.signal,token)).finally(()=>window.clearTimeout(timer));
+ async function ai(messages:any[],selectedAsset:string,onText:(fullText:string)=>void,maxTokens=1200,includeMarketContext=false):Promise<string>{
+  let collected='',currentMessages=messages;
+  for(let attempt=0;attempt<3;attempt++){
+   const controller=new AbortController(),timer=window.setTimeout(()=>controller.abort(),55_000);
+   try{
+    const token=await cloudClient!.getIdToken();
+    const segment=await postApiStream('/api/ai',{messages:currentMessages,asset:selectedAsset,maxTokens,includeMarketContext:attempt===0&&includeMarketContext},'OpenRouter',(_chunk,partial)=>onText(joinAiContinuation(collected,partial)),controller.signal,token);
+    return joinAiContinuation(collected,segment);
+   }catch(error){
+    if(!(error instanceof AiOutputLimitError)||!error.partialText.trim())throw error;
+    collected=joinAiContinuation(collected,error.partialText);
+    onText(collected);
+    if(attempt===2)throw new AiOutputLimitError(collected);
+    // Continue from a compact context, not from the entire old conversation.
+    const originalSystem=String(messages[0]?.content||'');
+    const originalRequest=String(messages.at(-1)?.content||'');
+    currentMessages=[
+     {role:'system',content:originalSystem.slice(0,3600)+'\nCONTINUATION TASK: Resume the previous answer at the next character. Do not introduce, restart, summarize or repeat previous text. Keep the original response format. For code, continue inside the existing JavaScript fence and close it only at the end. Do not invent missing trade evidence.'},
+     {role:'user',content:'Original request and supplied data (condensed):\n'+originalRequest.slice(0,15000)+'\n\nThe response already delivered ends with:\n'+collected.slice(-2400)+'\n\nWrite only the missing continuation. Do not repeat any of the text above.'}
+    ];
+   }finally{window.clearTimeout(timer)}
+  }
+  throw new AiOutputLimitError(collected);
  }
  const openDemo=(bot:DemoBot)=>{setVenue('valr');botLoadRef.current=bot.id;hydratedWorkspaceRef.current=bot.id;setDraftId(bot.id);setName(bot.name);setAsset(bot.asset);setPrompt(bot.prompt);setCode(bot.code);setCodeHydrated(true);setCreated(true);setChatHydrated(true);setScreen('workspace');setResult(null);setChat([{role:'assistant',content:`${bot.description} This example is ready to customize and backtest.`}]);setSelectedTrade(null);setView('chart');setTab('chart');setQueuedBacktest(bot.id)};
  const openCloudBot=async(bot:CloudBot)=>{setVenue(venueOf(bot.venue));
