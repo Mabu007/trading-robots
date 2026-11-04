@@ -41,6 +41,26 @@ export async function postApiJson<T>(url: string, payload: unknown, service: str
   return readApiJson<T>(response, service);
 }
 
+/** Preserve partial text when a free model reaches its completion quota.
+ * The caller may request continuation; incomplete strategies must never be applied. */
+export class AiOutputLimitError extends Error {
+  readonly partialText: string;
+  constructor(partialText: string) {
+    super('OpenRouter reached the model output limit. The partial response is preserved.');
+    this.name = 'AiOutputLimitError';
+    this.partialText = partialText;
+  }
+}
+
+/** Avoid duplicating boundary text when a model continues a truncated answer. */
+export function joinAiContinuation(previous: string, next: string): string {
+  if (!previous) return next;
+  for (let overlap = Math.min(400, previous.length, next.length); overlap >= 16; overlap--) {
+    if (previous.endsWith(next.slice(0, overlap))) return previous + next.slice(overlap);
+  }
+  return previous + next;
+}
+
 /** POST to an SSE endpoint and deliver each text delta as soon as it arrives. */
 export async function postApiStream(
   url: string,
@@ -111,7 +131,7 @@ export async function postApiStream(
     throw error;
   }
   if (!finished) throw new Error(`${service} connection ended before the response was complete. Retry the request.`);
-  if (truncated) throw new Error(`${service} reached the model’s output limit before finishing. Ask for a smaller change or configure another permitted model; existing code was preserved.`);
+  if (truncated) throw new AiOutputLimitError(fullText);
   if (!fullText.trim()) throw new Error(`${service} returned an empty assistant response.`);
   return fullText;
 }
