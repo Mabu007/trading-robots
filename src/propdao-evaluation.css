@@ -30,7 +30,13 @@
 .tv-live-play,.tv-live-pause,.tv-mode-switch{display:inline-flex;align-items:center;justify-content:center;gap:7px;white-space:nowrap}
 .tv-live-play{background:#176d52!important;color:#f4fff9!important;border:1px solid #4ac69a!important;font-weight:750}
 .tv-live-pause{border-color:rgba(250,199,102,.42)!important;color:#f9cf8e!important;font-weight:750}
-.prop-live-trades{display:flex;flex-direction:column;gap:3px;min-width:0;height:100%;overflow:auto;padding:14px 18px 24px;color:#e9f5ed}
+/* LIVE Trades is a direct child of the terminal's flex row. Stretch it across
+   the entire dock instead of shrinking to its intrinsic content width. */
+.output-dock-body > .prop-live-trades{flex:1 1 100%;width:100%;max-width:100%;min-width:0;min-height:0}
+.prop-live-trades{display:flex;flex-direction:column;gap:3px;min-width:0;height:100%;overflow:auto;padding:14px 18px 24px;color:#e9f5ed;scrollbar-width:thin;scrollbar-color:#60796a #0b1510}
+.prop-live-trades::-webkit-scrollbar{width:8px}
+.prop-live-trades::-webkit-scrollbar-track{background:#0b1510}
+.prop-live-trades::-webkit-scrollbar-thumb{background:#60796a;border-radius:6px}
 .prop-live-trades-head{display:flex;justify-content:space-between;align-items:center;gap:14px;padding-bottom:12px;border-bottom:1px solid #ffffff19}
 .prop-live-trades-head div{display:flex;flex-direction:column;gap:4px}
 .prop-live-trades-head strong{font-size:13px;font-weight:720}
