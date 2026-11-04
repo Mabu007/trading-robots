@@ -38,7 +38,7 @@ export class PropDAOLiveService{
    return {configured:enabled,connected:true,error:enabled?undefined:'Runtime connected. Automated trading is disabled.'};
   }catch(e){return {configured:false,connected:false,error:e instanceof Error?e.message:'Cloudflare Worker unavailable'}}
  }
- async status(uid:string,botId:string){
+ async status(uid:string,botId:string,selectedAccount?:string){
   const grant=await this.grant(uid,botId);const health=await this.health();const configured=health.configured;
   if(!grant)return {configured,connected:health.connected,deployed:false,running:false,accountId:null,events:[],error:configured?'Connect a PropDAO account and authorize a deployment.':health.error||'Live runtime is not available.'};
   if(!health.connected)return {configured:false,connected:false,deployed:true,running:false,uncertain:true,accountId:grant.accountId,events:[],error:health.error};
@@ -139,8 +139,14 @@ export class PropDAOLiveService{
  async reconcile(uid:string,botId:string,req:Request){
   if(req.body?.confirm!=='I VERIFIED PROPDAO HAS NO OPEN ORDERS OR POSITIONS')
    throw Error('Check the PropDAO account, then explicitly confirm that no orders or positions remain.');
-  const g=await this.grant(uid,botId);
-  if(!g)throw Error('No deployment authorization found. Open the bot that owns the pending order.');
+  const grant=await this.grant(uid,botId);
+  const selectedAccount=req.body?.accountId;
+  if(grant&&selectedAccount&&selectedAccount!==grant.accountId)
+   throw Error('Selected account differs from the authorized deployment');
+  if(!grant&&(typeof selectedAccount!=='string'||!safeId(selectedAccount)))
+   throw Error('Select the PropDAO account whose pending order needs reconciliation');
+  if(!grant)await this.deps.accounts.accountRisk(uid,selectedAccount);
+  const g=grant||({uid,accountId:selectedAccount} as PropGrant);
   const state=await this.runtime(g,'status');
   if(state.running||state.paused)throw Error('Pause or stop the running robot before reconciling an unknown order.');
   if(!state.pendingIntent)return {reconciled:true,reason:'No pending order on this account',...state};
@@ -197,7 +203,7 @@ export class PropDAOLiveService{
 export function propDAOLiveRoutes(app:Express,deps:Dependencies){
  const service=new PropDAOLiveService(deps);
  const route=(fn:(uid:string,id:string,req:Request)=>Promise<unknown>)=>async(req:Request,res:Response)=>{res.setHeader('Cache-Control','no-store');const uid=await deps.uid(req,res);if(!uid)return;const id=String(req.params.botId);if(!safeId(id))return res.status(400).json({error:'Invalid bot ID'});try{return res.json(await fn(uid,id,req))}catch(e){return res.status(/Unresolved prior order|reconcil|open orders or positions|already running or paused/.test(e instanceof Error?e.message:'')?409:400).json({error:e instanceof Error?e.message:'PropDAO live request failed'})}};
- app.get('/api/venues/propdao/bots/:botId/live',route((uid,id)=>service.status(uid,id)));
+ app.get('/api/venues/propdao/bots/:botId/live',route((uid,id,req)=>service.status(uid,id,typeof req.query.accountId==='string'?req.query.accountId:undefined)));
  app.get('/api/venues/propdao/bots/:botId/live/market',route((uid,id)=>service.market(uid,id)));
  app.post('/api/venues/propdao/bots/:botId/live',route((uid,id,req)=>req.body?.action==='deploy'?service.deploy(uid,id,req):req.body?.action==='stop'?service.stop(uid,id):req.body?.action==='pause'?service.pause(uid,id):req.body?.action==='resume'?service.resume(uid,id,req):req.body?.action==='reconcile'?service.reconcile(uid,id,req):Promise.reject(Error('Unknown action'))));
  app.post('/api/internal/propdao/provider',async(req,res)=>{
