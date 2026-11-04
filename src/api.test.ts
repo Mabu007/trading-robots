@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { postApiStream, readApiJson } from './api';
+import { AiOutputLimitError, joinAiContinuation, postApiStream, readApiJson } from './api';
+import { pendingRunIsNewer } from './backtest-persistence';
 
 describe('API response diagnostics', () => {
   it('reads normal JSON responses', async () => {
@@ -72,6 +73,28 @@ describe('API response diagnostics', () => {
       await expect(postApiStream('/api/ai', {}, 'OpenRouter', () => undefined))
         .rejects.toThrow('output limit');
     } finally { mock.mockRestore(); }
+  });
+
+  it('preserves truncated streamed text as a resumable error', async () => {
+    const body = 'data: {"choices":[{"delta":{"content":"partial strategy"},"finish_reason":null}]}\n\n' +
+      'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n' + 'data: [DONE]\n\n';
+    const mock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(body));
+    try {
+      await expect(postApiStream('/api/ai', {}, 'OpenRouter', () => undefined))
+        .rejects.toMatchObject({name:'AiOutputLimitError',partialText:'partial strategy'});
+    } finally {mock.mockRestore()}
+  });
+
+  it('continues generated output without duplicating a repeated suffix', () => {
+    expect(joinAiContinuation('abc 0123456789 ending', '0123456789 ending and more'))
+      .toBe('abc 0123456789 ending and more');
+    expect(new AiOutputLimitError('incomplete').partialText).toBe('incomplete');
+  });
+
+  it('prefers more recently saved local backtests without overwriting newer cloud runs', () => {
+    expect(pendingRunIsNewer({savedAt:2000},null)).toBe(true);
+    expect(pendingRunIsNewer({savedAt:2000},{savedAt:new Date(3000).toISOString()})).toBe(false);
+    expect(pendingRunIsNewer({savedAt:3000},{savedAt:new Date(2000).toISOString()})).toBe(true);
   });
 
   it('reports an error delivered in the stream', async () => {

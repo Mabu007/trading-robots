@@ -126,6 +126,8 @@ export async function runBacktest(
   if (window.warmupCandles) logs.push(`Indicator warm-up · ${window.warmupCandles.toLocaleString()} execution candles before the selected period; no trades placed during warm-up`);
   const result = simulate(tradingCandles, tradingDecisions, startingR,{spread:config.backtestSpread||0,slippage:config.backtestSlippage||0,commissionR:config.backtestCommissionR||0});
   logs.push(...result.logs);
+  const rrMismatches=result.trades.filter(t=>Number.isFinite(config.riskReward)&&Number.isFinite(t.entry)&&Math.abs(t.entry-t.stop)>0&&Math.abs(Math.abs(t.target-t.entry)/Math.abs(t.entry-t.stop)-config.riskReward)>0.25);
+  if(rrMismatches.length)logs.push(`R:R audit · ${rrMismatches.length} of ${result.trades.length} filled trades have a target multiple different from config.riskReward=${config.riskReward}. The strategy supplies explicit target prices; next-candle fills can also change the effective R:R. Review individual trade audits.`);
   for (const trade of result.trades.slice(0, 30)) {
     logs.push(`#${trade.id} ${trade.side} · ${trade.reason} · ${trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)}R`);
   }

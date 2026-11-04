@@ -10,7 +10,7 @@ export function simulate(candles:Candle[],decisions:any[],startingR=0,costs:Trad
    const levelsValid=Number.isFinite(stop)&&Number.isFinite(target)&&stop>0&&target>0&&(long?stop<signalClose&&target>signalClose:stop>signalClose&&target<signalClose);
    const fillValid=levelsValid&&(long?stop<entry&&entry<target:target<entry&&entry<stop);
    if(!fillValid){skippedSignals++;if(logs.length<20)logs.push(`Skipped ${action} signal · next open ${entry} was outside valid stop/target levels · ${new Date(c.time*1000).toISOString()}.`);}
-   else{const distance=Math.abs(entry-stop);position={side:long?'LONG':'SHORT',entryTime:c.time,entry,stop,target,riskDistance:distance};}
+   else{const distance=Math.abs(entry-stop);position={side:long?'LONG':'SHORT',entryTime:c.time,entry,stop,target,riskDistance:distance,signalClose,signalTargetR:Math.abs(target-signalClose)/Math.abs(signalClose-stop)};}
   }}
   if(position?.entryTime===c.time){let exit:number|undefined,reason:Trade['reason']='stop';if(position.side==='LONG'){if(c.low<=position.stop){exit=position.stop;reason='stop'}else if(c.high>=position.target){exit=position.target;reason='target'}}else{if(c.high>=position.stop){exit=position.stop;reason='stop'}else if(c.low<=position.target){exit=position.target;reason='target'}}if(exit!==undefined){const pnl=(exit-position.entry)*(position.side==='LONG'?1:-1)/position.riskDistance-costR(position);cumulativeR+=pnl;trades.push({...position,id:trades.length+1,exitTime:c.time,exit,pnl,reason});position=null}}
   const unrealizedR=position?(c.close-position.entry)*(position.side==='LONG'?1:-1)/position.riskDistance-costR(position):0;equity.push({time:c.time,value:cumulativeR+unrealizedR});}
