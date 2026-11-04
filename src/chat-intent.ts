@@ -33,7 +33,9 @@ function offersSpecificEdit(previous:ChatTurn|undefined):boolean{
 }
 export function requestsCodeChange(message:string,history:ChatTurn[]=[]):boolean{
  if(typeof message!=='string')return false;
- const text=message.trim().slice(0,3000);
+ // Conversational preambles should not conceal the user's actual first action.
+ // E.g. "okay nice, can you update the strategy" is still a direct edit.
+ const text=message.trim().replace(/^(?:(?:okay|ok|nice|great|alright|cool|thanks|so|now|right)\b[\s,!.:-]+){1,4}/i,'').trim().slice(0,3000);
  if(!text)return false;
 
  const affirmative=/^(?:y|yes|yeah|yep|sure|please|do it|go ahead|okay|ok)[.!]?$/.test(text.toLowerCase());
@@ -43,9 +45,9 @@ export function requestsCodeChange(message:string,history:ChatTurn[]=[]):boolean
  // not an instruction, even if it includes words like "make" and "change".
  if(isDiscussion(text))return false;
 
- const explicitAddress=/^\s*(?:(?:please|hey|hi)[,\s]+)?(?:can|could|would|will)\s+you\s+(?:please\s+)?/i;
+ const explicitAddress=/^\s*(?:(?:please|pls|hey|hi)[,\s]+)?(?:can|could|would|will)\s+you\s+(?:please\s+)?/i;
  const directive=/^\s*(?:i(?:'d| would) like|i want|i need)\s+(?:you|the ai|the assistant|chatgpt)\s+to\s+|^\s*(?:let'?s|we (?:need|have) to)\s+/i;
- const start=text.replace(explicitAddress,'').replace(directive,'').replace(/^\s*(?:please[\s,]+|go ahead and\s+)/i,'');
+ const start=text.replace(explicitAddress,'').replace(directive,'').replace(/^\s*(?:(?:please|pls)[\s,]+|go ahead and\s+)/i,'');
  // The first instruction verb must be a code action. "Can you explain how
  // to change the strategy?" is a question, not an edit request.
  if(!new RegExp('^'+command+'\\b','i').test(start))return false;
