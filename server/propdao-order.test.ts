@@ -22,7 +22,9 @@ describe('PropDAO protected live order adapter',()=>{
   const storage={read:async(k:string)=>saved.get(k)??null,write:async(k:string,v:string)=>{saved.set(k,v)},remove:async(k:string)=>{saved.delete(k)}};
   const accounts=new PropDAOAccounts(storage,fetcher as typeof fetch,()=>Buffer.alloc(32,4).toString('base64'));
   await accounts.connect('alice','pd_live_test');
-  await expect(accounts.executeOrder('alice','prop-1',{symbol:'BTCUSDC',side:'BUY',price:100,stop:99,target:103,leverage:1,riskUsd:2,intentId:'intent-1234567890',quoteTime:Date.now()})).rejects.toThrow();
+  const postError=await accounts.executeOrder('alice','prop-1',{symbol:'BTCUSDC',side:'BUY',price:100,stop:99,target:103,leverage:1,riskUsd:2,intentId:'intent-1234567890',quoteTime:Date.now()}).catch(e=>e);
+  expect(postError).toBeInstanceOf(Error);
+  expect(postError.notSubmitted).not.toBe(true);
   expect(submitted).toBe(1);
  });
  it('sends an idempotent order only after reading risk and validates attached bracket',async()=>{
@@ -57,7 +59,7 @@ describe('PropDAO protected live order adapter',()=>{
   });
   const storage={read:async(k:string)=>stored.get(k)??null,write:async(k:string,v:string)=>{stored.set(k,v)},remove:async(k:string)=>{stored.delete(k)}};
   const account=new PropDAOAccounts(storage,fetcher as typeof fetch,()=>Buffer.alloc(32,4).toString('base64'));await account.connect('alice',apiKey);
-  await expect(account.executeOrder('alice','prop-1',{symbol:'BTCUSDC',side:'BUY',price:100,stop:99,target:103,leverage:1,riskUsd:2,intentId:'intent-1234567890',quoteTime:Date.now()})).rejects.toThrow();
+  await expect(account.executeOrder('alice','prop-1',{symbol:'BTCUSDC',side:'BUY',price:100,stop:99,target:103,leverage:1,riskUsd:2,intentId:'intent-1234567890',quoteTime:Date.now()})).rejects.toMatchObject({notSubmitted:true});
   expect(posted).toBe(0);
  });
  it.each([false,true])('cancels linked GTC remainder and reconciles fill=%s before resuming',async(partialFill)=>{
