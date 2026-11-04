@@ -32,6 +32,7 @@ describe('monetary backtest',()=>{
   expect(out.rejected).toHaveLength(1);expect(out.trades).toHaveLength(1);expect(out.trades[0].entryTime).toBe(4);
  });
 
+ it('rejects a next-open inflated reward consistently with the R backtester',()=>{const out=simulateMoney([c(1,100,101,99,100),c(2,104,105,89,90)],[{action:'SELL',stopLoss:105,takeProfit:90}],500,5,a,2);expect(out.trades).toHaveLength(0);expect(out.rejected[0].reason).toMatch(/close to stop/);});
  it('rounds volume to increments from the minimum rather than exceeding risk',()=>{
   const candles=[c(1,100,101,99,100),c(2,100,101,99.5,100)];
   const out=simulateMoney(candles,[{action:'BUY',stopLoss:99,takeProfit:110}],1,5,{...a,minVolume:.03,volumeStep:.02});
