@@ -1,4 +1,5 @@
 import type { Candle, Side, Trade } from './types';
+import {nextOpenRewardGuard} from './entry-fill-guard';
 
 /** Evaluation assumptions are fixed to the user's Iron $1K Pro terms, not live account data. */
 export const IRON_1K = Object.freeze({ startingBalance:1000, targetProfit:100, maxStaticLoss:50, maxDailyLoss:20 });
@@ -16,7 +17,7 @@ export type PropDAOSimulation={
  * Candle extrema enforce conservative limit checks when intrabar order is unknown.
  * This is a signal-level simulation, not verified exchange executions/margin.
  */
-export function simulatePropDAO(candles:Candle[],decisions:any[],riskPercent=0.25,costs={spread:0,slippage:0,commissionR:0}):PropDAOSimulation {
+export function simulatePropDAO(candles:Candle[],decisions:any[],riskPercent=0.25,costs={spread:0,slippage:0,commissionR:0},configuredRR?:number):PropDAOSimulation {
  if(!Number.isFinite(riskPercent)||riskPercent<=0||riskPercent>2)throw Error('Evaluation risk must be between 0 and 2%.');
  if(!Object.values(costs).every(x=>Number.isFinite(x)&&x>=0))throw Error('Evaluation costs must be non-negative.');
  const initial=IRON_1K.startingBalance, riskUsd=initial*riskPercent/100;
@@ -71,7 +72,7 @@ export function simulatePropDAO(candles:Candle[],decisions:any[],riskPercent=0.2
    if(action==='BUY'||action==='SELL'){
     const long=action==='BUY',entry=c.open,stop=Number(signal.stopLoss),target=Number(signal.takeProfit),prev=candles[i-1].close;
     const valid=Number.isFinite(stop)&&Number.isFinite(target)&&stop>0&&target>0&&(long?stop<prev&&target>prev&&stop<entry&&entry<target:stop>prev&&target<prev&&target<entry&&entry<stop);
-    if(valid)position={side:long?'LONG':'SHORT',entryTime:c.time,entry,stop,target,riskDistance:Math.abs(entry-stop),entryFeeR:0};
+    if(valid&&!nextOpenRewardGuard(prev,entry,stop,target,action,configuredRR))position={side:long?'LONG':'SHORT',entryTime:c.time,entry,stop,target,riskDistance:Math.abs(entry-stop),entryFeeR:0};
    }
   }
   if(position&&position.entryTime===c.time){

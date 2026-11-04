@@ -4,13 +4,13 @@ import {evaluateStrategyInSandbox} from './strategy-sandbox';
 import {parseStrategyConfig} from '../src/strategy';
 import {TF_SECONDS} from '../shared/trading';
 type Grant={id:string;uid:string;botId:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;leverage:number;issuedAt:number;expiresAt:number};
-type Status={running:boolean;paused:boolean;lastError?:string;lastEvaluation?:any;lastOrder?:any;lastAccount?:any;events:string[]};
+type Status={running:boolean;paused:boolean;lastError?:string;lastEvaluation?:any;lastOrder?:any;lastAccount?:any;events:string[];lastReconciliation?:any};
 const interval:Record<string,string>={m1:'1m',m5:'5m',m15:'15m',m30:'30m',h1:'1h',h4:'4h',d1:'1d'};
 async function hash(s:string){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s)))).map(v=>v.toString(16).padStart(2,'0')).join('')}
 export class PropDAOLiveBot extends DurableObject<any>{
  private tail:Promise<unknown>=Promise.resolve();
  private serial<T>(fn:()=>Promise<T>):Promise<T>{const next=this.tail.then(fn,fn);this.tail=next.catch(()=>{});return next}
- private async state():Promise<Status>{return {running:(await this.ctx.storage.get<boolean>('running'))===true,paused:(await this.ctx.storage.get<boolean>('paused'))===true,lastError:await this.ctx.storage.get<string>('lastError'),lastEvaluation:await this.ctx.storage.get('lastEvaluation'),lastOrder:await this.ctx.storage.get('lastOrder'),lastAccount:await this.ctx.storage.get('lastAccount'),events:(await this.ctx.storage.get<string[]>('events'))||[]};}
+ private async state():Promise<Status>{return {running:(await this.ctx.storage.get<boolean>('running'))===true,paused:(await this.ctx.storage.get<boolean>('paused'))===true,lastError:await this.ctx.storage.get<string>('lastError'),lastEvaluation:await this.ctx.storage.get('lastEvaluation'),lastOrder:await this.ctx.storage.get('lastOrder'),lastAccount:await this.ctx.storage.get('lastAccount'),lastReconciliation:await this.ctx.storage.get('lastReconciliation'),events:(await this.ctx.storage.get<string[]>('events'))||[]};}
  private async record(message:string){const events=(await this.ctx.storage.get<string[]>('events'))||[];events.push(`${new Date().toISOString()} · ${message.slice(0,240)}`);await this.ctx.storage.put('events',events.slice(-100));}
  private async provider(grant:Grant,action:string,payload?:unknown){
   const origin=this.env.PROPDAO_CONTROL_URL;
@@ -67,6 +67,27 @@ export class PropDAOLiveBot extends DurableObject<any>{
    await this.schedule();return Response.json({running:true,events:(await this.state()).events});
   }
   if(!existing||existing.uid!==req.headers.get('X-TV-UID'))throw Error('No authorized deployment');
+  if(action==='reconcile'){
+   if(input?.confirm!=='I VERIFIED PROPDAO HAS NO OPEN ORDERS OR POSITIONS')
+    throw Error('Explicit operator confirmation required before reconciliation');
+   if((await this.ctx.storage.get<boolean>('running'))||(await this.ctx.storage.get<boolean>('paused')))
+    throw Error('Stop the robot before reconciling an unresolved order');
+   const pending=await this.ctx.storage.get<any>('pendingIntent');
+   if(!pending)return Response.json({reconciled:true,reason:'No unresolved intent',...await this.state(),pendingIntent:null});
+   if(typeof pending.intentId!=='string'||!pending.intentId.startsWith(`tv-${existing.id}-`))
+    throw Error('Pending order identity does not match this Durable Object deployment');
+   const proof=await this.provider(existing,'reconcile',{accountId:existing.accountId,pendingIntent:pending});
+   if(proof?.verified!==true||proof.accountId!==existing.accountId||proof.intentId!==pending.intentId||
+      proof.snapshots!==2||proof.openPositions!==0||proof.restingOrders!==0||proof.twapOrders!==0)
+    throw Error('PropDAO did not verify a flat account; unresolved order remains locked');
+   const record={time:Date.now(),intentId:pending.intentId,accountId:existing.accountId,
+    verification:proof.verification,closedTradesSinceIntent:proof.closedTradesSinceIntent,
+    historyEntries:proof.historyEntries};
+   await this.ctx.storage.put('lastReconciliation',record);
+   await this.ctx.storage.delete('pendingIntent');
+   await this.record(`Operator-verified flat account · unlocked pending order ${pending.intentId}`);
+   return Response.json({reconciled:true,...await this.state(),pendingIntent:null,lastReconciliation:record});
+  }
   if(action==='stop'){await this.ctx.storage.put('running',false);await this.ctx.storage.put('paused',false);await this.ctx.storage.deleteAlarm();await this.record('Stopped automatic entries. Existing positions remain with PropDAO.');return Response.json({running:false,events:(await this.state()).events})}
   if(action==='pause'){if(!(await this.ctx.storage.get<boolean>('running'))&&!(await this.ctx.storage.get<boolean>('paused')))throw Error('Stopped or halted deployment cannot be paused or resumed. Deploy again.');await this.ctx.storage.put('running',false);await this.ctx.storage.put('paused',true);await this.ctx.storage.deleteAlarm();await this.record('Paused automatic entries. Existing positions remain with PropDAO.');return Response.json({running:false,paused:true,events:(await this.state()).events})}
   if(action==='resume'){

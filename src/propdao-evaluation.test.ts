@@ -52,6 +52,7 @@ describe('Iron $1K evaluation replay',()=>{
   expect(s.balance).toBe(1000);
   expect(s.maxObservedDailyLoss).toBeCloseTo(20);
  });
+ it('skips a favourably gapped oversized-R fill under configured reward policy',()=>{const dates=[{...candle(0,99,101,100),open:100},{...candle(1,89,105,90),open:104}];const r=simulatePropDAO(dates,[{action:'SELL',stopLoss:105,takeProfit:90}],0.25,{spread:0,slippage:0,commissionR:0},2);expect(r.completedTrades).toBe(0);expect(r.balance).toBe(1000);});
  it('defines the agreed challenge limits',()=>{
   expect(IRON_1K).toEqual({startingBalance:1000,targetProfit:100,maxStaticLoss:50,maxDailyLoss:20});
  });

@@ -6,13 +6,13 @@ import type {PropDAOAccounts} from './propdao-account.ts';
 afterEach(()=>vi.unstubAllEnvs());
 const setup=()=>{
  const saved=new Map<string,string>();
- const storage={read:vi.fn(async(k:string)=>saved.get(k)??null),write:vi.fn(async(k:string,v:string)=>{saved.set(k,v)}),list:vi.fn(async(prefix:string)=>[...saved.keys()].filter(k=>k.startsWith(prefix)))};
+ const storage={read:vi.fn(async(k:string)=>saved.get(k)??null),write:vi.fn(async(k:string,v:string)=>{saved.set(k,v)}),remove:vi.fn(async(k:string)=>{saved.delete(k)}),list:vi.fn(async(prefix:string)=>[...saved.keys()].filter(k=>k.startsWith(prefix)))};
  const accounts={
   accountRisk:vi.fn(async()=>({account:{status:'active'},risk:{equity:1000,roomUsd:50,breached:false},positions:[],orders:[]})),
   getPublicMarkets:vi.fn(async()=>({data:[{symbol:'BTCUSDC',coin:'BTC',dex:null,lotStep:0.00001,maxLeverage:2}],fees:{taker:0.00045}})),
   executeOrder:vi.fn(async()=>({intentId:'test',protected:true})),
  };
- const fetcher=vi.fn(async(url:string)=>String(url).endsWith('/health')?Response.json({ready:true}):Response.json({running:String(url).endsWith('/status'),events:['authorized']}));
+ const fetcher=vi.fn(async(url:string)=>String(url).endsWith('/health')?Response.json({ready:true}):Response.json({grant:null,running:false,paused:false,pendingIntent:null,events:['authorized']}));
  const svc=new PropDAOLiveService({...storage,uid:async()=> 'alice',bot:async()=>({asset:'BTCUSDC',venue:'propdao',code:starterCode}),accounts:accounts as unknown as PropDAOAccounts,request:fetcher as unknown as typeof fetch});
  return {svc,fetcher,accounts,saved,storage};
 };
@@ -75,6 +75,53 @@ describe('PropDAO live execution authorization',()=>{
   expect(await svc.status('alice','bot-1')).toMatchObject({running:false,uncertain:true,connected:false});
  });
 
+ it('does not overwrite authorization when the account worker has a pending order',async()=>{
+  vi.stubEnv('PROPDAO_LIVE_ENABLED','true');vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
+  const {svc,fetcher,saved}=setup();
+  fetcher.mockImplementation(async(url:string)=>{
+   if(String(url).endsWith('/health'))return Response.json({ready:true});
+   if(String(url).endsWith('/status'))return Response.json({running:false,paused:false,pendingIntent:{intentId:'tv-old-1700000000'}});
+   return Response.json({error:'unexpected deploy'},{status:400});
+  });
+  await expect(svc.deploy('alice','bot-1',{body:{accountId:'prop-1',riskUsd:2,leverage:1,confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'}} as any)).rejects.toThrow(/Unresolved prior order/);
+  expect(saved.size).toBe(0);
+  expect(fetcher.mock.calls.some(([url])=>String(url).endsWith('/deploy'))).toBe(false);
+ });
+ it('rolls back a grant on definite worker rejection without retrying the order',async()=>{
+  vi.stubEnv('PROPDAO_LIVE_ENABLED','true');vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
+  const {svc,fetcher,saved,storage}=setup();
+  fetcher.mockImplementation(async(url:string)=>{
+   if(String(url).endsWith('/health'))return Response.json({ready:true});
+   if(String(url).endsWith('/status'))return Response.json({running:false,paused:false,pendingIntent:null});
+   return Response.json({error:'Unresolved prior order. Operator reconciliation required before redeployment.'},{status:400});
+  });
+  await expect(svc.deploy('alice','bot-1',{body:{accountId:'prop-1',riskUsd:2,leverage:1,confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'}} as any)).rejects.toThrow(/Unresolved prior order/);
+  expect(storage.remove).toHaveBeenCalledTimes(1);
+  expect(saved.size).toBe(0);
+ });
+ it('requires an explicit reconciliation confirmation and an existing grant',async()=>{
+  vi.stubEnv('PROPDAO_LIVE_ENABLED','true');vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
+  const {svc,fetcher}=setup();
+  await expect(svc.reconcile('alice','bot-1',{body:{confirm:'yes'}} as any)).rejects.toThrow(/Check the PropDAO account/);
+  await expect(svc.reconcile('alice','bot-1',{body:{confirm:'I VERIFIED PROPDAO HAS NO OPEN ORDERS OR POSITIONS'}} as any)).rejects.toThrow(/Select the PropDAO account/);
+  expect(fetcher).not.toHaveBeenCalled();
+ });
+ it('finds an old bot pending intent by account and reconciles without staging a new grant',async()=>{
+  vi.stubEnv('PROPDAO_LIVE_ENABLED','true');vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
+  const {svc,fetcher,saved,accounts}=setup();
+  fetcher.mockImplementation(async(url:string)=>{
+   if(String(url).endsWith('/health'))return Response.json({ready:true});
+   if(String(url).endsWith('/status'))return Response.json({grant:{id:'prior',botId:'old-bot'},running:false,paused:false,pendingIntent:{intentId:'tv-prior-1700000000',symbol:'BTCUSDC'}});
+   if(String(url).endsWith('/reconcile'))return Response.json({reconciled:true,pendingIntent:null,running:false});
+   return Response.json({error:'Unexpected route'},{status:400});
+  });
+  const state=await svc.status('alice','new-bot','prop-1');
+  expect(state).toMatchObject({deployed:false,accountId:'prop-1',blockingBotId:'old-bot',pendingIntent:{intentId:'tv-prior-1700000000'}});
+  const cleared=await svc.reconcile('alice','new-bot',{body:{confirm:'I VERIFIED PROPDAO HAS NO OPEN ORDERS OR POSITIONS',accountId:'prop-1'}} as any);
+  expect(cleared).toMatchObject({reconciled:true,pendingIntent:null});
+  expect(saved.size).toBe(0);
+  expect(accounts.accountRisk).toHaveBeenCalled();
+ });
  it('requires a saved owner authorization before reading live market candles',async()=>{
   const {svc}=setup();
   await expect(svc.market('alice','bot-1')).rejects.toThrow(/No PropDAO deployment/);
