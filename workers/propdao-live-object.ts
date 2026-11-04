@@ -68,7 +68,7 @@ export class PropDAOLiveBot extends DurableObject<any>{
    // This endpoint is internal to the BOTS binding. The public Worker router
    // does not forward these actions.
    const uid=req.headers.get('X-TV-UID');
-   if(!uid||typeof input?.intentId!=='string'||!/^tv-[a-f0-9]{48}-\\d{9,14}$/.test(input.intentId)||
+   if(!uid||typeof input?.intentId!=='string'||!/^tv-[a-f0-9]{48}-\d{9,14}$/.test(input.intentId)||
       typeof input?.accountId!=='string'||!input.accountId)
     throw Error('Invalid account execution lock');
    const existingLock=await this.ctx.storage.get<any>('accountExecutionLock');
@@ -175,7 +175,22 @@ export class PropDAOLiveBot extends DurableObject<any>{
     return;
    }
    await this.ctx.storage.put('pendingIntent',{intentId,createdAt:Date.now(),symbol:grant.symbol,side:decision.action,stop,target});
-   const order=await this.provider(grant,'execute',{symbol:grant.symbol,side:decision.action,price:last.close,stop,target,quoteTime:Date.now(),candleClose:close,intentId});
+   let order:any;
+   try{
+    order=await this.provider(grant,'execute',{symbol:grant.symbol,side:decision.action,price:last.close,stop,target,quoteTime:Date.now(),candleClose:close,intentId});
+   }catch(error){
+    // Provider rejected entry *before* order submission because another bot
+    // acquired exposure in the interval after the earlier account snapshot.
+    // This particular preflight error cannot have submitted an order.
+    if(error instanceof Error&&/Account has open positions or resting orders/.test(error.message)){
+     await this.executionLock(grant,'release',intentId);
+     await this.ctx.storage.delete('pendingIntent');
+     await this.record('Another bot has an open position or order; skipped entry without submission.');
+     return;
+    }
+    // All other execution failures remain ambiguous and require reconciliation.
+    throw error;
+   }
    if(order.filled!==true&&order.filled!==false)throw Error('Provider did not confirm a fill outcome');
    if(order.filled===true&&order.protected!==true)throw Error('Fill has no confirmed protective bracket');
    await this.ctx.storage.put('lastOrder',{time:Date.now(),intentId,quantity:order.quantity,plannedLoss:order.plannedLoss,protected:order.protected===true,providerStatus:order.providerStatus||(order.filled?'PROTECTED_FILL':'CANCELLED_UNFILLED')});
