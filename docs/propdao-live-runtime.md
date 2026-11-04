@@ -51,7 +51,24 @@ Stop revokes the server-side grant before contacting the Worker. Already accepte
 provider requests and existing/resting positions are not cancelled by Stop.
 A persistent pending intent is recorded before submission; ambiguous responses
 halt entries and block redeployment until operator reconciliation. Runtime errors
-also halt the bot. Recovery/clearance of unresolved intents is not automated.
+also halt the bot. Recovery/clearance of unresolved intents is deliberately **not automatic**.
+The Deploy dialog now offers **Reconcile pending order** after the operator
+checks the PropDAO account and confirms there are no remaining positions or
+resting orders. Reconciliation never retries or cancels the ambiguous order.
+The backend reads the complete account trade history and validates two
+independent, flat provider snapshots at least two minutes after the pending
+intent was created. Any active order, open position, incomplete history, stale
+intent, or provider error blocks clearance. The Durable Object permanently
+records the intent ID and verification evidence before removing the lock.
+A cleared lock does **not** mean the old order never filled; it means the
+operator has confirmed and the provider currently verifies no outstanding
+exposure. Deployment still requires a fresh explicit authorization.
+
+An account-scoped worker may contain an older bot's pending intent even when
+the current bot's grant was removed after a failed deployment. The Deploy
+dialog can query the selected account, discover that intent, and offer the same
+verified recovery. A rejected deploy must never overwrite the prior grant;
+only definitive rejections allow rollback of the newly staged grant.
 
 PropDAO documents IOC as market-only. The adapter uses a price-bounded GTC limit,
 checks actual positions and brackets, and halts on resting remainders. It must not
