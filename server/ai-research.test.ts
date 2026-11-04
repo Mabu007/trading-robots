@@ -49,7 +49,7 @@ describe('read-only AI web research',()=>{
  it('does not claim a live regime if public market data is unavailable',async()=>{
   const request=vi.fn(async()=>{throw Error('network offline')});
   const market={hyperliquidCandles:vi.fn(async()=>{throw Error('upstream down')})};
-  const result=await researchBrief({query:'gold current sentiment',asset:'GOLDUSDC'},{request:request as typeof fetch,market,now:()=>now});
+  const result=await researchBrief({query:'gold current sentiment',asset:'GOLDUSDC'},{request:request as typeof fetch,market,now:()=>now+3*60_000});
   expect(result.hasNews).toBe(false);expect(result.hasCandles).toBe(false);
   expect(result.context).toContain('No verifiable headlines');
   expect(result.context).toContain('do not assert a present technical trend');
