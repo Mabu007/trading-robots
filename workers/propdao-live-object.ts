@@ -38,6 +38,19 @@ export class PropDAOLiveBot extends DurableObject<any>{
   if(result.length>=2&&result.at(-1)!.time-result.at(-2)!.time!==duration)throw Error('Recent live candles contain gaps; refusing signal');
   return result;
  }
+ /** Serialize order submissions account-wide, even though strategies run in
+  * their own Durable Objects. A failed ambiguous order retains this lock
+  * until the original bot's verified operator reconciliation. */
+ private async executionLock(grant:Grant,action:'acquire'|'release',intentId:string){
+  const id=await hash('propdao-execution:'+grant.uid+':'+grant.accountId);
+  const stub=this.env.BOTS.get(this.env.BOTS.idFromName(id));
+  const response=await stub.fetch(new Request('https://bot/'+action,{method:'POST',
+   headers:{'X-TV-UID':grant.uid,'Content-Type':'application/json'},
+   body:JSON.stringify({intentId,accountId:grant.accountId})}));
+  const body=await response.json<any>();
+  if(!response.ok)throw Error(body?.error||'Account execution lock unavailable');
+  return body?.acquired===true;
+ }
  private async schedule(){
   const grant=await this.ctx.storage.get<Grant>('grant');
   if(!grant||!(await this.ctx.storage.get<boolean>('running'))){await this.ctx.storage.deleteAlarm();return}
@@ -51,6 +64,25 @@ export class PropDAOLiveBot extends DurableObject<any>{
   if(action==='status'&&req.method==='GET')return Response.json({grant:existing?{id:existing.id,botId:existing.botId,accountId:existing.accountId,symbol:existing.symbol,expiresAt:existing.expiresAt}:null,...await this.state(),nextAlarm:await this.ctx.storage.getAlarm(),pendingIntent:await this.ctx.storage.get('pendingIntent')});
   if(req.method!=='POST')return Response.json({error:'POST required'},{status:405});
   const input=await req.json<any>();
+  if(action==='acquire'||action==='release'){
+   // This endpoint is internal to the BOTS binding. The public Worker router
+   // does not forward these actions.
+   const uid=req.headers.get('X-TV-UID');
+   if(!uid||typeof input?.intentId!=='string'||!/^tv-[a-f0-9]{48}-\\d{9,14}$/.test(input.intentId)||
+      typeof input?.accountId!=='string'||!input.accountId)
+    throw Error('Invalid account execution lock');
+   const existingLock=await this.ctx.storage.get<any>('accountExecutionLock');
+   if(existingLock&&(existingLock.uid!==uid||existingLock.accountId!==input.accountId))
+    throw Error('Account execution lock owner mismatch');
+   if(action==='acquire'){
+    if(existingLock)return Response.json({acquired:existingLock.intentId===input.intentId,held:true});
+    await this.ctx.storage.put('accountExecutionLock',{uid,accountId:input.accountId,intentId:input.intentId,at:Date.now()});
+    return Response.json({acquired:true});
+   }
+   if(existingLock&&existingLock.intentId!==input.intentId)throw Error('Another live intent holds the account lock');
+   await this.ctx.storage.delete('accountExecutionLock');
+   return Response.json({acquired:true});
+  }
   if(action==='deploy'){
    if(this.env.PROPDAO_LIVE_ENABLED!=='true'||!this.env.PROPDAO_LIVE_INTERNAL_SECRET)throw Error('Live runtime is disabled');
    const grant=input as Grant;
@@ -61,8 +93,13 @@ export class PropDAOLiveBot extends DurableObject<any>{
    if(await this.ctx.storage.get('pendingIntent'))throw Error('Unresolved prior order. Operator reconciliation required before redeployment.');
    parseStrategyConfig(grant.code);
    const account=await this.provider(grant,'snapshot');
-   if(!['active','funded'].includes(account.account?.status)||account.risk?.breached||account.positions?.length||account.orders?.length)throw Error('Account not ready for live trading');
-   await this.ctx.storage.put('grant',grant);await this.ctx.storage.put('running',true);await this.ctx.storage.put('paused',false);await this.ctx.storage.delete('lastError');
+   if(!['active','funded'].includes(account.account?.status)||account.risk?.breached)
+    throw Error('Account not ready for live trading');
+   // Existing positions remain visible and are guarded at order entry; they
+   // must not stop independent strategies from scheduling observations.
+   await this.ctx.storage.put('grant',grant);await this.ctx.storage.put('running',true);await this.ctx.storage.put('paused',false);
+   await Promise.all(['lastError','lastEvaluation','lastOrder','lastAccount'].map(key=>this.ctx.storage.delete(key)));
+   await this.ctx.storage.put('events',[]);
    await this.record(`Deployed ${grant.symbol} · risk $${grant.riskUsd} · simulated funds`);
    await this.schedule();return Response.json({running:true,events:(await this.state()).events});
   }
@@ -84,6 +121,7 @@ export class PropDAOLiveBot extends DurableObject<any>{
     verification:proof.verification,closedTradesSinceIntent:proof.closedTradesSinceIntent,
     historyEntries:proof.historyEntries};
    await this.ctx.storage.put('lastReconciliation',record);
+   await this.executionLock(existing,'release',pending.intentId);
    await this.ctx.storage.delete('pendingIntent');
    await this.record(`Operator-verified flat account · unlocked pending order ${pending.intentId}`);
    return Response.json({reconciled:true,...await this.state(),pendingIntent:null,lastReconciliation:record});
@@ -132,11 +170,16 @@ export class PropDAOLiveBot extends DurableObject<any>{
    const stop=Number(decision.stopLoss),target=Number(decision.takeProfit);
    if(!Number.isFinite(stop)||!Number.isFinite(target)||stop<=0||target<=0)throw Error('Missing protective stop or target');
    const intentId=`tv-${grant.id}-${close}`;
+   if(!(await this.executionLock(grant,'acquire',intentId))){
+    await this.record('Another robot is submitting an order on this account; skipped this signal.');
+    return;
+   }
    await this.ctx.storage.put('pendingIntent',{intentId,createdAt:Date.now(),symbol:grant.symbol,side:decision.action,stop,target});
    const order=await this.provider(grant,'execute',{symbol:grant.symbol,side:decision.action,price:last.close,stop,target,quoteTime:Date.now(),candleClose:close,intentId});
    if(order.filled!==true&&order.filled!==false)throw Error('Provider did not confirm a fill outcome');
    if(order.filled===true&&order.protected!==true)throw Error('Fill has no confirmed protective bracket');
    await this.ctx.storage.put('lastOrder',{time:Date.now(),intentId,quantity:order.quantity,plannedLoss:order.plannedLoss,protected:order.protected===true,providerStatus:order.providerStatus||(order.filled?'PROTECTED_FILL':'CANCELLED_UNFILLED')});
+   await this.executionLock(grant,'release',intentId);
    await this.ctx.storage.delete('pendingIntent');
    await this.record(order.filled?`Protected fill ${decision.action} ${grant.symbol} · ${intentId}`:`Unfilled entry cancelled ${grant.symbol} · ${intentId}`);
    await this.ctx.storage.delete('lastError');
