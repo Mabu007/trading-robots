@@ -7,6 +7,8 @@ describe('read-only AI web research',()=>{
   expect(researchRequested('what is gold sentiment, and the market regime right now?')).toBe(true);
   expect(researchRequested('do you have access to Google news or the internet?')).toBe(true);
   expect(researchRequested('what is the latest Fed decision?')).toBe(true);
+  expect(researchRequested('why did gold fall after inflation data?')).toBe(true);
+  expect(researchRequested('how is DXY affecting gold?')).toBe(true);
   expect(researchRequested('rewrite the strategy.js breakout detection logic')).toBe(false);
  });
  it('does not send strategy code, API keys, URLs or personal emails in a public news query',()=>{
