@@ -46,7 +46,7 @@ export class PropDAOLiveBot extends DurableObject<any>{
   const stub=this.env.BOTS.get(this.env.BOTS.idFromName(id));
   const response=await stub.fetch(new Request('https://bot/'+action,{method:'POST',
    headers:{'X-TV-UID':grant.uid,'Content-Type':'application/json'},
-   body:JSON.stringify({intentId,accountId:grant.accountId})}));
+   body:JSON.stringify({intentId,accountId:grant.accountId,botId:grant.botId})}));
   const body=await response.json<any>();
   if(!response.ok)throw Error(body?.error||'Account execution lock unavailable');
   return body?.acquired===true;
@@ -61,7 +61,7 @@ export class PropDAOLiveBot extends DurableObject<any>{
  async fetch(req:Request){return this.serial(async()=>{try{
   const action=new URL(req.url).pathname.slice(1),existing=await this.ctx.storage.get<Grant>('grant');
   if(existing&&existing.uid!==req.headers.get('X-TV-UID'))return Response.json({error:'Deployment ownership mismatch'},{status:403});
-  if(action==='status'&&req.method==='GET')return Response.json({grant:existing?{id:existing.id,botId:existing.botId,accountId:existing.accountId,symbol:existing.symbol,expiresAt:existing.expiresAt}:null,...await this.state(),nextAlarm:await this.ctx.storage.getAlarm(),pendingIntent:await this.ctx.storage.get('pendingIntent')});
+  if(action==='status'&&req.method==='GET')return Response.json({grant:existing?{id:existing.id,botId:existing.botId,accountId:existing.accountId,symbol:existing.symbol,expiresAt:existing.expiresAt}:null,...await this.state(),nextAlarm:await this.ctx.storage.getAlarm(),pendingIntent:await this.ctx.storage.get('pendingIntent'),accountLock:await this.ctx.storage.get('accountExecutionLock')});
   if(req.method!=='POST')return Response.json({error:'POST required'},{status:405});
   const input=await req.json<any>();
   if(action==='acquire'||action==='release'){
@@ -76,7 +76,7 @@ export class PropDAOLiveBot extends DurableObject<any>{
     throw Error('Account execution lock owner mismatch');
    if(action==='acquire'){
     if(existingLock)return Response.json({acquired:existingLock.intentId===input.intentId,held:true});
-    await this.ctx.storage.put('accountExecutionLock',{uid,accountId:input.accountId,intentId:input.intentId,at:Date.now()});
+    await this.ctx.storage.put('accountExecutionLock',{uid,accountId:input.accountId,botId:input.botId,intentId:input.intentId,at:Date.now()});
     return Response.json({acquired:true});
    }
    if(existingLock&&existingLock.intentId!==input.intentId)throw Error('Another live intent holds the account lock');
