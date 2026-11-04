@@ -660,3 +660,23 @@
 
 .app-recovery{min-height:100dvh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:18px;padding:28px;text-align:center;background:#0b100d;color:#e8eee8}
 .app-recovery img{width:44px;height:44px;object-fit:contain}.app-recovery h1{font-size:26px;margin:0}.app-recovery p{max-width:420px;line-height:1.7;color:#a6b1a9}.app-recovery a{color:#d8cf91}
+
+/* Live Trading output: single scroll surface, predictable account-card layout,
+ * responsive horizontal tabs. Previously a 218px dock with nested overflow
+ * clipped the account metrics and left the activity feed half visible. */
+.output-dock .output-tab-list{flex:1 1 auto;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;scrollbar-color:#496350 transparent}
+.output-dock .output-dock-actions{flex:0 0 auto}
+.output-dock-body>.live-trading-panel{display:block;flex:1 1 auto;min-width:0;min-height:0;height:auto;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+.live-trading-panel .output-result-heading{flex-wrap:wrap}
+.live-trading-panel .output-metrics{grid-template-columns:repeat(auto-fit,minmax(min(155px,100%),1fr))}
+.live-trading-panel .output-metric{min-width:0}
+.live-trading-panel .output-metric.featured{grid-column:auto}
+.live-trading-panel .output-metric strong{font-size:clamp(11px,1.15vw,14px);overflow-wrap:anywhere;white-space:normal}
+.live-trading-panel .output-metric span{overflow-wrap:anywhere;white-space:normal}
+.live-trading-panel>.terminal-content{height:auto;max-height:none;min-height:0;overflow:visible;flex:none;white-space:normal}
+.live-trading-panel .log-line{overflow-wrap:anywhere}
+@media(max-width:640px){
+ .mobile-terminal-sheet .output-tab-list{flex:1 1 auto;min-width:0;overflow-x:auto;scrollbar-width:thin}
+ .mobile-terminal-sheet .live-trading-panel{height:auto;min-height:0;padding:12px 12px 24px;overflow-y:auto}
+ .live-trading-panel .output-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
