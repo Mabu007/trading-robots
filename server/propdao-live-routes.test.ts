@@ -103,7 +103,7 @@ describe('PropDAO live execution authorization',()=>{
   vi.stubEnv('PROPDAO_LIVE_ENABLED','true');vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
   const {svc,fetcher}=setup();
   await expect(svc.reconcile('alice','bot-1',{body:{confirm:'yes'}} as any)).rejects.toThrow(/Check the PropDAO account/);
-  await expect(svc.reconcile('alice','bot-1',{body:{confirm:'I VERIFIED PROPDAO HAS NO OPEN ORDERS OR POSITIONS'}} as any)).rejects.toThrow(/No deployment authorization/);
+  await expect(svc.reconcile('alice','bot-1',{body:{confirm:'I VERIFIED PROPDAO HAS NO OPEN ORDERS OR POSITIONS'}} as any)).rejects.toThrow(/Select the PropDAO account/);
   expect(fetcher).not.toHaveBeenCalled();
  });
  it('requires a saved owner authorization before reading live market candles',async()=>{
