@@ -10,7 +10,7 @@ describe('API response diagnostics', () => {
 
   it('explains empty proxy errors without leaking a JSON parser exception', async () => {
     await expect(readApiJson(new Response('', { status: 502, statusText: 'Bad Gateway' }), 'OpenRouter'))
-      .rejects.toThrow('OpenRouter returned an empty HTTP 502 Bad Gateway response. Check that the local API server is running.');
+      .rejects.toThrow('OpenRouter returned an empty HTTP 502 Bad Gateway response. Check the Trading Vibes API or gateway status.');
   });
 
   it('surfaces structured API errors', async () => {
@@ -41,6 +41,13 @@ describe('API response diagnostics', () => {
     } finally { fetchMock.mockRestore(); }
   });
 
+  it('reports a failed production SSE connection without instructing users to start a dev server',async()=>{
+    const fetchMock=vi.spyOn(globalThis,'fetch').mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    try{
+      await expect(postApiStream('/api/ai',{},'OpenRouter',()=>undefined))
+        .rejects.toThrow('Trading Vibes API connection failed');
+    }finally{fetchMock.mockRestore()}
+  });
   it('handles CRLF event boundaries split across network chunks', async () => {
     const encoder = new TextEncoder();
     const chunks = ['data: {"choices":[{"delta":{"content":"Hello"}}]}\r', '\n\r', '\ndata: [DONE]\r', '\n\r', '\n'];
