@@ -419,10 +419,13 @@ app.post('/api/ai', async (req, res) => {
   // Only conversational public-info queries can use web research; editing
   // strategy.js and all live execution paths remain unchanged.
   const lastUser=[...messages].reverse().find((m:any)=>m.role==='user');
-  const researchMode=req.body?.researchMode===true&&researchRequested(lastUser?.content);
+  const earlierPublicQuestion=[...messages].reverse().filter((m:any)=>m.role==='user').slice(1,4).find((m:any)=>researchRequested(m.content));
+  const referentialFollowup=typeof lastUser?.content==='string'&&lastUser.content.length<140&&/\b(what about|and (?:the |what)|how about|what caused|tell me more|why|does (?:that|it)|is (?:it|that))\b/i.test(lastUser.content);
+  const researchMode=req.body?.researchMode===true&&(researchRequested(lastUser?.content)||Boolean(referentialFollowup&&earlierPublicQuestion));
   let aiMessages=messages;
   if(researchMode){
-    const latestQuestion=String(lastUser.content).replace(/https?:\/\/\S+|[\w.+-]+@[\w.-]+\.\w+|sk-[a-z0-9-]+|\b[a-f0-9]{40,}\b/gi,'').slice(0,1500);
+    const sanitizePublicQuestion=(value:string)=>value.replace(/https?:\/\/\S+|[\w.+-]+@[\w.-]+\.\w+|sk-[a-z0-9-]+|\b[a-f0-9]{40,}\b/gi,'').slice(0,950);
+    const latestQuestion=(referentialFollowup&&earlierPublicQuestion?'Previous public research topic: '+sanitizePublicQuestion(String(earlierPublicQuestion.content))+'\nFollow-up: ':'')+sanitizePublicQuestion(String(lastUser.content));
     const evidence=await researchBrief({query:latestQuestion,asset:selectedAsset},{market:venueMarketData});
     // Do not forward proprietary strategy source, broker data, previous
     // messages or personal account context to external web search.
