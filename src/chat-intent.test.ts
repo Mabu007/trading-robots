@@ -28,6 +28,8 @@ describe('chat intent: explain vs edit strategy.js',()=>{
   'Can you modify the website to show indicator history?',
   'I want you to explain how to rewrite my code',
   'Can you tell me what would change if we add trailing stops?',
+  'Okay, why does my robot wait for EMA history?',
+  'Nice, can you explain what changing strategy.js would do?',
  ];
  const edits=[
   'Write a full strategy.js with EMA20 and ATR stop',
@@ -46,6 +48,8 @@ describe('chat intent: explain vs edit strategy.js',()=>{
   'Convert this strategy into a trend-following scalper',
   'Add EMA20 to the existing script',
   'Go ahead and edit strategy.js to use m5 instead of m1',
+  'Okay nice, can you update strategy.js to use H1 candles?',
+  'pls add EMA20 to my script',
  ];
  it.each(discussion)('answers as discussion: %s',message=>{
   expect(requestsCodeChange(message)).toBe(false);
