@@ -1,11 +1,11 @@
 import {createHash,timingSafeEqual,randomBytes} from 'node:crypto';
 import type {Express,Request,Response} from 'express';
 import {parseStrategyConfig} from '../src/strategy.ts';
-import {PropDAOAccounts} from './propdao-account.ts';
+import {PropDAOAccounts,PropDAONoSubmissionError} from './propdao-account.ts';
 
 type Storage={read:(key:string)=>Promise<string|null>;write:(key:string,value:string)=>Promise<void>;remove?:(key:string)=>Promise<void>;list?:(prefix:string,limit:number)=>Promise<string[]>};
 type Dependencies=Storage&{uid:(req:Request,res:Response)=>Promise<string|null>;bot:(uid:string,id:string,req:Request)=>Promise<{asset:string;code:string;venue?:string}|null>;accounts:PropDAOAccounts;request?:typeof fetch};
-export type PropGrant={id:string;uid:string;botId:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;leverage:number;issuedAt:number;expiresAt:number;revokedAt?:number};
+export type PropGrant={id:string;uid:string;botId:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;leverage:number;issuedAt:number;expiresAt:number;revokedAt?:number;runtimeScope?:'bot'|'lock'};
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 const safeId=(value:string)=>/^[A-Za-z0-9_-]{1,128}$/.test(value);
 export class PropDAOLiveService{
@@ -18,7 +18,8 @@ export class PropDAOLiveService{
  private async runtime(g:PropGrant,action:'deploy'|'stop'|'status'|'pause'|'resume'|'reconcile',body?:unknown){
   const base=process.env.PROPDAO_LIVE_RUNTIME_URL,secret=process.env.PROPDAO_LIVE_INTERNAL_SECRET;
   if(!base||!secret||secret.length<32)throw Error('PropDAO Durable Object runtime is not configured');
-  const url=new URL(`/live/${hash(g.uid+':'+g.accountId)}/${action}`,base);
+  const runtimeId=g.runtimeScope==='bot'?hash(g.uid+':'+g.accountId+':'+g.botId):g.runtimeScope==='lock'?hash('propdao-execution:'+g.uid+':'+g.accountId):hash(g.uid+':'+g.accountId);
+  const url=new URL(`/live/${runtimeId}/${action}`,base);
   if(url.protocol!=='https:'&&!(url.protocol==='http:'&&url.hostname==='127.0.0.1'))throw Error('Live runtime requires HTTPS');
   const response=await this.request(url,{method:action==='status'?'GET':'POST',headers:{Authorization:`Bearer ${secret}`,'X-TV-UID':g.uid,'Content-Type':'application/json'},...(action==='status'?{}:{body:JSON.stringify(body??{})}),signal:AbortSignal.timeout(20000)});
   let result:any;try{result=await response.json()}catch{throw Error('Durable Object returned invalid JSON')}
@@ -126,17 +127,24 @@ export class PropDAOLiveService{
   if(!market)throw Error('Bot market is not currently tradable on PropDAO');
   const account=await this.deps.accounts.accountRisk(uid,input.accountId);
   if(!['active','funded'].includes(account.account.status)||account.risk.breached||account.risk.roomUsd<=Number(input.riskUsd)*3)throw Error('PropDAO account does not have enough risk room');
-  if(account.positions.length||account.orders.length)throw Error('Resolve all existing positions and resting orders before deploying');
+  // Other bots can have exposure: independent deployments may start while
+  // the provider's per-account order guard still prevents overlapping entries.
   if(config.timeframes.some((tf:string)=>!['m1','m5','m15','m30','h1','h4'].includes(tf)))throw Error('Live timeframe is unsupported');
   const leverage=Number(input.leverage??1);
   if(!Number.isFinite(leverage)||leverage<1||leverage>Number(market.maxLeverage))throw Error('Selected leverage exceeds allowed market limit');
   const now=Date.now();
-  const grant:PropGrant={id:randomBytes(24).toString('hex'),uid,botId,accountId:input.accountId,symbol:bot.asset,coin:market.dex?`${market.dex}:${market.coin}`:market.coin,code:bot.code,codeHash:hash(bot.code),riskUsd:Number(input.riskUsd),leverage,issuedAt:now,expiresAt:now+7*24*3600_000};
-  // The Durable Object is account-scoped: verify it is not owned by a different
-  // active bot or blocked by a previous intent before overwriting any grant.
+  const grant:PropGrant={id:randomBytes(24).toString('hex'),uid,botId,accountId:input.accountId,symbol:bot.asset,coin:market.dex?`${market.dex}:${market.coin}`:market.coin,code:bot.code,codeHash:hash(bot.code),riskUsd:Number(input.riskUsd),leverage,issuedAt:now,expiresAt:now+7*24*3600_000,runtimeScope:'bot'};
+  // Each new bot gets its own Durable Object; an unresolved order from the
+  // legacy account-scoped runtime must still be reconciled before new entries.
+  const legacy={...grant,runtimeScope:undefined};
+  const legacyState=await this.runtime(legacy,'status');
+  if(legacyState.pendingIntent)throw Error('Unresolved prior order on the legacy account runtime. Reconcile the affected older bot before deploying.');
+  const lockState=await this.runtime({...grant,runtimeScope:'lock'},'status');
+  if(lockState.accountLock?.intentId)
+   throw Error('Another bot has an unresolved order on this account. Stop and reconcile that bot before starting new live orders.');
   const priorState=await this.runtime(grant,'status');
   if(priorState.pendingIntent)throw Error('Unresolved prior order on this PropDAO account. Use Reconcile pending order in Deploy after checking your PropDAO account.');
-  if(priorState.running||priorState.paused)throw Error('This PropDAO account is already running or paused under another deployment. Stop it before redeploying.');
+  if(priorState.running||priorState.paused)throw Error('This robot is already running. Stop it before deploying a new strategy version.');
   await this.deps.write(this.key(uid,botId),JSON.stringify(grant));
   try{return await this.runtime(grant,'deploy',grant)}
   catch(e){
@@ -177,7 +185,7 @@ export class PropDAOLiveService{
    if(g.uid!==uid)throw Error('Live authorization ownership mismatch');
    if(g.expiresAt<Date.now())continue;
    const current=await this.status(uid,g.botId);
-   if(current.running||current.paused||current.uncertain||!current.configured||!current.deployed||current.accountOccupied||current.pendingIntent||current.statusUnavailable)throw Error('Stop and reconcile all PropDAO live robots before changing API keys');
+   if(current.running||current.paused||current.uncertain||!current.configured||current.accountOccupied||current.pendingIntent||current.statusUnavailable)throw Error('Stop and reconcile all PropDAO live robots before changing API keys');
    const live=await this.deps.accounts.accountRisk(uid,g.accountId);
    if(live.positions.length||live.orders.length)throw Error('Close or cancel PropDAO orders and positions before disconnecting');
   }
@@ -196,7 +204,17 @@ export class PropDAOLiveService{
   if(!['active','funded'].includes(account.account.status)||account.risk.breached||!Number.isFinite(account.risk.roomUsd)||account.risk.roomUsd<=g.riskUsd*3||account.positions.length||account.orders.length)throw Error('PropDAO account risk or exposure blocks resume.');
   return this.runtime(g,'resume',{});
  }
- async stop(uid:string,botId:string){const g=await this.grant(uid,botId);if(!g)throw Error('No authorized PropDAO deployment');await this.deps.write(this.key(uid,botId),JSON.stringify({...g,revokedAt:Date.now()}));return this.runtime(g,'stop',{});}
+ async stop(uid:string,botId:string){
+  const g=await this.grant(uid,botId);
+  if(!g)return {running:false,deployed:false,stopped:true,alreadyStopped:true};
+  // Revoke order permission first, even if Cloudflare cannot be contacted.
+  await this.deps.write(this.key(uid,botId),JSON.stringify({...g,revokedAt:Date.now()}));
+  const state=await this.runtime(g,'stop',{});
+  const final=await this.runtime(g,'status');
+  if(final.pendingIntent)return {...final,running:false,deployed:false,stopped:true,needsReconciliation:true};
+  if(this.deps.remove)await this.deps.remove(this.key(uid,botId));
+  return {...state,running:false,paused:false,deployed:false,stopped:true};
+ }
  async provider(input:any){
   const {uid,botId,grantId,action,payload}=input??{};
   if(typeof uid!=='string'||!safeId(botId)||typeof grantId!=='string')throw Error('Invalid provider authorization');
@@ -225,7 +243,7 @@ export function propDAOLiveRoutes(app:Express,deps:Dependencies){
   res.setHeader('Cache-Control','no-store');
   const secret=process.env.PROPDAO_LIVE_INTERNAL_SECRET,header=req.header('authorization')||'';
   if(!secret||secret.length<32||header.length>512||!timingSafeEqual(Buffer.from(hash(header)),Buffer.from(hash(`Bearer ${secret}`))))return res.status(401).json({error:'Internal authorization required'});
-  try{return res.json(await service.provider(req.body))}catch(e){return res.status(400).json({error:e instanceof Error?e.message:'Provider rejected request'})}
+  try{return res.json(await service.provider(req.body))}catch(e){return res.status(400).json({error:e instanceof Error?e.message:'Provider rejected request',notSubmitted:e instanceof PropDAONoSubmissionError})}
  });
  return service;
 }

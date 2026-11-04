@@ -1,6 +1,6 @@
 # PropDAO live execution: activation checklist
 
-Status: **disabled by default**. This integration uses a Durable Object per user/account, live Hyperliquid candles, a QuickJS isolated strategy sandbox and PropDAO's own simulated-capital order API.
+Status: **disabled by default**. This integration uses a Durable Object per user/account/bot (legacy account-scoped instances remain reachable for safe stop/reconciliation), live Hyperliquid candles, a QuickJS isolated strategy sandbox and PropDAO's own simulated-capital order API.
 
 ## Required configuration
 
@@ -29,7 +29,10 @@ Status: **disabled by default**. This integration uses a Durable Object per user
 - Server validates the authenticated owner's saved PropDAO bot, account eligibility, market, quantity step, leverage and risk room.
 - The Worker reads finished market candles and runs user code in QuickJS. Its alarms check at the selected execution timeframe; alarms do not promise millisecond-exact scheduling.
 - A new signal uses a deterministic `intentId`, attached stop and take profit, and a server-side risk preflight. Orders are verified against returned PropDAO positions; missing brackets trigger a repair attempt.
-- The Worker refuses entries while PropDAO reports open positions/resting orders. Stop disables **new** orders but does **not** close existing positions.
+- A new deployment uses a **bot-scoped** Durable Object. Multiple robots can be deployed to the same account and run their own schedule, without overwriting each other's code, alarm or authorization. An older account-scoped deployment is still reachable for Stop/reconciliation.
+- A separate account-scoped Durable Object serializes order submission across bots. If another bot already holds a position or resting order, this bot skips entry while retaining its own live schedule. This protects account-level risk and avoids concurrent ambiguous order submissions. **Simultaneous independent open positions on one PropDAO account are not enabled by this change.**
+- Stop revokes authorization **before** contacting Cloudflare. On confirmed stop with no unresolved intent, the backend removes the old grant. Edit and save strategy.js after stopping, then Deploy again to load the new saved code and create a new authorization. Running strategy code is immutable; hot swapping without a stop is deliberately prohibited.
+- The Worker refuses new entries while PropDAO reports open positions/resting orders. Stop disables **new** orders but does **not** close existing positions.
 - After network errors, execution may be ambiguous; do not retry with a different intent ID. Inspect the provider's positions and orders.
 
 ## Known boundaries

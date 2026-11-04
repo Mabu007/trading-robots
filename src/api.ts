@@ -7,7 +7,7 @@ export async function readApiJson<T>(response: Response, service: string): Promi
     const status = `${response.status} ${response.statusText}`.trim();
     throw new Error(response.ok
       ? `${service} returned an empty response.`
-      : `${service} returned an empty HTTP ${status} response. Check that the local API server is running.`);
+      : `${service} returned an empty HTTP ${status} response. Check the Trading Vibes API or gateway status.`);
   }
 
   let data: T & ApiErrorBody;
@@ -15,7 +15,7 @@ export async function readApiJson<T>(response: Response, service: string): Promi
     data = JSON.parse(body) as T & ApiErrorBody;
   } catch {
     const status = `${response.status} ${response.statusText}`.trim();
-    throw new Error(`${service} returned an invalid response (HTTP ${status}). Check the API server logs.`);
+    throw new Error(`${service} returned an invalid response (HTTP ${status}). Check the API service status.`);
   }
 
   if (!response.ok) {
@@ -36,7 +36,7 @@ export async function postApiJson<T>(url: string, payload: unknown, service: str
     });
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') throw error;
-    throw new Error(`${service} is unreachable. Start both app and API with npm run dev:all, then retry.`);
+    throw new Error(`${service}: the Trading Vibes API connection failed before a response arrived. Check your internet connection and retry; if the site otherwise loads, the API gateway may be temporarily unavailable.`);
   }
   return readApiJson<T>(response, service);
 }
@@ -80,7 +80,7 @@ export async function postApiStream(
     });
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') throw error;
-    throw new Error(`${service} is unreachable. Start both app and API with npm run dev, then retry.`);
+    throw new Error(`${service}: the Trading Vibes API connection failed before a response arrived. Check your connection, VPN or browser network, then retry. This does not necessarily mean OpenRouter itself is offline.`);
   }
 
   if (!response.ok) {
@@ -130,7 +130,7 @@ export async function postApiStream(
     await reader.cancel().catch(() => undefined);
     throw error;
   }
-  if (!finished) throw new Error(`${service} connection ended before the response was complete. Retry the request.`);
+  if (!finished) throw new Error(`${service} stream disconnected before completion. Your request may have reached the AI provider; retry only if needed. Check your network and Trading Vibes API connectivity.`);
   if (truncated) throw new AiOutputLimitError(fullText);
   if (!fullText.trim()) throw new Error(`${service} returned an empty assistant response.`);
   return fullText;

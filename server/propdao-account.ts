@@ -7,6 +7,8 @@ const validKey=(v:unknown):v is string=>typeof v==='string' && /^pd_live_[A-Za-z
 const validId=(v:unknown):v is string=>typeof v==='string' && /^[A-Za-z0-9_-]{1,128}$/.test(v);
 function secret(v:string|undefined){if(!v||!/^[A-Za-z0-9+/]{43}=$/.test(v))throw Error('PropDAO credential encryption is not configured.');const k=Buffer.from(v,'base64');if(k.length!==32||k.toString('base64')!==v)throw Error('PropDAO credential encryption is not configured.');return k}
 function path(uid:string){const env=process.env.VERCEL_ENV==='production'?'production':process.env.VERCEL_ENV==='preview'?'preview':'development';return `propdao-credentials/v1/${env}/${Buffer.from(uid).toString('base64url')}.json`}
+/** An error verified to happen before any order HTTP submission. */
+export class PropDAONoSubmissionError extends Error { readonly notSubmitted = true; }
 export class PropDAOAccounts {
  private storage:Storage; private request:typeof fetch; private key:()=>string|undefined;
  constructor(storage:Storage,request:typeof fetch=fetch,key:()=>string|undefined=()=>process.env.PROPDAO_CREDENTIAL_ENCRYPTION_KEY){this.storage=storage;this.request=request;this.key=key}
@@ -31,6 +33,8 @@ export class PropDAOAccounts {
   return {account,risk,positions:positions.data,orders:orders.data};
  }
  async executeOrder(uid:string,id:string,input:{symbol:string;side:'BUY'|'SELL';price:number;stop:number;target:number;leverage:number;riskUsd:number;intentId:string;quoteTime:number}){
+  let submissionStarted=false;
+  try{
   if(!validId(id)||!/^[A-Z0-9]{2,40}$/.test(input.symbol)||!['BUY','SELL'].includes(input.side)||!/^[a-zA-Z0-9_-]{10,128}$/.test(input.intentId))throw Error('Invalid live order intent');
   if(!Number.isFinite(input.quoteTime)||Math.abs(Date.now()-input.quoteTime)>25000)throw Error('Market quote is stale');
   const [live,markets]=await Promise.all([this.accountRisk(uid,id),this.getPublicMarkets()]);
@@ -56,6 +60,7 @@ export class PropDAOAccounts {
   const verdict=validatePropDAORisk({status:live.account.status,breached:live.risk.breached,roomUsd:live.risk.roomUsd,availableMargin:live.risk.equity,side:input.side,entry:maxEntry,stop:input.stop,quantity:qty,lotStep:market.lotStep,leverage:input.leverage,maxLeverage:market.maxLeverage,takerFeeRate:fee,userRiskLimitUsd:risk});
   if(!verdict.ok)throw Error(verdict.reason);
   const apiKey=await this.load(uid);if(!apiKey)throw Error('Credentials unavailable');
+  submissionStarted=true;
   const response=await this.request(`https://app.propdao.finance/api/v1/accounts/${encodeURIComponent(id)}/orders`,{method:'POST',headers:{Authorization:`Bearer ${apiKey}`,'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({symbol:input.symbol,side:input.side,qty,leverage:input.leverage,orderType:'limit',tif:'gtc',limitPrice:maxEntry,sl:input.stop,tp:input.target,intentId:input.intentId}),signal:AbortSignal.timeout(15000)});
   let body:any;try{body=await response.json()}catch{throw Error('PropDAO order response is ambiguous; reconcile by intentId before retrying')};
   if(!response.ok)throw Error(typeof body?.error==='string'?body.error:'PropDAO rejected live order');
@@ -104,6 +109,10 @@ export class PropDAOAccounts {
   const filledQuantity=Number(position.qty);
   if(!Number.isFinite(filledQuantity)||filledQuantity<=0||filledQuantity>qty+market.lotStep/2)throw Error('Unexpected filled quantity; account reconciliation required');
   return {intentId:input.intentId,quantity:filledQuantity,requestedQuantity:qty,plannedLoss:verdict.plannedLoss,protected:true,filled:true,positionId:position.id,providerStatus:'PROTECTED_FILL',provider:body};
+  }catch(error){
+   if(!submissionStarted)throw new PropDAONoSubmissionError(error instanceof Error?error.message:'Order preflight failed before submission');
+   throw error;
+  }
  }
  async getPublicMarkets(){
   let response:Response;try{response=await this.request('https://app.propdao.finance/api/v1/markets',{signal:AbortSignal.timeout(10000)})}catch{throw Error('Could not load PropDAO market metadata')};

@@ -10,7 +10,7 @@ describe('API response diagnostics', () => {
 
   it('explains empty proxy errors without leaking a JSON parser exception', async () => {
     await expect(readApiJson(new Response('', { status: 502, statusText: 'Bad Gateway' }), 'OpenRouter'))
-      .rejects.toThrow('OpenRouter returned an empty HTTP 502 Bad Gateway response. Check that the local API server is running.');
+      .rejects.toThrow('OpenRouter returned an empty HTTP 502 Bad Gateway response. Check the Trading Vibes API or gateway status.');
   });
 
   it('surfaces structured API errors', async () => {
@@ -20,7 +20,7 @@ describe('API response diagnostics', () => {
 
   it('explains non-JSON gateway output', async () => {
     await expect(readApiJson(new Response('<html>proxy error</html>', { status: 502 }), 'Market data'))
-      .rejects.toThrow('Market data returned an invalid response (HTTP 502). Check the API server logs.');
+      .rejects.toThrow('Market data returned an invalid response (HTTP 502). Check the API service status.');
   });
 
   it('assembles streamed OpenRouter deltas across network chunks', async () => {
@@ -41,6 +41,13 @@ describe('API response diagnostics', () => {
     } finally { fetchMock.mockRestore(); }
   });
 
+  it('reports a failed production SSE connection without instructing users to start a dev server',async()=>{
+    const fetchMock=vi.spyOn(globalThis,'fetch').mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    try{
+      await expect(postApiStream('/api/ai',{},'OpenRouter',()=>undefined))
+        .rejects.toThrow('Trading Vibes API connection failed');
+    }finally{fetchMock.mockRestore()}
+  });
   it('handles CRLF event boundaries split across network chunks', async () => {
     const encoder = new TextEncoder();
     const chunks = ['data: {"choices":[{"delta":{"content":"Hello"}}]}\r', '\n\r', '\ndata: [DONE]\r', '\n\r', '\n'];
@@ -62,7 +69,7 @@ describe('API response diagnostics', () => {
     }), { headers: { 'Content-Type': 'text/event-stream' } }));
     try {
       await expect(postApiStream('/api/ai', { messages: [] }, 'OpenRouter', () => undefined))
-        .rejects.toThrow('connection ended before the response was complete');
+        .rejects.toThrow('stream disconnected before completion');
     } finally { fetchMock.mockRestore(); }
   });
   it('rejects a response that hits the output limit even after DONE', async () => {
