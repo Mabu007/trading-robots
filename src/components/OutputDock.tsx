@@ -180,8 +180,11 @@ function TradesPanel({ props }: { props: Props }) {
           <div><small>STOP LOSS</small><strong>{displayPrice(selected.stop, props.asset)}</strong></div>
           <div><small>TAKE PROFIT</small><strong>{displayPrice(selected.target, props.asset)}</strong></div>
           <div><small>RISK DISTANCE</small><strong>{displayPrice(Math.abs(selected.entry - selected.stop), props.asset)}</strong></div>
+          <div><small>TARGET R AT FILL</small><strong>{Math.abs(selected.entry-selected.stop)>0?(Math.abs(selected.target-selected.entry)/Math.abs(selected.entry-selected.stop)).toFixed(2)+'R':'—'}</strong></div>
+          {typeof selected.signalTargetR==='number'&&Number.isFinite(selected.signalTargetR)&&<div><small>TARGET R AT SIGNAL CLOSE</small><strong>{selected.signalTargetR.toFixed(2)}R</strong></div>}
           <div><small>TIME IN TRADE</small><strong>{duration(selected.entryTime, selected.exitTime)}</strong></div>
         </div>
+        {typeof selected.signalTargetR==='number'&&Math.abs(selected.entry-selected.stop)>0&&Math.abs(Math.abs(selected.target-selected.entry)/Math.abs(selected.entry-selected.stop)-selected.signalTargetR)>0.25&&<p className="output-disclaimer">The next-candle entry changed the effective target R:R from the signal-close value. The strategy's fixed target price was not recomputed from the fill.</p>}
         <footer className="trade-modal-foot"><span>Audit uses the selected trade and surrounding OHLC prices.</span><button type="button" className="audit-ai-button" onClick={() => props.onAuditTrade(selected)} disabled={Boolean(props.busy)}><Sparkles size={14}/> Ask AI to audit this trade</button></footer>
       </section>
     </div>}
