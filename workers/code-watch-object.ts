@@ -44,7 +44,7 @@ export class CodeWatch extends DurableObject<any>{
     const findings=report.findings.filter(f=>f.time===latest);
     const events=state.events;
     if(config.kind==='liquidity_sweeps')for(const f of findings)events.push({id:config.id+':'+f.time+':'+f.kind,time:f.time,kind:f.kind,level:f.level,price:f.price});
-    if(config.kind==='volatility_profile'&&report.regime==='High relative volatility')events.push({id:config.id+':'+latest+':high-vol',time:latest,kind:'High relative volatility',level:report.atrPercent||0,price:candles.at(-1)!.close});
+    if(config.kind==='volatility_profile'){const prior=await this.ctx.storage.get<string>('lastVolRegime');if(report.regime==='High relative volatility'&&prior!=='High relative volatility')events.push({id:config.id+':'+latest+':high-vol',time:latest,kind:'High relative volatility',level:report.atrPercent||0,price:candles.at(-1)!.close});await this.ctx.storage.put('lastVolRegime',report.regime);}
     await this.ctx.storage.put('events',events.slice(-100));await this.ctx.storage.put('lastCandle',latest);
    }
    await this.ctx.storage.put('lastCheck',Date.now());await this.ctx.storage.delete('lastError');
