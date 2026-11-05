@@ -10,14 +10,18 @@ describe('seamless workspace layout',()=>{
   expect(app).not.toContain('aria-label="Collapse sidebar"');
   expect(app.match(/className="icon-button tv-sidebar-toggle"/g)?.length).toBe(1);
  });
- it('uses one scroll container for strategies and chats',()=>{
+ it('uses one scroll container for Code, Apps, and chats',()=>{
   const start=app.indexOf('<div className="tv-sidebar-scroll">');
-  const strategies=app.indexOf('className="tv-sidebar-strategies"',start);
+  const code=app.indexOf('<span>Code</span>',start);
+  const apps=app.indexOf('<span>Apps</span>',start);
   const chats=app.indexOf('className="tv-sidebar-chats"',start);
   const close=app.indexOf('</div><footer className="tv-sidebar-profile">',start);
   expect(start).toBeGreaterThan(0);
-  expect(strategies).toBeGreaterThan(start);
-  expect(chats).toBeGreaterThan(strategies);
+  expect(code).toBeGreaterThan(start);
+  expect(apps).toBeGreaterThan(code);
+  expect(chats).toBeGreaterThan(apps);
+  expect(app).not.toContain('className="tv-sidebar-strategies"');
+  expect(app).not.toContain('<span>Scheduled</span>');
   expect(close).toBeGreaterThan(chats);
   expect(css).toContain('.tv-sidebar-scroll{display:block;flex:1 1 auto;min-height:0;overflow-y:auto');
  });
