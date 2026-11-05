@@ -11,6 +11,7 @@ const setup=()=>{
   accountRisk:vi.fn(async()=>({account:{status:'active'},risk:{equity:1000,roomUsd:50,breached:false},positions:[],orders:[]})),
   getPublicMarkets:vi.fn(async()=>({data:[{symbol:'BTCUSDC',coin:'BTC',dex:null,lotStep:0.00001,maxLeverage:2}],fees:{taker:0.00045}})),
   executeOrder:vi.fn(async()=>({intentId:'test',protected:true})),
+  recentTrades:vi.fn(async()=>[]),
  };
  const fetcher=vi.fn(async(url:string)=>String(url).endsWith('/health')?Response.json({ready:true}):Response.json({grant:null,running:false,paused:false,pendingIntent:null,events:['authorized']}));
  const svc=new PropDAOLiveService({...storage,uid:async()=> 'alice',bot:async()=>({asset:'BTCUSDC',venue:'propdao',code:starterCode}),accounts:accounts as unknown as PropDAOAccounts,request:fetcher as unknown as typeof fetch});
@@ -24,6 +25,21 @@ describe('PropDAO live execution authorization',()=>{
   expect(state.configured).toBe(false);
   await expect(svc.deploy('alice','bot-1',{body:{accountId:'prop-1',riskUsd:2,leverage:1,confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'}} as any)).rejects.toThrow(/not ready/);
   expect(fetcher).not.toHaveBeenCalled();
+ });
+ it('returns broker pending orders separately from unresolved execution intent',async()=>{
+  vi.stubEnv('PROPDAO_LIVE_ENABLED','true');vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
+  const {svc,accounts,saved,fetcher}=setup();
+  await svc.deploy('alice','bot-1',{body:{accountId:'prop-1',riskUsd:2,leverage:1,confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'}} as any);
+  const grant=JSON.parse([...saved.values()][0]);
+  fetcher.mockImplementation(async(url:string)=>{
+   if(String(url).endsWith('/health'))return Response.json({ready:true});
+   return Response.json({grant:{id:grant.id},running:true,paused:false,pendingIntent:{intentId:'tv-unknown'}});
+  });
+  accounts.accountRisk.mockResolvedValueOnce({account:{status:'active'},risk:{equity:1000,roomUsd:50,breached:false},positions:[],orders:[{id:'order-42',symbol:'BTCUSDC',side:'BUY',qty:0.5,price:99.8,status:'PENDING',orderType:'LIMIT',privateField:'do not return'}]} as any);
+  const state=await svc.status('alice','bot-1');
+  expect(state.pendingOrders).toEqual([{id:'order-42',symbol:'BTCUSDC',side:'BUY',qty:0.5,price:99.8,status:'PENDING',type:'LIMIT',createdAt:null}]);
+  expect(state.pendingIntent).toEqual({intentId:'tv-unknown'});
+  expect(JSON.stringify(state)).not.toContain('do not return');
  });
  it('isolates bots on the same account while keeping order submission separately gated',async()=>{
   vi.stubEnv('PROPDAO_LIVE_ENABLED','true');vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));

@@ -69,7 +69,7 @@ export class PropDAOLiveService{
   try{
    const state=await this.runtime(grant,'status');
    const matched=state.grant?.id===grant.id;
-   let positions:any[]=[],closedTrades:any[]=[],risk:any=null,accountError:string|undefined;
+   let positions:any[]=[],closedTrades:any[]=[],pendingOrders:any[]|null=null,risk:any=null,accountError:string|undefined;
    if(matched){
     try{
      const account=await this.deps.accounts.accountRisk(uid,grant.accountId);
@@ -78,6 +78,15 @@ export class PropDAOLiveService{
       id:String(p.id||''),symbol:String(p.symbol||''),side:p.side,qty:Number(p.qty),
       entry:Number(p.entry),mark:Number(p.mark),unrealizedPnl:Number(p.unrealizedPnl),
       slPrice:p.slPrice, tpPrice:p.tpPrice,openedAt:Number(p.openedAt)
+     }));
+     // Expose provider-reported *resting orders* separately from uncertain
+     // Durable Object order intents. This is a read-only account snapshot.
+     pendingOrders=account.orders.slice(0,50).map((o:any)=>({
+      id:String(o.id??o.orderId??''),symbol:String(o.symbol??''),side:o.side,
+      qty:Number.isFinite(Number(o.qty??o.quantity))?Number(o.qty??o.quantity):null,
+      price:Number.isFinite(Number(o.price??o.limitPrice))?Number(o.price??o.limitPrice):null,
+      status:String(o.status??'UNKNOWN'),type:String(o.orderType??o.type??''),
+      createdAt:Number.isFinite(Number(o.createdAt??o.timestamp))?Number(o.createdAt??o.timestamp):null
      }));
      closedTrades=await this.deps.accounts.recentTrades(uid,grant.accountId);
     }catch(e){accountError=e instanceof Error?e.message:'PropDAO account activity unavailable'}
@@ -89,7 +98,7 @@ export class PropDAOLiveService{
     deployed:matched,running:state.running===true&&configured&&matched&&!grant.revokedAt&&Date.now()<grant.expiresAt,
      paused:state.paused===true&&matched&&!grant.revokedAt&&Date.now()<grant.expiresAt,
      canResume:state.paused===true&&matched&&configured&&!state.pendingIntent&&!grant.revokedAt&&Date.now()<grant.expiresAt,
-    accountId:grant.accountId,positions,closedTrades,risk,accountError,
+    accountId:grant.accountId,positions,pendingOrders,closedTrades,risk,accountError,
     error:!matched&&state.pendingIntent?'This account has an unresolved order from another bot. Reconcile it before deploying.':health.error};
 
   }catch(e){return {configured:true,deployed:true,running:false,uncertain:true,accountId:grant.accountId,events:[],error:e instanceof Error?e.message:'Worker unavailable. Order status is unknown.'}}
