@@ -294,19 +294,44 @@ function App(){
   let focusedCode:{bot:CloudBot;source:string}|null=null;
   let creatingCode:{id:string;name:string;asset:string;venue:Venue;prompt:string}|null=null;
   const referenced=resolveCodeReference(message,cloudBots);
+  const matchingAnalysis=codeAnalyses.find(a=>message.toLowerCase().includes(a.name.toLowerCase()));
+  const directMarketAnalysis=(/\b(liquidity sweeps?|volatility profile|market volatility|atr\s*14|volatility of)\b/i.test(message)&&/\b(how many|today|yesterday|last|what|show|scan|calculate|run|check|analy[sz]e|find|count|profile)\b/i.test(message))||Boolean(matchingAnalysis&&/\b(run|execute|scan|check|analy[sz]e|calculate)\b/i.test(message));
   setBusy('chat');
   try{
    if(!attachedContext){
     if(!cloudClient)throw Error('Sign in to use your AI.');
-    const planned=await sharingRequest<{tool:string|null}>(cloudClient,'/api/chat/plan','POST',{message});
-    command=planned.tool;
+    if(directMarketAnalysis){command='analyze_market'}else{const planned=await sharingRequest<{tool:string|null}>(cloudClient,'/api/chat/plan','POST',{message});command=planned.tool;}
    }
   }catch(error){setAiError(err(error));setBusy('');return;}
   setBusy('');
   if(command==='create'&&!/\b(propdao|valr|hyperliquid|ctrader)\b/i.test(message)){setChatInput('');setChat([...next,{role:'assistant',content:'Which market and venue should the new strategy use? For example: Create a GOLDUSDC strategy on PropDAO that trades M1 liquidity sweeps.'}]);return;}
 
+  if(command==='analyze_market'){
+   if(!cloudClient){setChat([...next,{role:'assistant',content:'Sign in to run saved Code analysis.'}]);return;}
+   setChatInput('');setBusy('chat');
+   try{
+    const kind:AnalysisKind=matchingAnalysis?.kind||(/\b(sweep|liquidity)\b/i.test(message)?'liquidity_sweeps':'volatility_profile');
+    const requestedAsset=message.match(/\b([A-Z]{2,12}(?:USDC|USDT|ZAR|USD))\b/)?.[1]||matchingAnalysis?.asset||(/\bgold\b/i.test(message)?'GOLDUSDC':asset);
+    const requestedVenue=matchingAnalysis?.venue||venue;
+    const timeframe=matchingAnalysis?.timeframe||((message.match(/\b(m1|m5|m15|h1)\b/i)?.[1]?.toLowerCase()||'m1') as 'm1'|'m5'|'m15'|'h1');
+    if(!requestedAsset)throw Error('Choose a market, for example GOLDUSDC, before running the scanner.');
+    const now=Date.now(),day=Math.floor(now/86400000)*86400000;
+    const start=/\byesterday\b/i.test(message)?day-86400000:/\b(last\s+(?:7\s+days|week))\b/i.test(message)?day-7*86400000:day;
+    const end=/\byesterday\b/i.test(message)?day:now;
+    setChat([...next,{role:'assistant',content:'Scanning verified '+requestedAsset+' '+timeframe.toUpperCase()+' candles from '+new Date(start).toISOString()+'…'}]);
+    const history=await historicalData({venue:requestedVenue,asset:requestedAsset,timeframe,from:new Date(start).toISOString(),to:new Date(end).toISOString()});
+    const report=analyzeMarket({kind,asset:requestedAsset,timeframe,from:new Date(start).toISOString(),to:new Date(end).toISOString(),lookback:matchingAnalysis?.lookback||5},history.candles);
+    if(report.bars<15)throw Error('Not enough completed historical candles were returned to produce a verified analysis.');
+    const analysis:CodeAnalysis={id:analysisId(kind,requestedVenue,requestedAsset,timeframe),name:(kind==='liquidity_sweeps'?'Liquidity Sweep Scanner':'Volatility Profile')+' · '+requestedAsset,kind,asset:requestedAsset,venue:requestedVenue,timeframe,lookback:matchingAnalysis?.lookback||5,source:analysisSource(kind)};
+    let saved=false;
+    try{await cloudClient.saveCodeAnalysis(analysis);setCodeAnalyses(current=>[analysis,...current.filter(x=>x.id!==analysis.id)]);saved=true}catch(error){setCloudMessage('Code analysis was not saved: '+err(error))}
+    setChat(current=>[...next,{role:'assistant',content:'Completed '+requestedAsset+' '+timeframe.toUpperCase()+' analysis using '+report.bars+' completed candles. '+(saved?'The reusable detector is saved in Code.':'The analysis ran, but the reusable detector could not be saved.'),context:{kind:'market-analysis',label:'Analysis · '+requestedAsset,data:report}}]);
+   }catch(error){setChat([...next,{role:'assistant',content:'The historical scan could not be verified: '+err(error)+'. No result was invented.'}])}
+   finally{setBusy('')}
+   return;
+  }
   if(command==='find_code'){
-   if(!referenced){const suggestions=codeSuggestions(message,cloudBots);setChatInput('');setChat([...next,{role:'assistant',content:suggestions.length?'I found these saved Code items:\n'+suggestions.map(b=>'- **'+b.name+'** · '+b.asset+' · '+venueLabel[b.venue||'valr']).join('\n')+'\n\nWhich one do you mean? You can also open Code in the sidebar.':'I could not find matching saved code. Open Code to browse or ask me to create one.'}]);return;}
+   if(!referenced){const suggestions=codeSuggestions(message,cloudBots);const matchingTools=codeAnalyses.filter(a=>message.toLowerCase().includes(a.asset.toLowerCase())||/\b(code|tools|library|scanner|analyses)\b/i.test(message));setChatInput('');setChat([...next,{role:'assistant',content:suggestions.length||matchingTools.length?'I found these saved Code items:\n'+[...suggestions.map(b=>'- **'+b.name+'** · '+b.asset+' · '+venueLabel[b.venue||'valr']),...matchingTools.map(a=>'- **'+a.name+'** · '+a.timeframe.toUpperCase()+' · callable analysis')].join('\n')+'\n\nWhich one do you mean? You can also open Code in the sidebar.':'I could not find matching saved code. Open Code to browse or ask me to create one.'}]);return;}
    try{const loaded=await userBotRequest<{code:string}>('/api/user-bots/'+encodeURIComponent(referenced.bot.id)+'/current','GET');focusedCode={bot:referenced.bot,source:loaded.code};command=null}
    catch(error){setChat([...next,{role:'assistant',content:'Found '+referenced.bot.name+', but could not load its source: '+err(error)}]);return;}
   }
