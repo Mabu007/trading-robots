@@ -20,7 +20,7 @@ function SectionTitle({title,subtitle,total}:{title:string;subtitle:string;total
 }
 function Empty({value}:{value:string}){return <p className="tv-desk-table-empty">{value}</p>}
 export function TradesHub(p:Props){
- const prop=p.venue==='propdao',open=rows(p.propLive?.positions),pending=rows(p.propLive?.pendingOrders),history=rows(p.propLive?.closedTrades)?.slice().sort((a,b)=>Number(b.closedAt||0)-Number(a.closedAt||0))??null;
+ const prop=p.venue==='propdao',verified=!p.propLive?.accountError,open=verified?rows(p.propLive?.positions):null,pending=verified?rows(p.propLive?.pendingOrders):null,history=verified?rows(p.propLive?.closedTrades)?.slice().sort((a,b)=>Number(b.closedAt||0)-Number(a.closedAt||0))??null:null;
  const valrState=p.liveAccount?.state?.bots?.[p.botId];
  const status=prop?(p.propLive?.uncertain?'Status unverified':p.propLive?.running?'Running':p.propLive?.paused?'Paused':p.propLive?.deployed?'Stopped':'Not deployed'):p.venue==='valr'?(p.liveCheck!=='ready'?'Status unavailable':valrState?.running?'Running':p.liveAccount?.state?.active?'Order in progress':p.liveAccount?.deployed?'Stopped':'Not deployed'):p.paperStatus?.state?.running?'Running · paper':'No verified live feed';
  const warning=prop?(p.propLive?.accountError||p.propLive?.error):p.venue==='valr'?p.liveAccount?.state?.active?.lastError:null;
