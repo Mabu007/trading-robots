@@ -137,6 +137,7 @@ function App(){
  useEffect(()=>{setSelectedTrade(null)},[monetary]);
  const editorIdentityRef=useRef({draftId,code});editorIdentityRef.current={draftId,code};
  useEffect(()=>{setProposal('');setProposalSummary('')},[draftId,code]);
+ useEffect(()=>{setChatOperation(null)},[draftId]);
  const userBotRequest=async<T,>(path:string,method:'GET'|'PUT'|'POST'|'PATCH'|'DELETE',body?:unknown):Promise<T>=>{if(!cloudClient)throw new Error('Sign in to use cloud robot storage.');const token=await cloudClient.getIdToken();let response:Response;try{response=await fetch(path,{method,headers:{Authorization:`Bearer ${token}`,...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})})}catch{throw new Error('Cloud robot storage is unreachable. Retry when the connection is available.')}return readApiJson<T>(response,'Robot storage')};
  const hydrateAccountDraft=(uid:string,preserveCurrent=false)=>{if(preserveCurrent)return;const draft=readDraft(`trading-vibes:draft:${uid}`);setVenue(venueOf(draft.venue));setCreated(Boolean(draft.created));setDraftId(draft.id||makeBotId());setName(draft.name||'');setAsset(draft.asset||'');setPrompt(draft.prompt||'');setCode(draft.code??starterCode);setView(draft.view||'code');setChat(draft.chat||[]);setResult(null);setSelectedTrade(null);setChatHydrated(true);setCodeHydrated(Boolean(draft.code?.trim()));setCreateError(draft.created&&!draft.code?.trim()?'Strategy generation did not finish. Retry to write this robot’s script.':'')};
  useEffect(()=>{const signature=JSON.stringify([venue,code,asset,from,to]);if(restoreResultRef.current===signature){restoreResultRef.current='';return}restoreResultRef.current='';setResult(null);setSelectedTrade(null)},[venue,code,asset,from,to]);
@@ -218,6 +219,7 @@ function App(){
  };
  const sendChat=async(messageOverride?:string,attachedContext?:ChatContext,retryPrevious=false)=>{
   const message=(messageOverride??chatInput).trim();if(!message||busy)return;
+  setChatOperation(null);
   const prior=retryPrevious?chat.slice(0,-2):chat;
   const userMessage:Chat={role:'user',content:message,...(attachedContext?{context:attachedContext}:{})};
   const next=[...prior,userMessage];
