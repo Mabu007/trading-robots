@@ -2,35 +2,42 @@ import {DurableObject} from 'cloudflare:workers';
 import {getQuickJSWASMModule} from '@cf-wasm/quickjs/workerd';
 import {evaluateStrategyInSandbox} from './strategy-sandbox';
 import {parseStrategyConfig} from '../src/strategy';
+import {propDAOLiveHistoryBars,propDAOLiveHistoryStats} from './propdao-live-history';
 import {TF_SECONDS} from '../shared/trading';
-type Grant={id:string;uid:string;botId:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;leverage:number;issuedAt:number;expiresAt:number};
-type Status={running:boolean;paused:boolean;lastError?:string;lastEvaluation?:any;lastOrder?:any;lastAccount?:any;events:string[];lastReconciliation?:any};
+import {parseUpstreamJson,TemporaryReadError,retryableReadError} from './propdao-upstream-response';
+type Grant={id:string;uid:string;botId:string;agentId?:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;leverage:number;issuedAt:number;expiresAt:number};
+type Status={running:boolean;paused:boolean;lastError?:string;lastEvaluation?:any;lastOrder?:any;lastAccount?:any;events:string[];lastMarketData?:any;lastReconciliation?:any};
 const interval:Record<string,string>={m1:'1m',m5:'5m',m15:'15m',m30:'30m',h1:'1h',h4:'4h',d1:'1d'};
 async function hash(s:string){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s)))).map(v=>v.toString(16).padStart(2,'0')).join('')}
 export class PropDAOLiveBot extends DurableObject<any>{
  private tail:Promise<unknown>=Promise.resolve();
  private serial<T>(fn:()=>Promise<T>):Promise<T>{const next=this.tail.then(fn,fn);this.tail=next.catch(()=>{});return next}
- private async state():Promise<Status>{return {running:(await this.ctx.storage.get<boolean>('running'))===true,paused:(await this.ctx.storage.get<boolean>('paused'))===true,lastError:await this.ctx.storage.get<string>('lastError'),lastEvaluation:await this.ctx.storage.get('lastEvaluation'),lastOrder:await this.ctx.storage.get('lastOrder'),lastAccount:await this.ctx.storage.get('lastAccount'),lastReconciliation:await this.ctx.storage.get('lastReconciliation'),events:(await this.ctx.storage.get<string[]>('events'))||[]};}
+ private async state():Promise<Status>{return {running:(await this.ctx.storage.get<boolean>('running'))===true,paused:(await this.ctx.storage.get<boolean>('paused'))===true,lastError:await this.ctx.storage.get<string>('lastError'),lastEvaluation:await this.ctx.storage.get('lastEvaluation'),lastOrder:await this.ctx.storage.get('lastOrder'),lastAccount:await this.ctx.storage.get('lastAccount'),lastMarketData:await this.ctx.storage.get('lastMarketData'),lastReconciliation:await this.ctx.storage.get('lastReconciliation'),events:(await this.ctx.storage.get<string[]>('events'))||[]};}
  private async record(message:string){const events=(await this.ctx.storage.get<string[]>('events'))||[];events.push(`${new Date().toISOString()} · ${message.slice(0,240)}`);await this.ctx.storage.put('events',events.slice(-100));}
  private async provider(grant:Grant,action:string,payload?:unknown){
   const origin=this.env.PROPDAO_CONTROL_URL;
   const url=new URL('/api/internal/propdao/provider',origin);
   if(url.protocol!=='https:'&&!(url.protocol==='http:'&&url.hostname==='127.0.0.1'))throw Error('Invalid control origin');
-  const response=await fetch(url,{method:'POST',headers:{Authorization:`Bearer ${this.env.PROPDAO_LIVE_INTERNAL_SECRET}`,'Content-Type':'application/json'},body:JSON.stringify({uid:grant.uid,botId:grant.botId,grantId:grant.id,action,payload}),signal:AbortSignal.timeout(16000)});
-  const data=await response.json<any>();
-  if(!response.ok){const error=Error(data?.error||'Live provider unavailable') as Error&{notSubmitted?:boolean};
-   if(data?.notSubmitted===true)error.notSubmitted=true;
-   throw error;
+  let response:Response;
+  try{
+   response=await fetch(url,{method:'POST',headers:{Authorization:`Bearer ${this.env.PROPDAO_LIVE_INTERNAL_SECRET}`,'Content-Type':'application/json'},body:JSON.stringify({uid:grant.uid,botId:grant.botId,grantId:grant.id,action,payload}),signal:AbortSignal.timeout(16000)});
+  }catch{
+   if(action==='execute')throw Error('Control API connection failed after possible order submission. Outcome unknown; reconcile before retrying.');
+   throw new TemporaryReadError('Control API connection temporarily unavailable.');
   }
-  return data;
+  return parseUpstreamJson(response,'Control API',{mayHaveSubmittedOrder:action==='execute'});
  }
  private async candles(grant:Grant,timeframe:string,cutoff:number){
-  const duration=TF_SECONDS[timeframe],end=Math.floor(cutoff/duration)*duration,from=(end-210*duration)*1000;
+  const duration=TF_SECONDS[timeframe],end=Math.floor(cutoff/duration)*duration,from=(end-propDAOLiveHistoryBars(timeframe)*duration)*1000;
   if(!duration||!interval[timeframe])throw Error('Unsupported live timeframe');
-  const response=await fetch('https://api.hyperliquid.xyz/info',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'candleSnapshot',req:{coin:grant.coin,interval:interval[timeframe],startTime:from,endTime:end*1000-1}}),signal:AbortSignal.timeout(12000)});
-  if(!response.ok)throw Error('Hyperliquid live market data unavailable');
-  const rows=await response.json<any>();
-  if(!Array.isArray(rows))throw Error('Invalid Hyperliquid candles');
+  let response:Response;
+  try{
+   response=await fetch('https://api.hyperliquid.xyz/info',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'candleSnapshot',req:{coin:grant.coin,interval:interval[timeframe],startTime:from,endTime:end*1000-1}}),signal:AbortSignal.timeout(12000)});
+  }catch{
+   throw new TemporaryReadError('Hyperliquid market data connection temporarily unavailable.');
+  }
+  const rows=await parseUpstreamJson(response,'Hyperliquid market data');
+  if(!Array.isArray(rows))throw new TemporaryReadError('Hyperliquid returned an invalid candle response.');
   const result=rows.map((r:any)=>{if(r.s!==grant.coin||r.i!==interval[timeframe])throw Error('Market-data symbol/timeframe mismatch');return {time:Number(r.t)/1000,open:Number(r.o),high:Number(r.h),low:Number(r.l),close:Number(r.c),volume:Number(r.v)}}).filter((r:any)=>Number.isFinite(r.time)&&r.time>=from/1000&&r.time<end);
   result.sort((a:any,b:any)=>a.time-b.time);
   for(let i=0;i<result.length;i++){
@@ -64,7 +71,7 @@ export class PropDAOLiveBot extends DurableObject<any>{
  async fetch(req:Request){return this.serial(async()=>{try{
   const action=new URL(req.url).pathname.slice(1),existing=await this.ctx.storage.get<Grant>('grant');
   if(existing&&existing.uid!==req.headers.get('X-TV-UID'))return Response.json({error:'Deployment ownership mismatch'},{status:403});
-  if(action==='status'&&req.method==='GET')return Response.json({grant:existing?{id:existing.id,botId:existing.botId,accountId:existing.accountId,symbol:existing.symbol,expiresAt:existing.expiresAt}:null,...await this.state(),nextAlarm:await this.ctx.storage.getAlarm(),pendingIntent:await this.ctx.storage.get('pendingIntent'),accountLock:await this.ctx.storage.get('accountExecutionLock')});
+  if(action==='status'&&req.method==='GET')return Response.json({grant:existing?{id:existing.id,botId:existing.botId,agentId:existing.agentId||null,accountId:existing.accountId,symbol:existing.symbol,expiresAt:existing.expiresAt}:null,...await this.state(),nextAlarm:await this.ctx.storage.getAlarm(),pendingIntent:await this.ctx.storage.get('pendingIntent'),accountLock:await this.ctx.storage.get('accountExecutionLock')});
   if(req.method!=='POST')return Response.json({error:'POST required'},{status:405});
   const input=await req.json<any>();
   if(action==='acquire'||action==='release'){
@@ -89,7 +96,7 @@ export class PropDAOLiveBot extends DurableObject<any>{
   if(action==='deploy'){
    if(this.env.PROPDAO_LIVE_ENABLED!=='true'||!this.env.PROPDAO_LIVE_INTERNAL_SECRET)throw Error('Live runtime is disabled');
    const grant=input as Grant;
-   if(!grant?.uid||grant.uid!==req.headers.get('X-TV-UID')||!grant.id||!grant.botId||!grant.code||!Number.isFinite(grant.issuedAt)||!Number.isFinite(grant.expiresAt)||grant.issuedAt>Date.now()+5000||grant.expiresAt>grant.issuedAt+7*24*3600_000||Date.now()>grant.issuedAt+60000||Date.now()>=grant.expiresAt)throw Error('Invalid or expired deployment');
+   if(!grant?.uid||grant.uid!==req.headers.get('X-TV-UID')||!grant.id||!grant.botId||grant.agentId!==undefined&&!/^agent_[a-f0-9]{32}$/.test(grant.agentId)||!grant.code||!Number.isFinite(grant.issuedAt)||!Number.isFinite(grant.expiresAt)||grant.issuedAt>Date.now()+5000||grant.expiresAt>grant.issuedAt+7*24*3600_000||Date.now()>grant.issuedAt+60000||Date.now()>=grant.expiresAt)throw Error('Invalid or expired deployment');
    if(await hash(grant.code)!==grant.codeHash)throw Error('Strategy identity mismatch');
    if(existing?.uid&&existing.uid!==grant.uid)throw Error('This account belongs to another identity');
    if(existing&&(await this.ctx.storage.get<boolean>('running')))throw Error('Account already has a running robot');
@@ -160,13 +167,15 @@ export class PropDAOLiveBot extends DurableObject<any>{
    if(account.positions?.length||account.orders?.length){await this.ctx.storage.put(marker,close);await this.record('Existing position/order; awaiting reconciliation and skipping entry.');return}
    const data:Record<string,any[]>={};
    for(const tf of config.timeframes)data[tf]=await this.candles(grant,tf,close);
+   const diagnostics=Object.fromEntries(config.timeframes.map((tf:string)=>[tf,propDAOLiveHistoryStats(tf,data[tf],close)]));
+   await this.ctx.storage.put('lastMarketData',{time:Date.now(),source:'Hyperliquid',executionTimeframe:config.executionTimeframe,closedAt:close,timeframes:diagnostics});
    const execution=data[config.executionTimeframe];
    const vm=await getQuickJSWASMModule();
    const decisions=evaluateStrategyInSandbox(vm,grant.code,data,config as any) as any[];
    const decision=decisions.at(-1);
    await this.ctx.storage.put(marker,close);
-   await this.ctx.storage.put('lastEvaluation',{time:Date.now(),candleClose:close,action:decision?.action||'WAIT'});
-   await this.record(`Candle ${config.executionTimeframe.toUpperCase()} · ${new Date(close*1000).toISOString()} · signal ${decision?.action||'WAIT'}`);
+   await this.ctx.storage.put('lastEvaluation',{time:Date.now(),candleClose:close,action:decision?.action||'WAIT',reason:decision?.reason||'',history:diagnostics});
+   await this.record(`Candle ${config.executionTimeframe.toUpperCase()} · ${new Date(close*1000).toISOString()} · ${decision?.action||'WAIT'}${decision?.reason?' · '+decision.reason:''} · history ${config.timeframes.map((tf:string)=>tf.toUpperCase()+' '+diagnostics[tf].received+'/'+diagnostics[tf].requested).join(', ')}`);
    if(decision?.action!=='BUY'&&decision?.action!=='SELL'){await this.ctx.storage.delete('lastError');return;}
    const last=execution.at(-1);
    if(!last||last.time+period!==close||Date.now()-close*1000>25000)throw Error('Live candle too old for order entry');
@@ -202,11 +211,11 @@ export class PropDAOLiveBot extends DurableObject<any>{
    await this.ctx.storage.delete('lastError');
   }catch(e){const error=e instanceof Error?e.message:'Live evaluation failed';
    const transient=!(await this.ctx.storage.get('pendingIntent')) &&
-    /Latest closed market candle missing|Recent live candles contain gaps|Hyperliquid live market data unavailable|Invalid Hyperliquid candles|Could not reach PropDAO|PropDAO rate limit reached|PropDAO account request failed|Live provider unavailable/.test(error);
+    (retryableReadError(e)||/Latest closed market candle missing|Recent live candles contain gaps|Invalid Hyperliquid candles|Could not reach PropDAO|PropDAO rate limit reached|PropDAO account request failed|Live provider unavailable/.test(error));
    if(transient){
     const previous=await this.ctx.storage.get<string>('lastError');
-    await this.ctx.storage.put('lastError','Market data paused · '+error);
-    if(previous!=='Market data paused · '+error)await this.record('Awaiting valid market data · '+error);
+    await this.ctx.storage.put('lastError','Temporary upstream outage · '+error);
+    if(previous!=='Temporary upstream outage · '+error)await this.record('Retrying on next candle · '+error);
    }else{
     await this.ctx.storage.put('running',false);await this.ctx.storage.put('paused',false);await this.ctx.storage.put('lastError',error);
     await this.record('Execution halted · '+error);

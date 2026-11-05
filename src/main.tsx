@@ -6,4 +6,9 @@ import './style.css';
 import './premium.css';
 import './studio-polish.css';
 import './shadcn.css';
+import './chat-first.css';
+import './theme.css';
 createRoot(document.getElementById('root')!).render(<React.StrictMode><AppErrorBoundary><App /></AppErrorBoundary></React.StrictMode>);
+
+
+if(import.meta.env.PROD&&'serviceWorker' in navigator){window.addEventListener('load',()=>{void navigator.serviceWorker.register('/sw.js').catch(()=>{/* App remains usable without push. */})})}

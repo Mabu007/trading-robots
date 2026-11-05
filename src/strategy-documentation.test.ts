@@ -12,7 +12,8 @@ describe('copyable strategy guide', () => {
   it('provides an executable example using an available timeframe', () => {
     const doc = strategyDocumentation('XAUUSD', ['h1', 'm5']);
     expect(doc).toContain('Selected instrument: XAUUSD');
-    expect(doc).toContain('Listed historical timeframes: h1, m5');
+    expect(doc).toContain('Supported strategy intervals: h1, m5');
+    expect(doc).toContain('Historical candle coverage has not been verified yet');
     const code = exampleFrom(doc);
     const config = parseStrategyConfig(code);
     expect(config.executionTimeframe).toBe('h1');
@@ -26,9 +27,10 @@ describe('copyable strategy guide', () => {
     expect(decision.takeProfit).toBeGreaterThan(candles.at(-1)!.close);
   });
 
-  it('does not pretend historical timeframes are available when data has not loaded', () => {
+  it('does not present supported strategy intervals as verified historical coverage', () => {
     const doc = strategyDocumentation('XAUUSD', []);
-    expect(doc).toContain('not loaded yet');
+    expect(doc).toContain('Historical candle coverage has not been verified yet');
+    expect(doc).not.toContain('Listed historical timeframes:');
     expect(parseStrategyConfig(exampleFrom(doc)).executionTimeframe).toBe('m1');
   });
 });

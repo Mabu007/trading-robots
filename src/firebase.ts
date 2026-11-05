@@ -15,6 +15,9 @@ export type CloudBot = {
 export type BotVersion = { id: string; name: string; storageKey: string; createdAt: string };
 
 export type CloudClient = {
+  listConversations: () => Promise<{id:string;title:string}[]>;
+  loadConversation: (id:string) => Promise<any[]|null>;
+  saveConversation: (id:string, messages:any[]) => Promise<void>;
   listBots: () => Promise<CloudBot[]>;
   getIdToken: (forceRefresh?: boolean) => Promise<string>;
   saveBot: (bot: CloudBot, storageKey: string) => Promise<void>;
@@ -109,6 +112,23 @@ export function connectFirebase(): Promise<CloudClient | null> {
         batch.delete(storeSdk.doc(reference, 'chats', 'current'));
         batch.delete(reference);
         await batch.commit();
+      },
+      async listConversations() {
+        const reference=storeSdk.collection(db,'users',await currentUserId(),'conversations');
+        const snapshot=await storeSdk.getDocs(storeSdk.query(reference,storeSdk.orderBy('updatedAt','desc'),storeSdk.limit(100)));
+        return snapshot.docs.map((doc:any)=>({id:doc.id,title:String(doc.data().title||'Conversation')}));
+      },
+      async loadConversation(id:string) {
+        const snapshot=await storeSdk.getDoc(storeSdk.doc(db,'users',await currentUserId(),'conversations',id));
+        if(!snapshot.exists())return null;
+        const messages=snapshot.data()?.messages;
+        return Array.isArray(messages)?messages.filter((m:any)=>m&&['user','assistant'].includes(m.role)&&typeof m.content==='string'):[];
+      },
+      async saveConversation(id:string, chat:any[]) {
+        let messages=chat.slice(-60);
+        while(messages.length>1&&JSON.stringify(messages).length>650000)messages=messages.slice(1);
+        if(JSON.stringify(messages).length>650000)throw Error('Conversation is too large to save.');
+        await storeSdk.setDoc(storeSdk.doc(db,'users',await currentUserId(),'conversations',id),{messages:JSON.parse(JSON.stringify(messages)),title:String(messages.find((m:any)=>m.role==='user')?.content||'New conversation').slice(0,80),updatedAt:storeSdk.serverTimestamp()});
       },
       async loadChats(botId: string) {
         const reference = storeSdk.doc(db, 'users', await currentUserId(), 'bots', botId, 'chats', 'current');

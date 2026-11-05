@@ -1,0 +1,184 @@
+/* Chat-first Trading Vibes workspace. Does not change trading logic. */
+.studio.tv-chat-first{background:#08110e}
+.tv-primary-nav{display:flex;gap:6px;align-items:center;justify-content:center;padding:9px 16px;border-bottom:1px solid #27352d;background:#0a1510;flex:none}
+.tv-primary-nav button{border:1px solid transparent;border-radius:12px;padding:10px 18px;display:flex;align-items:center;justify-content:center;gap:8px;color:#9caea4;background:transparent;cursor:pointer;font-size:13px;font-weight:650}
+.tv-primary-nav button[aria-current="page"]{background:#1c3529;border-color:#385c48;color:#dbf7e8}
+.tv-primary-nav button:focus-visible{outline:2px solid #7ad6a3;outline-offset:2px}
+.tv-chat-first .studio-body{position:relative}
+.tv-chat-first .studio-body>.chat-side{transition:none}
+.tv-chat-first .studio-body>.main-column{min-width:0;flex:1}
+.tv-chat-first.tv-area-chat .studio-body>.chat-side{width:100%;max-width:840px;margin:0 auto;border-right:0;box-shadow:none;flex:1}
+.tv-chat-first.tv-area-chat .studio-body>.main-column{display:none}
+.tv-chat-first.tv-area-chat .chat-messages{width:100%;max-width:780px;margin:0 auto;flex:1}
+.tv-chat-first.tv-area-chat .chat-composer{width:calc(100% - 32px);max-width:780px;margin:10px auto 18px;border:1px solid #32473b;border-radius:18px}
+.tv-chat-first.tv-area-chat .chat-empty{max-width:570px;margin:auto}
+.tv-chat-first.tv-area-chat .chat-side.collapsed{width:100%}
+.tv-chat-first.tv-area-chat .chat-side.collapsed .chat-messages,.tv-chat-first.tv-area-chat .chat-side.collapsed .chat-composer{display:flex}
+.tv-chat-first.tv-area-chat .chat-side.collapsed .side-head{display:flex}
+.tv-chat-first.tv-area-backtest .studio-body>.chat-side,.tv-chat-first.tv-area-code .studio-body>.chat-side,.tv-chat-first.tv-area-agents .studio-body>.chat-side{display:none}
+.tv-chat-first.tv-area-agents .studio-body>.main-column{display:none}
+.tv-agent-home{width:100%;max-width:900px;min-width:0;overflow:auto;margin:0 auto;padding:32px 24px 48px;color:#e2f0e8}
+.tv-agent-home h1{font-size:27px;margin:0 0 8px}
+.tv-agent-home p{color:#a3b7ab;line-height:1.5}
+.tv-agent-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:22px}
+.tv-agent-card{background:#102019;border:1px solid #2b4135;border-radius:18px;padding:22px}
+.tv-agent-card strong{display:block;margin-bottom:10px;font-size:15px}
+.tv-agent-card span{color:#a6b9ac;font-size:13px;line-height:1.5}
+.tv-agent-card button{display:block;margin-top:18px;border:1px solid #3a674d;color:#d7f5e0;background:#1b3d2b;border-radius:9px;padding:10px 15px;cursor:pointer}
+.tv-agent-warning{margin-top:20px;border:1px solid #745b33;border-radius:12px;padding:14px;font-size:13px;color:#f6d7a0}
+@media(max-width:640px){
+ .tv-primary-nav{order:3;position:relative;z-index:3;padding:5px 4px calc(6px + env(safe-area-inset-bottom));gap:1px;border-top:1px solid #26392e;border-bottom:0}
+ .tv-primary-nav button{flex:1;min-width:0;flex-direction:column;gap:4px;padding:8px 2px;font-size:11px;border-radius:10px}
+ .tv-chat-first .studio-body{order:2;min-height:0}
+ .tv-chat-first .topbar{order:1}
+ .tv-chat-first .mobile-top-tabs,.tv-chat-first .mobile-actions{display:none!important}
+ .tv-chat-first .studio-body>.chat-side{position:relative!important;inset:auto!important;z-index:auto!important;height:100%!important;max-width:none!important}
+ .tv-chat-first.tv-area-chat .studio-body>.chat-side{display:flex!important}
+ .tv-chat-first.tv-area-chat .chat-composer{margin:8px 10px 12px;width:calc(100% - 20px)}
+ .tv-chat-first.tv-area-chat .chat-messages{padding:18px 12px}
+ .tv-chat-first.tv-area-backtest .studio-body>.main-column,.tv-chat-first.tv-area-code .studio-body>.main-column{display:flex;width:100%;height:100%}
+ .tv-agent-home{padding:20px 14px 36px}
+ .tv-agent-cards{grid-template-columns:1fr}
+ .tv-chat-first .top-actions .backtest-dates,.tv-chat-first .top-actions .prop-risk-control,.tv-chat-first .top-actions .deploy-top-action,.tv-chat-first .top-actions .backtest-button,.tv-chat-first .top-actions .workspace-share,.tv-chat-first .top-actions .hide-small{display:none}
+}
+
+/* Keep the existing terminal accessible from Charts and Code; chat remains the default landing pane. */
+.tv-chat-first.tv-area-backtest .studio-body>.main-column,.tv-chat-first.tv-area-code .studio-body>.main-column{display:flex;flex:1;min-width:0}
+.tv-chat-first.tv-area-chat .studio-body>.main-column,.tv-chat-first.tv-area-agents .studio-body>.main-column{display:none}
+.tv-chat-first.tv-area-agents .studio-body>.tv-agent-home{display:block}
+.tv-chat-first:not(.tv-area-agents) .studio-body>.tv-agent-home{display:none}
+
+.tv-chat-result-card{background:#14231b;border:1px solid #375243;border-radius:14px;padding:16px;margin:14px 10px;color:#e5f4e8}
+.tv-chat-result-card .tv-card-heading{display:flex;align-items:center;gap:8px;font-size:13px}
+.tv-chat-result-card p{font-size:12px;line-height:1.6;color:#a9bbaf;margin:10px 0}
+.tv-chat-result-card button{display:inline-flex;align-items:center;gap:8px;border:1px solid #3e7955;border-radius:9px;background:#24523a;color:#e6f8e9;padding:9px 12px;font-size:12px;cursor:pointer}
+.tv-chat-result-card button:disabled{cursor:not-allowed;opacity:.5}
+.tv-chat-first .proposal{border:1px solid #3d6750;border-radius:14px;margin:12px 10px}
+@media(max-width:640px){.tv-chat-first.tv-area-chat .chat-side .side-head{display:flex}.tv-chat-first .tv-chat-result-card{margin:12px 0}}
+
+.tv-operation-actions{display:flex;gap:9px;flex-wrap:wrap}.tv-chat-result-card .tv-action-dismiss{background:transparent;border-color:#506259;color:#abbdb1}
+
+.tv-backtest-toolbar{display:flex;align-items:center;gap:12px;flex:none;background:#0e1e16;border-bottom:1px solid #304536;padding:8px 16px;min-height:56px}
+.tv-backtest-heading{display:flex;align-items:center;gap:8px;margin-right:auto;white-space:nowrap}
+.tv-backtest-heading strong{font-size:13px}
+.tv-backtest-heading span{font-size:11px;color:#9eb2a4}
+.tv-backtest-toolbar>button{border:1px solid #3f674b;border-radius:10px;background:#1d4030;color:#e4f6e8;min-height:36px;padding:8px 12px;display:flex;align-items:center;justify-content:center;gap:7px;font-size:12px;white-space:nowrap;cursor:pointer}
+.tv-backtest-toolbar>button:disabled{opacity:.45;cursor:not-allowed}
+.tv-backtest-toolbar .date-controls{display:flex}
+@media(max-width:640px){
+ .tv-chat-first .topbar{order:1}
+ .tv-chat-first .tv-backtest-toolbar{order:2;flex-wrap:wrap;gap:8px;padding:9px 11px;min-height:unset}
+ .tv-chat-first .tv-backtest-heading{width:100%;margin:0}
+ .tv-chat-first .tv-backtest-toolbar .date-controls{flex:1;min-width:150px}
+ .tv-chat-first .tv-backtest-toolbar>button{padding:8px 9px;min-width:75px}
+ .tv-chat-first .studio-body{order:3}
+ .tv-chat-first .tv-primary-nav{order:4}
+}
+
+.tv-chat-first .tv-connect-ai{margin:12px auto;display:flex;gap:8px;align-items:center;justify-content:center;padding:10px 14px;border:1px solid #3d7753;border-radius:12px;color:#e1f6e8;background:#1b3d2c;cursor:pointer;font-size:13px}
+.tv-conversation-bar{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid #25382d;flex:none}
+.tv-conversation-bar button{border:0;background:transparent;color:#b5cabc;font-size:12px;min-height:32px;padding:5px 8px;cursor:pointer}
+.tv-conversation-entry{display:block;width:100%;padding:14px;text-align:left;background:#16271e;color:#e2efe7;border:1px solid #344b3c;border-radius:10px;margin:8px 0;overflow-wrap:anywhere}
+@media(max-width:640px){.tv-conversation-bar{order:2;gap:2px;padding:4px}.tv-conversation-bar button{font-size:11px}.tv-chat-first .topbar .bot-title{min-width:0}.tv-chat-first .topbar .bot-title strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:155px}}
+.tv-area-chat .top-actions>*:not(.profile-button):not(.tv-theme-toggle){display:none!important}
+.tv-area-chat .topbar{min-height:60px;height:60px;flex-wrap:nowrap}
+.tv-no-agent .top-left>.market-symbol,.tv-no-agent .top-left>.phase-pill,.tv-no-agent .top-left>.muted{display:none}
+.tv-no-agent .studio-body>.main-column,.tv-no-agent .tv-agent-home{display:none!important}
+.tv-empty-agent{margin:auto;max-width:600px;padding:28px;color:#d8e8de;text-align:center}
+.tv-empty-agent p{line-height:1.7;color:#9fb5a7}.tv-empty-agent button{margin:8px}
+@media(max-width:640px){
+ .tv-chat-first .topbar{display:flex;align-items:center;justify-content:space-between;min-height:60px;height:60px;padding:8px 10px;gap:8px}
+ .tv-chat-first .top-left{width:auto;flex:1;min-width:0;padding-right:0;overflow:hidden}
+ .tv-chat-first .top-actions{width:auto;flex:none;display:flex;align-items:center;margin:0;height:auto}
+ .tv-chat-first .top-actions .profile-button{position:static}
+ .tv-chat-first .top-actions .simulation-controls{display:none}
+}
+.tv-proposal-diff{margin:12px 0;max-width:100%;font-size:12px}.tv-proposal-diff pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto;background:#09140e;padding:12px;border-radius:8px}
+.tv-chat-first .top-left{min-width:0;flex:1}.tv-chat-first .bot-title{min-width:100px}.tv-chat-first .bot-title strong{display:block;max-width:230px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tv-chat-first .top-actions>.backtest-dates,.tv-chat-first .top-actions>.hide-small{display:none}
+.tv-area-code .top-actions>.prop-risk-control,.tv-area-agents .top-actions>.prop-risk-control,.tv-area-agents .top-actions>.simulation-controls{display:none}
+@media(max-width:640px){.tv-chat-first .bot-title{min-width:0}.tv-chat-first .bot-title strong{max-width:155px}}
+
+/* Blueprint navigation: Chat · Markets · Agents · You. The strategy and
+   backtest surfaces stay inside the Agents workbench. */
+.studio.tv-chat-first{background:#0b0c13;color:#efedf5}
+.tv-primary-nav{position:relative;z-index:4;gap:4px;padding:8px 14px;border-color:#252532;background:#0e0f17}
+.tv-primary-nav button{min-width:100px;min-height:42px;padding:8px 15px;border-radius:12px;color:#9b99aa}
+.tv-primary-nav button[aria-current="page"]{color:#e5dcff;border-color:#403956;background:#211d2b}
+.tv-primary-nav button:focus-visible{outline-color:#bba9f5}
+.tv-primary-nav button svg{flex:none}
+.tv-primary-nav button span{white-space:nowrap}
+.tv-chat-first .topbar{background:#0e0f17;border-color:#252532}
+.tv-chat-first .top-left .back-button{display:none}
+.tv-chat-first .bot-title span{color:#9d9aaa}
+.tv-chat-first .top-actions .profile-button{min-height:38px}
+.tv-chat-first .tv-conversation-bar{background:#0d0e15;border-color:#252532}
+.tv-conversation-bar button{color:#c0b6d8}
+.tv-chat-first .studio-body{flex:1;min-height:0}
+.tv-chat-first.tv-area-chat .studio-body>.chat-side{max-width:900px;background:transparent}
+.tv-chat-first.tv-area-chat .chat-messages{max-width:790px}
+.tv-chat-first.tv-area-chat .chat-composer{border-color:#3e394f;background:#15151f;box-shadow:0 12px 32px #0004}
+.tv-chat-first.tv-area-chat .chat-empty{max-width:590px}
+.tv-chat-first.tv-area-chat .chat-empty>strong{font-size:22px;letter-spacing:-.5px}
+.tv-chat-first.tv-area-chat .chat-empty>p{max-width:410px;margin:9px auto 15px;color:#a9a6b5;line-height:1.7}
+.tv-chat-first.tv-area-chat .suggestions{gap:9px}
+.tv-chat-first.tv-area-chat .suggestions button{border-color:#393548;background:#15151f;color:#ddd7ec;border-radius:12px;min-height:42px}
+.tv-chat-first.tv-area-chat .tv-connect-ai{border-color:#4a4160;background:#221e2e;color:#e7dfff}
+.tv-chat-first .tv-chat-result-card{background:#171621;border-color:#393448;color:#f0edf7}
+.tv-chat-first .tv-chat-result-card p{color:#b1aebd}
+.tv-chat-first .tv-chat-result-card button{border-color:#5f527d;background:#292337;color:#e9e0ff}
+.tv-chat-first .proposal{border-color:#514866;background:#171621}
+.tv-chat-first .tv-agent-home{padding:0;max-width:none;overflow:auto;color:#f1eff7}
+.tv-chat-first .studio-body>.tv-agent-home{display:none}
+.tv-chat-first.tv-area-agents.tv-agent-workspace-overview .studio-body>.tv-agent-home{display:block!important;flex:1}
+.tv-chat-first.tv-area-agents.tv-agent-workspace-overview .studio-body>.main-column{display:none!important}
+.tv-chat-first.tv-area-agents.tv-agent-workspace-overview .studio-body>.chat-side{display:none!important}
+.tv-chat-first.tv-area-agents.tv-agent-workspace-backtest .studio-body>.main-column,
+.tv-chat-first.tv-area-agents.tv-agent-workspace-code .studio-body>.main-column{display:flex!important;flex:1;min-width:0}
+.tv-chat-first.tv-area-agents.tv-agent-workspace-backtest .studio-body>.chat-side,
+.tv-chat-first.tv-area-agents.tv-agent-workspace-code .studio-body>.chat-side{display:none!important}
+.tv-chat-first.tv-area-agents.tv-agent-workspace-backtest .studio-body>.tv-agent-home,
+.tv-chat-first.tv-area-agents.tv-agent-workspace-code .studio-body>.tv-agent-home{display:none!important}
+.tv-chat-first.tv-area-markets .studio-body,.tv-chat-first.tv-area-you .studio-body{display:none!important}
+.tv-chat-first.tv-area-markets .tv-conversation-bar,.tv-chat-first.tv-area-you .tv-conversation-bar{display:none!important}
+.tv-chat-first.tv-area-markets .top-actions>*:not(.profile-button):not(.tv-theme-toggle),
+.tv-chat-first.tv-area-you .top-actions>*:not(.profile-button):not(.tv-theme-toggle),
+.tv-chat-first.tv-area-agents.tv-agent-workspace-overview .top-actions>*:not(.profile-button):not(.tv-theme-toggle){display:none!important}
+.tv-chat-first.tv-area-agents.tv-agent-workspace-backtest .top-actions>*:not(.profile-button):not(.tv-theme-toggle){display:none!important}
+.tv-chat-first.tv-area-agents.tv-agent-workspace-code .top-actions>*:not(.profile-button):not(.tv-theme-toggle):not(.backtest-button){display:none!important}
+.tv-chat-first.tv-area-agents.tv-agent-workspace-code .top-actions>.backtest-button{display:inline-flex!important}
+.tv-chat-first.tv-area-markets .bot-title>span,.tv-chat-first.tv-area-you .bot-title>span{display:none}
+.tv-chat-first.tv-area-markets .tv-primary-nav button[aria-current="page"],.tv-chat-first.tv-area-you .tv-primary-nav button[aria-current="page"]{background:#211d2b}
+.tv-chat-first.tv-no-agent .studio-body>.tv-agent-home{display:block}
+.tv-chat-first.tv-area-agents.tv-no-agent.tv-agent-workspace-overview .studio-body>.tv-agent-home{display:block!important}
+.tv-chat-first.tv-no-agent.tv-area-chat .studio-body>.main-column{display:none!important}
+.tv-chat-first.tv-no-agent.tv-area-chat .studio-body>.chat-side{display:flex!important}
+.tv-chat-first .tv-primary-nav svg{color:inherit}
+@media(max-width:720px){
+ .tv-chat-first .topbar{order:1;min-height:58px;height:58px;padding:7px 12px}
+ .tv-chat-first .tv-backtest-toolbar{order:2;flex-wrap:wrap;gap:8px;padding:8px 10px}
+ .tv-chat-first .tv-conversation-bar{order:2;justify-content:flex-start;overflow:auto;flex-wrap:nowrap;padding:4px 8px;scrollbar-width:none}
+ .tv-chat-first .tv-conversation-bar button{flex:none;min-height:36px;padding:5px 9px;font-size:10px}
+ .tv-chat-first .tv-destination-shell{order:3;min-height:0}
+ .tv-chat-first .studio-body{order:3;min-height:0}
+ .tv-chat-first .tv-primary-nav{order:5;position:relative;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));min-height:68px;height:calc(68px + env(safe-area-inset-bottom));padding:5px 5px calc(6px + env(safe-area-inset-bottom));gap:2px;border-top:1px solid #292837;border-bottom:0;background:#11121a}
+ .tv-chat-first .tv-primary-nav button{min-width:0;min-height:55px;flex-direction:column;gap:4px;padding:7px 2px;font-size:10px;border-radius:11px}
+ .tv-chat-first .tv-primary-nav button svg{width:19px;height:19px}
+ .tv-chat-first .tv-primary-nav button[aria-current="page"]{background:#211d2b}
+ .tv-chat-first .tv-chat-result-card{margin:12px 0}
+ .tv-chat-first .chat-messages{padding:17px 14px}
+ .tv-chat-first .tv-market-layout{grid-template-columns:minmax(0,1fr)}
+ .tv-chat-first .tv-market-actions>*{flex:1}
+ .tv-chat-first .tv-library-agent .tv-hub-secondary{min-width:120px}
+}
+@media(min-width:721px){
+ .tv-chat-first .tv-primary-nav{min-height:54px}
+ .tv-chat-first.tv-area-chat .studio-body>.chat-side{max-width:880px}
+ .tv-chat-first.tv-area-agents.tv-agent-workspace-overview .studio-body{padding:20px 24px 30px;overflow:auto}
+}
+@media(max-width:380px){
+ .tv-chat-first .tv-conversation-bar button{font-size:9px;padding:4px 7px}
+ .tv-chat-first .tv-market-provenance{gap:8px}
+ .tv-chat-first .tv-market-provenance strong{width:100%}
+ .tv-chat-first .tv-destination-heading h1{font-size:29px}
+}

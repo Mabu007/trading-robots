@@ -6,6 +6,6 @@ export default defineConfig(({ mode }) => {
   const apiPort = Number(env.API_PORT) || 8787;
   return {
     plugins: [react(), tailwindcss()],
-    server: { proxy: { '/api': `http://127.0.0.1:${apiPort}` } },
+    server: { allowedHosts: ['terminal.local'], proxy: { '/api': `http://127.0.0.1:${apiPort}` } },
   };
 });

@@ -45,7 +45,7 @@ export class FirestoreStore implements RecordStore {
       try{
         // Firestore transaction reads all documents before committing writes.
         const records=await Promise.all(paths.map(async path=>{const r=await this.call(`/${path}?transaction=${encodeURIComponent(transaction)}`);if(r.status===404)return null;if(!r.ok)throw Error('Could not read update.');return decode((await r.json() as any).fields||{});}));
-        const updates=update(records),writes=Object.entries(updates).map(([path,data])=>({update:{name:`projects/${this.project}/databases/(default)/documents/${path}`,fields:fields(data)}}));
+        const updates=update(records),writes=Object.entries(updates).map(([path,data])=>{const index=paths.indexOf(path);if(index<0)throw Error('Transaction attempted to write an unread document.');return {update:{name:`projects/${this.project}/databases/(default)/documents/${path}`,fields:fields(data)},currentDocument:{exists:records[index]!==null}}});
         const committed=await this.call(':commit','POST',{transaction,writes});if(committed.status===409)continue;if(!committed.ok)throw Error('Could not commit update.');return;
       }catch(error){await this.call(':rollback','POST',{transaction}).catch(()=>{});throw error;}
     }
