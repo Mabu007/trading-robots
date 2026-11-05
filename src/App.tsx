@@ -316,7 +316,7 @@ function App(){
    const title=(message.match(/(?:named|called)\s+["“]?([^"“”,.]{3,48})/i)?.[1]||requestedAsset+' AI strategy').trim().slice(0,64);
    creatingCode={id:makeBotId(),name:title,asset:requestedAsset,venue:requestedVenue,prompt:message};setNewCodeTarget(creatingCode);
   }
-  if(command&&command!=='edit'){
+  if(command&&command!=='edit'&&command!=='create'){
    setChatInput('');setAiError('');
    if(command==='backtest'){
     const target=referenced?.bot||cloudBots.find(bot=>bot.id===draftId);
