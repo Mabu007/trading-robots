@@ -74,3 +74,5 @@
  .tv-chat-first .studio-body{order:3}
  .tv-chat-first .tv-primary-nav{order:4}
 }
+
+.tv-chat-first .tv-connect-ai{margin:12px auto;display:flex;gap:8px;align-items:center;justify-content:center;padding:10px 14px;border:1px solid #3d7753;border-radius:12px;color:#e1f6e8;background:#1b3d2c;cursor:pointer;font-size:13px}
