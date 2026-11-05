@@ -3,7 +3,11 @@ export type ChatCommand = 'backtest' | 'status' | 'deploy' | 'stop' | null;
 export function classifyChatCommand(message: string): ChatCommand {
   const text = message.trim().toLowerCase().replace(/[.!?]+$/g, '').trim();
   if (!text) return null;
-  // Never treat an explanation or hypothetical question as an execution instruction.
+  if (/^(?:what is|what's)\s+(?:the\s+|my\s+)?(?:bot|robot|agent|deployment)\s+(?:status|state)\b/.test(text)) return 'status';
+  if (/^(?:can you|could you|would you)\s+(?:please\s+)?(?:run|perform|do)\s+(?:a\s+|the\s+|my\s+)?backtest\b/.test(text)) return 'backtest';
+  if (/^(?:can you|could you)\s+(?:please\s+)?(?:show|check|refresh|inspect)\s+(?:me\s+)?(?:the\s+|my\s+)?(?:agent|bot|robot)\s+status\b/.test(text)) return 'status';
+  if (/^(?:can you|could you)\s+(?:please\s+)?deploy\b/.test(text)) return 'deploy';
+    // Never treat an explanation or hypothetical question as an execution instruction.
   if (/^(what|why|how|explain|teach|describe|tell me about|would|could|should|if |when |is it |can a |can the )\b/.test(text)) return null;
   if (/^(?:please\s+)?(?:run|start|execute|perform|do)\s+(?:a\s+|the\s+|my\s+)?backtest\b/.test(text)
     || /^(?:please\s+)?backtest\s+(?:it|this|my\s+(?:bot|strategy|agent)|the\s+(?:bot|strategy|agent))\b/.test(text)
