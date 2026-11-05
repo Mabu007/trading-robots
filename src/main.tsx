@@ -8,6 +8,7 @@ import './studio-polish.css';
 import './shadcn.css';
 import './chat-first.css';
 import './theme.css';
+import './chatgpt-shell.css';
 createRoot(document.getElementById('root')!).render(<React.StrictMode><AppErrorBoundary><App /></AppErrorBoundary></React.StrictMode>);
 
 
