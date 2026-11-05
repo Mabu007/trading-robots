@@ -288,6 +288,7 @@ function App(){
   const next=[...prior,userMessage];
   let command:string|null=null;
   let focusedCode:{bot:CloudBot;source:string}|null=null;
+  let creatingCode:{id:string;name:string;asset:string;venue:Venue;prompt:string}|null=null;
   const referenced=resolveCodeReference(message,cloudBots);
   setBusy('chat');
   try{
@@ -310,9 +311,10 @@ function App(){
    const marketMatch=message.match(/\b([A-Z]{2,12}(?:USDC|USDT|ZAR|USD))\b/i);
    if(!venueMatch||!marketMatch){setChatInput('');setChat([...next,{role:'assistant',content:'Specify a market and venue, for example: Create a GOLDUSDC trading strategy on PropDAO named Gold Sweeper.'}]);return;}
    const requestedVenue=venueOf(venueMatch[1].toLowerCase()),requestedAsset=marketMatch[1].toUpperCase();
-   if(!marketAvailability.some(m=>m.asset===requestedAsset)){setChatInput('');setChat([...next,{role:'assistant',content:'The market '+requestedAsset+' is not available in your current verified market catalogue. Choose an available market before creating code.'}]);return;}
+   if(requestedVenue==='ctrader'){setChat([...next,{role:'assistant',content:'cTrader strategy creation needs a verified broker market catalogue first. Choose a connected supported venue.'}]);return;}
+   try{const response=await fetch(requestedVenue==='valr'?'/api/valr/markets':'/api/venues/'+requestedVenue+'/markets');const data=await readApiJson<{markets:{symbol:string}[]}>(response,'Venue markets');if(!data.markets?.some(m=>m.symbol===requestedAsset))throw Error('This market was not listed by the venue.');}catch(error){setChat([...next,{role:'assistant',content:'Cannot verify '+requestedAsset+' on '+venueLabel[requestedVenue]+': '+err(error)}]);return;}
    const title=(message.match(/(?:named|called)\s+["“]?([^"“”,.]{3,48})/i)?.[1]||requestedAsset+' AI strategy').trim().slice(0,64);
-   setNewCodeTarget({id:makeBotId(),name:title,asset:requestedAsset,venue:requestedVenue,prompt:message});
+   creatingCode={id:makeBotId(),name:title,asset:requestedAsset,venue:requestedVenue,prompt:message};setNewCodeTarget(creatingCode);
   }
   if(command&&command!=='edit'){
    setChatInput('');setAiError('');
@@ -355,11 +357,12 @@ function App(){
    return;
   }
   if(command==='edit'&&!created){setChat([...next,{role:'assistant',content:'Select an agent to propose changes, or ask me to create a new strategy.'}]);return;}
+  if(command==='edit')setNewCodeTarget(null);
   const wantsCode=command==='edit'||command==='create';
   const requestedEditor={draftId,code};
   setChatInput('');setAiError('');setChat([...next,{role:'assistant',content:wantsCode?'Preparing a strategy edit…':'Thinking…'}]);setBusy('chat');
   try{
-   const appContext=focusedCode?'Retrieved saved code: '+focusedCode.bot.name+' on '+focusedCode.bot.asset+' · '+venueLabel[focusedCode.bot.venue||'valr']+'\n'+focusedCode.source.slice(0,18000):command==='create'?'NEW strategy.js request for venue '+String(newCodeTarget?.venue||'propdao')+', market '+String(newCodeTarget?.asset||'GOLDUSDC')+'. Produce a complete strategy implementing config and onCandle. This is not an edit of existing source.':created?`Bot: ${name||'Untitled'}
+   const appContext=focusedCode?'Retrieved saved code: '+focusedCode.bot.name+' on '+focusedCode.bot.asset+' · '+venueLabel[focusedCode.bot.venue||'valr']+'\n'+focusedCode.source.slice(0,18000):command==='create'?'NEW strategy.js request for venue '+String(creatingCode?.venue||'propdao')+', market '+String(creatingCode?.asset||'GOLDUSDC')+'. Produce a complete strategy implementing config and onCandle. This is not an edit of existing source.':created?`Bot: ${name||'Untitled'}
 Asset: ${asset}
 Available price timeframes: ${selectedMarket?.timeframes.join(', ')||'unknown'}
 Current JavaScript strategy (authoritative):
