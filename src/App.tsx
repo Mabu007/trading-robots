@@ -355,11 +355,11 @@ function App(){
    return;
   }
   if(command==='edit'&&!created){setChat([...next,{role:'assistant',content:'Select an agent to propose changes, or ask me to create a new strategy.'}]);return;}
-  const wantsCode=command==='edit';
+  const wantsCode=command==='edit'||command==='create';
   const requestedEditor={draftId,code};
   setChatInput('');setAiError('');setChat([...next,{role:'assistant',content:wantsCode?'Preparing a strategy edit…':'Thinking…'}]);setBusy('chat');
   try{
-   const appContext=created?`Bot: ${name||'Untitled'}
+   const appContext=focusedCode?'Retrieved saved code: '+focusedCode.bot.name+' on '+focusedCode.bot.asset+' · '+venueLabel[focusedCode.bot.venue||'valr']+'\n'+focusedCode.source.slice(0,18000):command==='create'?'NEW strategy.js request for venue '+String(newCodeTarget?.venue||'propdao')+', market '+String(newCodeTarget?.asset||'GOLDUSDC')+'. Produce a complete strategy implementing config and onCandle. This is not an edit of existing source.':created?`Bot: ${name||'Untitled'}
 Asset: ${asset}
 Available price timeframes: ${selectedMarket?.timeframes.join(', ')||'unknown'}
 Current JavaScript strategy (authoritative):
@@ -383,8 +383,7 @@ STRATEGY CONTRACT: export const config = { timeframes: [...], executionTimeframe
 
 TRADE AUDITS: when an attached trade context is present, inspect its exact strategy source, trade metadata, backtest metrics, and OHLC candles. State what those supplied bars prove and what they cannot prove. Do not invent omitted bars or assume flat candles.
 
-CURRENT WORKSPACE CONTEXT:
-${appContext}`;
+SAVED CODE CATALOGUE (user-owned names/metadata; load the exact source before describing its internals):\n${catalogContext(cloudBots)}\n\nCURRENT WORKSPACE CONTEXT:\n${appContext}`;
    const history=next.slice(-6).map((item,index)=>{
     let content=item.content;
     if(item.role==='assistant'&&index<next.slice(-6).length-1&&/```(?:js|javascript)/i.test(content))content='[Earlier assistant message contained a code proposal; the current strategy is provided in system context.]';
@@ -394,7 +393,7 @@ ${appContext}`;
    let lastChatPaint=0;
    const text=await ai([{role:'system',content:system},...history],asset,fullText=>{if(performance.now()-lastChatPaint<70)return;lastChatPaint=performance.now();const safeText=wantsCode?'Preparing a strategy edit…':conciseAssistantText(fullText);setChat([...next,{role:'assistant',content:safeText||'Thinking…'}])},wantsCode?6000:1800,false,!wantsCode);
    const proposed=wantsCode?extractCodeIfPresent(text):'';let proposalError='';
-   if(wantsCode&&proposed&&proposed!==code){try{if(editorIdentityRef.current.draftId!==requestedEditor.draftId||editorIdentityRef.current.code!==requestedEditor.code)throw new Error('The editor changed while the response was being prepared');const proposedConfig=parseStrategyConfig(proposed);if(selectedMarket&&proposedConfig.timeframes.some((tf:string)=>!selectedMarket.timeframes.includes(tf)))throw new Error(`Available history is ${selectedMarket.timeframes.join(', ')} only.`);if(!/export\s+function\s+onCandle\s*\(/.test(proposed))throw new Error('Missing onCandle(ctx) export');validateStrategySyntax(proposed);setProposal(proposed);setProposalSummary(conciseAssistantText(text)||'A strategy update is ready. Apply it to load the changes into the code editor.');log('AI prepared a strategy edit · review and apply to the code editor.')}catch(error){proposalError=`The strategy edit was incomplete (${err(error)}). Retry to prepare a complete editor update.`;log(`AI code was not staged · ${err(error)} Ask AI to try again.`)}}
+   if(wantsCode&&proposed&&proposed!==code){try{if(command!=='create'&&(editorIdentityRef.current.draftId!==requestedEditor.draftId||editorIdentityRef.current.code!==requestedEditor.code))throw new Error('The editor changed while the response was being prepared');const proposedConfig=parseStrategyConfig(proposed);if(command!=='create'&&selectedMarket&&proposedConfig.timeframes.some((tf:string)=>!selectedMarket.timeframes.includes(tf)))throw new Error(`Available history is ${selectedMarket.timeframes.join(', ')} only.`);if(!/export\s+function\s+onCandle\s*\(/.test(proposed))throw new Error('Missing onCandle(ctx) export');validateStrategySyntax(proposed);setProposal(proposed);setProposalSummary(conciseAssistantText(text)||'A strategy update is ready. Apply it to load the changes into the code editor.');log('AI prepared a strategy edit · review and apply to the code editor.')}catch(error){proposalError=`The strategy edit was incomplete (${err(error)}). Retry to prepare a complete editor update.`;log(`AI code was not staged · ${err(error)} Ask AI to try again.`)}}
    const finalText=wantsCode?(proposed&&proposed!==code&&!proposalError?'Strategy edit ready. Review the summary below, then apply it to the code editor.':proposalError||'I couldn’t prepare a complete strategy edit. Retry, or describe the change another way.'):conciseAssistantText(text)||'I could not form a useful response. Please rephrase your request.';
    setAiError(proposalError||(wantsCode&&!proposed?'The response did not include a complete strategy edit. Retry your request.':''));setChat([...next,{role:'assistant',content:finalText}]);
   }catch(error){if(error instanceof AiOutputLimitError){const notice='The free model reached its output limit after multiple continuation attempts.';setAiError(notice);setChat([...next,{role:'assistant',content:wantsCode?'The strategy edit could not be completed and was not applied. Try a smaller edit or choose a model with a larger output allowance.':(conciseAssistantText(error.partialText)||'Partial answer unavailable.')+'\n\n'+notice+' Ask me to continue for the remainder.'}]);}else{const errorMessage=error instanceof Error&&error.name==='AbortError'?'AI response timed out. Retry your message.':err(error);setAiError(errorMessage);setChatInput(message);setChat([...next,{role:'assistant',content:`Could not reach AI: ${errorMessage}`}])}}
