@@ -511,3 +511,25 @@
   .tv-chat-first.tv-area-agents .top-actions .tv-theme-toggle { position: sticky; left: 0; z-index: 1; background: var(--tv-shell-panel); }
   .tv-chat-first.tv-area-agents .tv-backtest-toolbar { order: 2; }
 }
+
+/* Unified workspace chrome: one toggle, one sidebar scroll, no frame seams. */
+.studio.tv-chat-first .tv-app-sidebar{border-right:0;box-shadow:none;}
+.studio.tv-chat-first .tv-sidebar-brand{min-height:50px;gap:11px;padding:1px 7px 9px;}
+.studio.tv-chat-first .tv-sidebar-brand img{width:36px;height:36px;min-width:36px;object-fit:contain;}
+.studio.tv-chat-first .tv-sidebar-brand strong{font-size:15px;letter-spacing:-.025em;}
+.studio.tv-chat-first .tv-sidebar-scroll{display:block;flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--tv-shell-line) transparent;}
+.studio.tv-chat-first .tv-sidebar-scroll::-webkit-scrollbar{width:5px;}
+.studio.tv-chat-first .tv-sidebar-scroll::-webkit-scrollbar-thumb{border-radius:8px;background:var(--tv-shell-line);}
+.studio.tv-chat-first .tv-sidebar-navigation{border:0;margin:0;padding:0 0 8px;}
+.studio.tv-chat-first .tv-sidebar-strategies,.studio.tv-chat-first .tv-sidebar-chats{display:block;flex:none;min-height:0;max-height:none;overflow:visible;overscroll-behavior:auto;padding:0;margin:0;border:0;}
+.studio.tv-chat-first .tv-sidebar-label{padding:17px 9px 7px;font-size:10px;letter-spacing:.055em;}
+.studio.tv-chat-first .tv-sidebar-profile{border:0;padding-top:5px;}
+.studio.tv-chat-first .topbar,:root[data-theme="dark"] .studio.tv-chat-first .topbar{border:0;border-bottom:0;box-shadow:none;background:var(--tv-shell-bg);}
+.studio.tv-chat-first .tv-header-modes{border:0;box-shadow:none;background:var(--tv-shell-panel-muted);}
+.studio.tv-chat-first .tv-header-modes button.active{box-shadow:none;}
+.studio.tv-chat-first .tv-sidebar-toggle{visibility:visible;opacity:1;position:relative;}
+@media(max-width:720px){
+ .studio.tv-chat-first .tv-app-sidebar{box-shadow:var(--tv-shell-shadow);}
+ .studio.tv-chat-first .tv-sidebar-scroll{flex:1 1 auto;}
+ .studio.tv-chat-first .topbar{border:0;box-shadow:none;background:var(--tv-shell-bg);}
+}
