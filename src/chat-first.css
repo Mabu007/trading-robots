@@ -15,7 +15,7 @@
 .tv-chat-first.tv-area-chat .chat-side.collapsed{width:100%}
 .tv-chat-first.tv-area-chat .chat-side.collapsed .chat-messages,.tv-chat-first.tv-area-chat .chat-side.collapsed .chat-composer{display:flex}
 .tv-chat-first.tv-area-chat .chat-side.collapsed .side-head{display:flex}
-.tv-chat-first.tv-area-charts .studio-body>.chat-side,.tv-chat-first.tv-area-code .studio-body>.chat-side,.tv-chat-first.tv-area-agents .studio-body>.chat-side{display:none}
+.tv-chat-first.tv-area-backtest .studio-body>.chat-side,.tv-chat-first.tv-area-code .studio-body>.chat-side,.tv-chat-first.tv-area-agents .studio-body>.chat-side{display:none}
 .tv-chat-first.tv-area-agents .studio-body>.main-column{display:none}
 .tv-agent-home{width:100%;max-width:900px;min-width:0;overflow:auto;margin:0 auto;padding:32px 24px 48px;color:#e2f0e8}
 .tv-agent-home h1{font-size:27px;margin:0 0 8px}
@@ -36,14 +36,14 @@
  .tv-chat-first.tv-area-chat .studio-body>.chat-side{display:flex!important}
  .tv-chat-first.tv-area-chat .chat-composer{margin:8px 10px 12px;width:calc(100% - 20px)}
  .tv-chat-first.tv-area-chat .chat-messages{padding:18px 12px}
- .tv-chat-first.tv-area-charts .studio-body>.main-column,.tv-chat-first.tv-area-code .studio-body>.main-column{display:flex;width:100%;height:100%}
+ .tv-chat-first.tv-area-backtest .studio-body>.main-column,.tv-chat-first.tv-area-code .studio-body>.main-column{display:flex;width:100%;height:100%}
  .tv-agent-home{padding:20px 14px 36px}
  .tv-agent-cards{grid-template-columns:1fr}
  .tv-chat-first .top-actions .backtest-dates,.tv-chat-first .top-actions .prop-risk-control,.tv-chat-first .top-actions .deploy-top-action,.tv-chat-first .top-actions .backtest-button,.tv-chat-first .top-actions .workspace-share,.tv-chat-first .top-actions .hide-small{display:none}
 }
 
 /* Keep the existing terminal accessible from Charts and Code; chat remains the default landing pane. */
-.tv-chat-first.tv-area-charts .studio-body>.main-column,.tv-chat-first.tv-area-code .studio-body>.main-column{display:flex;flex:1;min-width:0}
+.tv-chat-first.tv-area-backtest .studio-body>.main-column,.tv-chat-first.tv-area-code .studio-body>.main-column{display:flex;flex:1;min-width:0}
 .tv-chat-first.tv-area-chat .studio-body>.main-column,.tv-chat-first.tv-area-agents .studio-body>.main-column{display:none}
 .tv-chat-first.tv-area-agents .studio-body>.tv-agent-home{display:block}
 .tv-chat-first:not(.tv-area-agents) .studio-body>.tv-agent-home{display:none}
@@ -55,3 +55,5 @@
 .tv-chat-result-card button:disabled{cursor:not-allowed;opacity:.5}
 .tv-chat-first .proposal{border:1px solid #3d6750;border-radius:14px;margin:12px 10px}
 @media(max-width:640px){.tv-chat-first.tv-area-chat .chat-side .side-head{display:flex}.tv-chat-first .tv-chat-result-card{margin:12px 0}}
+
+.tv-operation-actions{display:flex;gap:9px;flex-wrap:wrap}.tv-chat-result-card .tv-action-dismiss{background:transparent;border-color:#506259;color:#abbdb1}
