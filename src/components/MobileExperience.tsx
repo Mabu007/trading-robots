@@ -16,6 +16,7 @@ type Props = {
   onConnect: () => void;
   onExplore: () => void;
   onStartStrategy: (prompt: string) => void;
+  onAskAI: (question: string, history: Array<{role:'user'|'assistant';content:string}>) => Promise<string>;
 };
 const nav = [
   { id: 'chat', label: 'Chat', icon: MessageCircle },
@@ -55,9 +56,11 @@ function inferIntent(value: string): 'create' | 'markets' | Lesson {
   if (/risk|stop.loss|drawdown|loss|leverage|margin/i.test(value)) return 'risk';
   return 'basics';
 }
-export function MobileExperience({ bots, profileName, cloudStatus, onCreate, onOpen, onSettings, onConnect, onExplore, onStartStrategy }: Props) {
+export function MobileExperience({ bots, profileName, cloudStatus, onCreate, onOpen, onSettings, onConnect, onExplore, onStartStrategy, onAskAI }: Props) {
   const [tab, setTab] = useState<Destination>('chat');
   const [input, setInput] = useState('');
+  const [messages, setMessages] = useState<Array<{role:'user'|'assistant';content:string}>>([]);
+  const [asking, setAsking] = useState(false);
   const [query, setQuery] = useState('');
   const [lesson, setLesson] = useState<Lesson | null>(null);
   const [selectedMarket, setSelectedMarket] = useState<string | null>(null);
@@ -71,12 +74,21 @@ export function MobileExperience({ bots, profileName, cloudStatus, onCreate, onO
     if (action === 'markets') { setTab('markets'); setLesson(null); return; }
     setLesson(action);
   };
-  const submit = (event: FormEvent) => {
+  const submit = async (event: FormEvent) => {
     event.preventDefault();
     const prompt = input.trim();
-    if (!prompt) return;
+    if (!prompt || asking) return;
     setInput('');
-    launch(inferIntent(prompt), prompt);
+    const intent = inferIntent(prompt);
+    if (intent === 'create') { launch('create',prompt); return; }
+    const next: Array<{role:'user'|'assistant';content:string}> = [...messages,{role:'user',content:prompt}];
+    setMessages(next);setAsking(true);
+    try {
+      const answer = await onAskAI(prompt,messages.slice(-8));
+      setMessages(previous => [...previous,{role:'assistant',content:answer || 'I could not produce an answer. Please try again.'}]);
+    } catch (error) {
+      setMessages(previous => [...previous,{role:'assistant',content: 'The assistant could not respond: '+(error instanceof Error ? error.message : 'Connection unavailable')+'. Please try again.'}]);
+    } finally {setAsking(false)}
   };
   const go = (destination: Destination) => { setTab(destination); setLesson(null); setSelectedMarket(null); };
   const name = profileName.trim().split(/\s+/)[0] || 'there';
@@ -102,7 +114,12 @@ export function MobileExperience({ bots, profileName, cloudStatus, onCreate, onO
         <div className="tvm-takeaway"><CheckCircle2 size={19}/><p>{lessons[lesson].takeaway}</p></div>
         <button className="tvm-cta-secondary" onClick={() => setLesson(null)}>Explore another topic <ArrowRight size={16}/></button>
       </section> : <>
-        <section className="tvm-hero">
+        {messages.length > 0 && <section className="tvm-thread" aria-label="AI conversation">
+          <div className="tvm-thread-head"><span className="tvm-eyebrow">CONVERSATION</span><button onClick={()=>setMessages([])} aria-label="Start a new chat"><Plus size={15}/> New chat</button></div>
+          {messages.map((m,i)=><div className={`tvm-bubble ${m.role}`} key={i}><span>{m.role==='assistant'?'Trading Vibes':'You'}</span><p>{m.content}</p></div>)}
+          {asking && <div className="tvm-bubble assistant" role="status"><span>Trading Vibes</span><p>Thinking…</p></div>}
+        </section>}
+        {messages.length === 0 && <><section className="tvm-hero">
           <span className="tvm-eyebrow"><span className="tvm-pulse"/> YOUR INTELLIGENCE STUDIO</span>
           <h1>What are we exploring <em>today, {name}?</em></h1>
           <p>Learn the markets, develop ideas and build trading strategies — without complicated software.</p>
@@ -110,7 +127,7 @@ export function MobileExperience({ bots, profileName, cloudStatus, onCreate, onO
         <div className="tvm-section-title"><span>START SOMETHING</span><span className="tvm-muted">Pick a direction</span></div>
         <div className="tvm-task-grid">{starters.map(item => <button key={item.title} className="tvm-task" onClick={() => launch(item.action)}><span className="tvm-task-icon"><item.icon size={20}/></span><strong>{item.title}</strong><small>{item.subtitle}</small><ArrowRight className="tvm-task-arrow" size={15}/></button>)}</div>
         <section className="tvm-editorial"><div className="tvm-editorial-top"><span>YOUR FIRST EDGE</span><span>01 / 03</span></div><h2>Before you trade, learn to think in probabilities.</h2><p>Start with a short lesson on risk, stops and the difference between a good decision and a winning trade.</p><button onClick={() => setLesson('risk')}>Explore the lesson <ArrowRight size={16}/></button></section>
-        <div className="tvm-note"><ShieldCheck size={17}/><p>AI can make mistakes. Market analysis and historical results are not guaranteed outcomes. Live trades require your approval.</p></div>
+        <div className="tvm-note"><ShieldCheck size={17}/><p>AI can make mistakes. Market analysis and historical results are not guaranteed outcomes. Live trades require your approval.</p></div></>}
       </>)}
       {tab === 'markets' && <section className="tvm-page">
         <span className="tvm-eyebrow">DISCOVER · UNDERSTAND · TEST</span>
@@ -135,7 +152,7 @@ export function MobileExperience({ bots, profileName, cloudStatus, onCreate, onO
         <div className="tvm-note"><CircleHelp size={17}/><p>Connected venue permissions, market access and KYC requirements depend on the provider and your jurisdiction.</p></div>
       </section>}
     </main>
-    {tab === 'chat' && !lesson && <form className="tvm-composer" onSubmit={submit}><label htmlFor="tvm-prompt" className="tvm-sr">Describe what you want to do</label><input id="tvm-prompt" value={input} onChange={e => setInput(e.target.value)} placeholder="What would you like to do?" autoComplete="off"/><button type="submit" disabled={!input.trim()} aria-label="Continue with request"><Send size={19}/></button><span className="tvm-composer-hint">Guided starting point · AI chat available in your strategy workspace</span></form>}
+    {tab === 'chat' && !lesson && <form className="tvm-composer" onSubmit={submit}><label htmlFor="tvm-prompt" className="tvm-sr">Describe what you want to do</label><input id="tvm-prompt" value={input} onChange={e => setInput(e.target.value)} placeholder="What would you like to do?" autoComplete="off"/><button type="submit" disabled={!input.trim()||asking} aria-label="Continue with request"><Send size={19}/></button><span className="tvm-composer-hint">AI education chat · strategy building opens your workspace</span></form>}
     <nav className="tvm-nav" aria-label="Main navigation">{nav.map(item => <button key={item.id} className={tab===item.id?'active':''} aria-current={tab===item.id?'page':undefined} onClick={()=>go(item.id)}><item.icon size={21}/><span>{item.label}</span></button>)}</nav>
   </div>;
 }
