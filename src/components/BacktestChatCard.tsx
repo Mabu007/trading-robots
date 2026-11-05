@@ -15,7 +15,7 @@ export function BacktestChatCard({data,onInspect}:{data:BacktestCardData;onInspe
   <div className="tv-backtest-chat-metrics">
    <div><small>Net result</small><strong className={typeof m.netReturn==='number'&&m.netReturn<0?'loss':'gain'}>{fmt(m.netReturn,'R')}</strong></div>
    <div><small>Trades</small><strong>{fmt(m.trades)}</strong></div>
-   <div><small>Win rate</small><strong>{fmt(m.winRate,'%')}</strong></div>
+   <div><small>Win rate</small><strong>{fmt(typeof m.winRate==='number'?m.winRate*100:null,'%')}</strong></div>
    <div><small>Profit factor</small><strong>{fmt(m.profitFactor)}</strong></div>
    <div><small>Max drawdown</small><strong>{fmt(m.maxDrawdown,'R')}</strong></div>
   </div>
