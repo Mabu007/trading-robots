@@ -261,3 +261,22 @@
 .tvx-rename-field{display:grid;gap:8px;color:#AAB6C9;font-size:12px;margin:15px 0}
 .tvx-rename-field input{background:#0C111C;border:1px solid #59637B;border-radius:12px;padding:12px 14px;min-height:46px;color:#fff}
 .tvx-agent-form-error{font-size:12px;color:#FFC5C8;margin:12px 0 18px!important}
+
+/* Real saved-watchlist affordance. Never simulates unavailable prices. */
+.tvx-market-row-wrap{display:flex;align-items:center;position:relative}
+.tvx-market-row-wrap:not(:last-child){border-bottom:1px solid #2A3344}
+.tvx-market-row-wrap>.tvx-market-row{flex:1;min-width:0;border-bottom:0!important}
+.tvx-watch-button{display:grid;place-items:center;width:44px;min-width:44px;min-height:44px;border:1px solid #47516A;border-radius:12px;background:#242339;color:#9FA9BE;margin-right:12px}
+.tvx-watch-button[aria-pressed="true"]{color:#D7C5FF;background:#342A4F;border-color:#75619F}
+.tvx-watch-button:hover{border-color:#AA92F5}
+.tvx-market-detail-actions{display:flex;gap:8px;align-items:center}
+.tvx-market-detail-actions>.tvx-watch-button{margin-right:0}
+.tvx-watchlist{border:1px solid #49425E;border-radius:17px;padding:15px 16px;background:#1B1B2B;margin:23px 0 19px}
+.tvx-watchlist>span{font-size:10px;letter-spacing:.11em;font-weight:750;color:#CBB9FF;display:flex;align-items:center;gap:8px}
+.tvx-watchlist>div{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.tvx-watchlist button{min-height:38px;padding:7px 11px;border-radius:10px;background:#2A243F;border:1px solid #615280;color:#EEE5FF;font-size:12px;display:flex;gap:7px;align-items:center}
+@media(max-width:420px){
+ .tvx-market-detail-title h2{font-size:23px}
+ .tvx-market-detail-actions>.tvx-quiet{font-size:11px!important;padding:10px 11px}
+ .tvx-market-row-wrap>.tvx-watch-button{margin-right:8px}
+}
