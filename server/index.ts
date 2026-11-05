@@ -1,6 +1,7 @@
 import {openRouterOAuthRoutes} from './openrouter-oauth.ts';
 import {selectOpenRouterApiKey} from './openrouter-credentials.ts';
 import {chatToolRoutes} from './chat-tools.ts';
+import {codeWatchRoutes} from './code-watch-routes.ts';
 import {AgentRegistry,agentRoutes,type AgentBot} from './agent-registry.ts';
 import {venueOf} from '../shared/venues.ts';
 import 'dotenv/config';
@@ -31,7 +32,7 @@ const app = express();
 const valrMarketData = new ValrMarketData();
 const venueMarketData = new VenueMarketData();
 const dwellirHistory = new DwellirHistory();
-app.use(['/api/marketplace','/api/economy','/api/valr','/api/venues','/api/openrouter','/api/chat'],requestLimit);
+app.use(['/api/marketplace','/api/economy','/api/valr','/api/venues','/api/openrouter','/api/chat','/api/code-watches'],requestLimit);
 app.use(express.json({ limit: '10mb' }));
 
 
@@ -141,6 +142,7 @@ const openRouterAccounts = new OpenRouterAccounts({read:readR2Object,write:write
 openRouterRoutes(app,openRouterAccounts,firebaseUidOrReply);
 openRouterOAuthRoutes(app,openRouterAccounts,firebaseUidOrReply);
 chatToolRoutes(app,openRouterAccounts,firebaseUidOrReply);
+codeWatchRoutes(app,{uid:firebaseUidOrReply,store:marketplace.store});
 const economy=new BotEconomy(marketplace.store,{read:readR2Object,write:writeR2Object,root:userBotRoot},marketplace);
 const agentRegistry=new AgentRegistry(marketplace.store);
 const ownedValrBot=async(uid:string,id:string,req:express.Request)=>{

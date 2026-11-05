@@ -160,7 +160,7 @@ export function YouHub({ onAISettings, onVenues }: {
     <div className="tv-you-list tv-app-connections">
       <button type="button" onClick={onAISettings}><span><Sparkles size={18}/></span><span><strong>OpenRouter AI</strong><small>Connect your account, choose a model and manage spending limits</small></span><ArrowRight size={15}/></button>
       <button type="button" onClick={onVenues}><span><Wallet size={18}/></span><span><strong>Broker connections</strong><small>Manage supported venue credentials and execution access</small></span><ArrowRight size={15}/></button>
-      <div className="tv-apps-note"><strong>Infrastructure</strong><small>Trading Vibes manages its own Firebase and Cloudflare services. They are not customer apps and do not require API keys here.</small></div>
+      
     </div>
   </section>;
 }
