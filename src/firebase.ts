@@ -1,5 +1,6 @@
 import {venueOf,type Venue} from '../shared/venues';
 import {cloudBotFromRecord} from './cloud-bot';
+import type {CodeAnalysis} from './code-analysis';
 export type CloudBot = {
   id: string;
   name: string;
@@ -19,6 +20,8 @@ export type CloudClient = {
   loadConversation: (id:string) => Promise<any[]|null>;
   saveConversation: (id:string, messages:any[]) => Promise<void>;
   listBots: () => Promise<CloudBot[]>;
+  listCodeAnalyses: () => Promise<CodeAnalysis[]>;
+  saveCodeAnalysis: (analysis:CodeAnalysis) => Promise<void>;
   getIdToken: (forceRefresh?: boolean) => Promise<string>;
   saveBot: (bot: CloudBot, storageKey: string) => Promise<void>;
   deleteBot: (botId: string) => Promise<void>;
@@ -98,6 +101,21 @@ export function connectFirebase(): Promise<CloudClient | null> {
           code: storeSdk.deleteField(),
         };
         await storeSdk.setDoc(reference, payload, { merge: true });
+      },
+      async listCodeAnalyses(){
+        const uid=await currentUserId();
+        const reference=storeSdk.collection(db,'users',uid,'codeAnalyses');
+        const snapshot=await storeSdk.getDocs(storeSdk.query(reference,storeSdk.limit(100)));
+        return snapshot.docs.map((doc:any)=>{
+         const data=doc.data()||{};
+         if(!['liquidity_sweeps','volatility_profile'].includes(data.kind)||!['m1','m5','m15','h1'].includes(data.timeframe))return null;
+         return {id:doc.id,name:String(data.name||'Market analysis').slice(0,80),kind:data.kind,asset:String(data.asset||'').slice(0,50),venue:venueOf(data.venue),timeframe:data.timeframe,lookback:Number(data.lookback)||5,source:String(data.source||'').slice(0,30000),updatedAt:typeof data.updatedAt?.toMillis==='function'?data.updatedAt.toMillis():undefined} as CodeAnalysis;
+        }).filter(Boolean) as CodeAnalysis[];
+      },
+      async saveCodeAnalysis(analysis:CodeAnalysis){
+       if(!/^analysis-[a-z0-9_-]{8,100}$/.test(analysis.id)||!['liquidity_sweeps','volatility_profile'].includes(analysis.kind)||!['m1','m5','m15','h1'].includes(analysis.timeframe)||analysis.source.length>30000)throw Error('Invalid Code analysis record.');
+       const uid=await currentUserId();
+       await storeSdk.setDoc(storeSdk.doc(db,'users',uid,'codeAnalyses',analysis.id),{name:analysis.name.slice(0,80),kind:analysis.kind,asset:analysis.asset.slice(0,50),venue:venueOf(analysis.venue),timeframe:analysis.timeframe,lookback:analysis.lookback,source:analysis.source,updatedAt:storeSdk.serverTimestamp()},{merge:false});
       },
       async deleteBot(botId: string) {
         const uid = await currentUserId();
