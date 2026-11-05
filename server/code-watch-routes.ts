@@ -47,7 +47,7 @@ export function codeWatchRoutes(app:Express,deps:Deps){
    }
    if(req.body?.confirm!=='START CODE WATCH')return res.status(400).json({error:'Explicit monitor authorization required.'});
    const asset=await deps.store.get('users/'+uid+'/codeAnalyses/'+id);
-   if(!asset||!['liquidity_sweeps','volatility_profile'].includes(asset.kind)||!['m1','m5','m15','h1'].includes(asset.timeframe)||!coins[String(asset.asset||'').toUpperCase()])return res.status(400).json({error:'Only saved, validated Code analysis tools can run continuously.'});
+   if(!asset||!['liquidity_sweeps','volatility_profile'].includes(asset.kind)||!['m1','m5','m15','h1'].includes(asset.timeframe)||!['propdao','hyperliquid'].includes(asset.venue)||!coins[String(asset.asset||'').toUpperCase()])return res.status(400).json({error:'Only saved, validated PropDAO/Hyperliquid Code analysis tools can run continuously.'});
    const records=await deps.store.query('users/'+uid+'/codeWatches');
    if(!records.some(r=>r.id===id)&&records.length>=10)return res.status(409).json({error:'Maximum of ten Code monitors per account.'});
    const watch={uid,id,kind:asset.kind,asset:asset.asset,timeframe:asset.timeframe,coin:coins[String(asset.asset).toUpperCase()],lookback:Math.max(3,Math.min(25,Number(asset.lookback)||5))};

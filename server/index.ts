@@ -32,7 +32,7 @@ const app = express();
 const valrMarketData = new ValrMarketData();
 const venueMarketData = new VenueMarketData();
 const dwellirHistory = new DwellirHistory();
-app.use(['/api/marketplace','/api/economy','/api/valr','/api/venues','/api/openrouter','/api/chat'],requestLimit);
+app.use(['/api/marketplace','/api/economy','/api/valr','/api/venues','/api/openrouter','/api/chat','/api/code-watches'],requestLimit);
 app.use(express.json({ limit: '10mb' }));
 
 
