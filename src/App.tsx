@@ -87,6 +87,7 @@ function App(){
   const [sidebarOpen,setSidebarOpen]=useState(()=>window.innerWidth>720);
   const [chatBacktestBotId,setChatBacktestBotId]=useState('');
   const chatBacktestBotRef=useRef('');
+  const [pendingCodeDeployBotId,setPendingCodeDeployBotId]=useState('');
   const [newCodeTarget,setNewCodeTarget]=useState<{id:string;name:string;asset:string;venue:Venue;prompt:string}|null>(null);
  const loadMarketHistory=useCallback((request:{venue:Venue;asset:string;timeframe:string;from:string;to:string})=>historicalData(request),[]);
  const chatRequestInFlight=useRef(false);
@@ -286,6 +287,8 @@ function App(){
   const userMessage:Chat={role:'user',content:message,...(attachedContext?{context:attachedContext}:{})};
   const next=[...prior,userMessage];
   let command:string|null=null;
+  let focusedCode:{bot:CloudBot;source:string}|null=null;
+  const referenced=resolveCodeReference(message,cloudBots);
   setBusy('chat');
   try{
    if(!attachedContext){
@@ -295,7 +298,7 @@ function App(){
    }
   }catch(error){setAiError(err(error));setBusy('');return;}
   setBusy('');
-  if(command==='create'){setPrompt(message);setScreen('create');setChatInput('');return;}
+  if(command==='create'&&!/\b(propdao|valr|hyperliquid|ctrader)\b/i.test(message)){setChatInput('');setChat([...next,{role:'assistant',content:'Which market and venue should the new strategy use? For example: Create a GOLDUSDC strategy on PropDAO that trades M1 liquidity sweeps.'}]);return;}
 
   if(command&&command!=='edit'){
    setChatInput('');setAiError('');
