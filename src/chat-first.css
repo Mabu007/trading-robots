@@ -47,3 +47,11 @@
 .tv-chat-first.tv-area-chat .studio-body>.main-column,.tv-chat-first.tv-area-agents .studio-body>.main-column{display:none}
 .tv-chat-first.tv-area-agents .studio-body>.tv-agent-home{display:block}
 .tv-chat-first:not(.tv-area-agents) .studio-body>.tv-agent-home{display:none}
+
+.tv-chat-result-card{background:#14231b;border:1px solid #375243;border-radius:14px;padding:16px;margin:14px 10px;color:#e5f4e8}
+.tv-chat-result-card .tv-card-heading{display:flex;align-items:center;gap:8px;font-size:13px}
+.tv-chat-result-card p{font-size:12px;line-height:1.6;color:#a9bbaf;margin:10px 0}
+.tv-chat-result-card button{display:inline-flex;align-items:center;gap:8px;border:1px solid #3e7955;border-radius:9px;background:#24523a;color:#e6f8e9;padding:9px 12px;font-size:12px;cursor:pointer}
+.tv-chat-result-card button:disabled{cursor:not-allowed;opacity:.5}
+.tv-chat-first .proposal{border:1px solid #3d6750;border-radius:14px;margin:12px 10px}
+@media(max-width:640px){.tv-chat-first.tv-area-chat .chat-side .side-head{display:flex}.tv-chat-first .tv-chat-result-card{margin:12px 0}}
