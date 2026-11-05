@@ -7,3 +7,5 @@ import './premium.css';
 import './studio-polish.css';
 import './shadcn.css';
 createRoot(document.getElementById('root')!).render(<React.StrictMode><AppErrorBoundary><App /></AppErrorBoundary></React.StrictMode>);
+
+import './chat-first.css';
