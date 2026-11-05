@@ -221,6 +221,27 @@ function App(){
   const prior=retryPrevious?chat.slice(0,-2):chat;
   const userMessage:Chat={role:'user',content:message,...(attachedContext?{context:attachedContext}:{})};
   const next=[...prior,userMessage];
+  const command=!attachedContext?classifyChatCommand(message):null;
+  if(command){
+   setChatInput('');setAiError('');
+   if(command==='backtest'){
+    const issue=!created?'Open a saved bot or create one before running a backtest.':!codeHydrated||!code.trim()?'Strategy code is still loading.':!asset?'Choose a market first.':!from||!to||!availableDates.length?'No valid historical date range is selected. Open Backtest and choose a date range.':liveLocked||liveCheck!=='ready'?'The live strategy is locked or its status cannot be verified. Create a copy before testing.':unavailableTimeframes.length?'Required market timeframes are unavailable: '+unavailableTimeframes.join(', '):'';
+    setChat([...next,{role:'assistant',content:issue||`Running the historical backtest for ${name||'this strategy'} on ${asset}, ${from} to ${to}. Results will appear in this chat when available.`}]);
+    if(!issue)void backtest();
+    return;
+   }
+   if(command==='status'){
+    setChat([...next,{role:'assistant',content:'Checking the current execution runtime status…'}]);
+    setBusy('chat');
+    try{const status=await getRuntimeStatus();setChat([...next,{role:'assistant',content:status}]);}
+    catch(error){setChat([...next,{role:'assistant',content:`Agent status could not be verified: ${err(error)}`}]);}
+    finally{setBusy('');}
+    return;
+   }
+   setChatOperation(command);
+   setChat([...next,{role:'assistant',content:command==='deploy'?'I can open the existing deployment review. You must explicitly approve settings before anything starts.':'I can prepare a stop request. Please confirm it in the card below; no command has been sent yet.'}]);
+   return;
+  }
   const wantsCode=requestsCodeChange(message,prior);
   const requestedEditor={draftId,code};
   setChatInput('');setAiError('');setChat([...next,{role:'assistant',content:wantsCode?'Preparing a strategy edit…':'Thinking…'}]);setBusy('chat');
