@@ -1,0 +1,92 @@
+/* Shared visual language for the existing creator/editor/backtest workflows.
+   No execution-state or data semantics are changed here. */
+.create-shell,.studio{--tvx-accent:#B39BFF;--tvx-surface:#121722;--tvx-raised:#1B2230;--tvx-outline:#354054;--tvx-text:#F6F7FB;--tvx-secondary:#ADB8C8;background:#090C12!important;color:var(--tvx-text)!important;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.create-shell{background:radial-gradient(ellipse 65% 45% at 50% 12%,#24203C 0%,#121724 45%,#090C12 78%)!important}
+.create-shell .create-brand,.studio .topbar{background:#0E121C!important;border-color:#2A3344!important}
+.create-shell .create-brand{min-height:70px;gap:14px}
+.create-shell .create-brand>span:not(.phase-pill){color:#F7F8FC;font-weight:760;letter-spacing:-.03em}
+.create-shell .phase-pill,.studio .phase-pill{background:#27213C!important;border:1px solid #655485!important;color:#D7C8FF!important}
+.create-shell .eyebrow,.create-shell .library-eyebrow{color:#BEAAFF!important}
+.create-shell .eyebrow-dot{background:#B39BFF!important}
+.create-shell .create-content{width:min(800px,calc(100% - 40px));margin-top:clamp(35px,7vh,80px)}
+.create-shell .create-content h1{color:#F7F8FC!important;letter-spacing:-.055em;line-height:1.06;font-size:clamp(37px,6vw,61px);font-weight:760}
+.create-shell .create-sub{color:#B2BDCC!important;font-size:15px;line-height:1.67}
+.create-shell .prompt-card{background:#141A26!important;border:1px solid #465069!important;box-shadow:0 20px 60px #0005!important;border-radius:22px!important;padding:26px}
+.create-shell .prompt-card label{color:#AFB9CA!important;font-size:11px!important;letter-spacing:.06em}
+.create-shell .prompt-card :is(input,select,textarea),.create-shell .tvx-asset-trigger{background:#0E1420!important;border:1px solid #47516A!important;border-radius:12px!important;color:#F4F6FD!important;font-size:14px!important;min-height:48px}
+.create-shell .prompt-card :is(input,select,textarea):focus-visible,.create-shell .tvx-asset-trigger:focus-visible{border-color:#B39BFF!important;outline:2px solid #B39BFF!important;outline-offset:2px}
+.create-shell .prompt-card textarea{min-height:138px;line-height:1.65}
+.create-shell .primary,.studio .primary{background:#B39BFF!important;color:#191329!important;border:1px solid #C8B8FF!important;border-radius:12px!important;min-height:46px;font-weight:700!important;box-shadow:none!important}
+.create-shell .primary:hover,.studio .primary:hover{background:#D0C4FF!important}
+.create-shell .ghost,.studio .ghost{border-color:#45506B!important;color:#D4DCEC!important}
+.create-shell .prompt-foot{gap:12px;flex-wrap:wrap}
+.create-shell .prompt-foot span{color:#B5BECD!important}
+.create-shell .text-button{color:#C3AEFF!important}
+.create-shell .manual-create{margin-top:18px;gap:10px}
+.create-shell .manual-create :is(button,label){background:#171D2B!important;border-color:#465069!important;border-radius:12px!important;color:#DBD8F3!important;min-height:46px}
+.create-shell .example-prompt{color:#CDBDFF!important}
+.create-shell .create-bottom{background:#0E131D!important;border-top:1px solid #2B3446!important;color:#8E9BAD!important}
+.studio .topbar{min-height:64px}
+.studio .bot-title strong{color:#F6F7FB;font-size:14px}
+.studio .bot-title span{color:#A7B2C6}
+.studio .market-symbol{color:#E4DAFF!important;border-color:#514773!important}
+.studio .studio-body,.studio .main-column,.studio .workspace-content,.studio .chart-workspace{background:#090D16!important}
+.studio .chat-side{background:#111722!important;border-color:#30384C!important}
+.studio .side-head,.studio .chat-context,.studio .workspace-head,.studio .chart-toolbar,.studio .editor-filebar{border-color:#30384C!important;background:#151B28!important}
+.studio .chat-messages{color:#E8ECF5}
+.studio .chat-empty strong{color:#F2F4FA}
+.studio .chat-empty p,.studio .chat-context p{color:#ADB8C8!important}
+.studio .suggestions button{background:#202639!important;border:1px solid #4B4666!important;color:#D8D0ED!important;border-radius:12px!important;min-height:43px}
+.studio .message-avatar{background:#312749!important;color:#D8C8FF!important}
+.studio .message-content{color:#E8EBF4}
+.studio .chat-composer{background:#181E2C!important;border-color:#4F536F!important;border-radius:16px!important}
+.studio .chat-composer textarea{color:#F1F3FB!important}
+.studio .chat-composer textarea:focus{border-color:#B39BFF!important;box-shadow:0 0 0 3px #B39BFF17!important}
+.studio .send-button{background:#B39BFF!important;color:#21172D!important;border-radius:10px!important}
+.studio .workspace-tabs button.active,.studio .mobile-top-tabs button.active{color:#D8CBFF!important;border-color:#B39BFF!important}
+.studio .quiet-action,.studio .import-button{background:#282341!important;border-color:#645385!important;color:#E4D7FF!important;border-radius:11px}
+.studio .chart-instrument strong{color:#F2F4FA}
+.studio .chart-source{color:#C5B5FF!important}
+.studio .date-controls :is(select,input){background:#171D2A!important;border:1px solid #4B546C!important;color:#E9ECF6!important;border-radius:10px}
+.studio .chart-toolbar .backtest-button{background:#B39BFF!important;color:#181225!important}
+.studio .output-dock,.studio .terminal-panel{background:#0E1420}
+.studio .mobile-actions{background:#111722!important;border-color:#313B4E!important}
+.studio .mobile-actions button{color:#CBC5E2!important}
+.studio .profile-button,.create-shell .profile-button{border-color:#4F4C68!important;background:#211D34!important;color:#DED4F7!important}
+.studio :is(button,input,select,textarea):focus-visible,.create-shell :is(button,input,select,textarea):focus-visible{outline:2px solid #B39BFF!important;outline-offset:2px}
+.studio .status-dot.instance-running{background:#58D9AE!important}
+.studio .trade-modal,.studio .mobile-terminal-sheet{background:#171D2B!important;border-color:#4A526B!important}
+.studio .import-notice{background:#232039!important;border-color:#6A5A90!important;color:#DED0FF!important}
+.tvx-asset-trigger{width:100%;padding:0 12px!important;display:flex;align-items:center;justify-content:space-between;text-align:left;gap:10px;cursor:pointer;font-weight:560!important}
+.tvx-asset-trigger span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tvx-asset-trigger svg{flex:none;color:#B39BFF}
+.tvx-asset-backdrop{position:fixed;z-index:1000;inset:0;background:#060810C8;display:flex;align-items:flex-end;justify-content:center;padding:0 10px;backdrop-filter:blur(5px)}
+.tvx-asset-sheet{width:min(100%,600px);max-height:min(85dvh,750px);min-height:320px;display:flex;flex-direction:column;border:1px solid #4D5269;border-bottom:0;border-radius:26px 26px 0 0;background:#171D29;color:#F6F7FB;box-shadow:0 -20px 75px #0009;padding:10px 21px calc(18px + env(safe-area-inset-bottom))}
+.tvx-asset-grabber{width:45px;height:4px;border-radius:10px;background:#626C80;margin:0 auto 16px}
+.tvx-asset-sheet header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+.tvx-asset-sheet header strong{font-size:19px;font-weight:690}
+.tvx-asset-sheet header p{font-size:12px;color:#AAB6C9;margin:4px 0 0}
+.tvx-asset-sheet header button{border:0;background:#262C3B;border-radius:12px;width:44px;height:44px;display:grid;place-items:center;color:#C6C7D9}
+.tvx-asset-search{display:flex;gap:10px;align-items:center;background:#101622;border:1px solid #4B556B;border-radius:14px;color:#B8C2D3;padding:0 14px;height:49px}
+.tvx-asset-search input{width:100%;height:100%;background:transparent!important;color:#F6F7FB!important;border:0!important;outline:0!important;font-size:14px}
+.tvx-asset-results{flex:1;min-height:120px;overflow:auto;margin:14px 0}
+.tvx-asset-results>button{width:100%;border:0;border-bottom:1px solid #30394B;background:transparent;text-align:left;padding:13px 6px;min-height:67px;display:flex;align-items:center;justify-content:space-between;color:#F4F5FA}
+.tvx-asset-results>button.selected{background:#292541;color:#DECDFF}
+.tvx-asset-results>button>span{display:grid;gap:3px}
+.tvx-asset-results strong{font-size:14px}
+.tvx-asset-results small{font-size:11px;color:#A5B2C3}
+.tvx-asset-results>button>svg{color:#B39BFF}
+.tvx-asset-results>p{font-size:13px;color:#B2BFCE;padding:20px}
+.tvx-asset-note{color:#919FB4;line-height:1.5;font-size:11px;padding:0 0 5px}
+@media(max-width:640px){
+ .create-shell .create-content{width:calc(100% - 28px);margin-top:28px}
+ .create-shell .create-content h1{font-size:37px;letter-spacing:-.055em}
+ .create-shell .prompt-card{padding:17px;border-radius:18px!important}
+ .create-shell .create-brand{padding:0 13px;gap:9px}
+ .studio .topbar{padding:0 12px}
+ .studio .bot-title strong{font-size:12px}
+ .studio .chat-side{border:0!important}
+ .tvx-asset-backdrop{padding:0}
+ .tvx-asset-sheet{width:100%}
+}
+@media(prefers-reduced-motion:reduce){.tvx-asset-sheet *{scroll-behavior:auto!important;animation:none!important}}
