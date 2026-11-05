@@ -317,12 +317,26 @@ function App(){
   if(command&&command!=='edit'){
    setChatInput('');setAiError('');
    if(command==='backtest'){
+    const target=referenced?.bot||cloudBots.find(bot=>bot.id===draftId);
+    if(!target){setChat([...next,{role:'assistant',content:'Choose saved code first. Mention the name, for example: Backtest MySol Robot.'}]);return;}
+    chatBacktestBotRef.current=target.id;setChatBacktestBotId(target.id);
+    if(target.id!==draftId){
+     setChat([...next,{role:'assistant',content:'Loading '+target.name+' from Code, then running its saved historical backtest…'}]);
+     try{await openCloudBot(target,{keepChat:true});setQueuedBacktest(target.id)}catch(error){chatBacktestBotRef.current='';setChatBacktestBotId('');setChat(current=>[...current,{role:'assistant',content:'Could not load '+target.name+': '+err(error)}])}
+     return;
+    }
     const issue=!created?'Open a saved bot or create one before running a backtest.':!codeHydrated||!code.trim()?'Strategy code is still loading.':!asset?'Choose a market first.':!from||!to||!availableDates.length?'No valid historical date range is selected. Open Backtest and choose a date range.':liveLocked||liveCheck!=='ready'?'The live strategy is locked or its status cannot be verified. Create a copy before testing.':unavailableTimeframes.length?'Required market timeframes are unavailable: '+unavailableTimeframes.join(', '):'';
     setChat([...next,{role:'assistant',content:issue||`Running the historical backtest for ${name||'this strategy'} on ${asset}, ${from} to ${to}. Results will appear in this chat when available.`}]);
-    if(!issue)void backtest();
+    if(!issue)void backtest();else{chatBacktestBotRef.current='';setChatBacktestBotId('')}
     return;
    }
    if(command==='status'){
+    if(referenced?.bot&&referenced.bot.id!==draftId){
+     const target=referenced.bot;try{
+      if(target.venue==='propdao'){const state=await sharingRequest<any>(cloudClient!,'/api/venues/propdao/bots/'+encodeURIComponent(target.id)+'/live');setChat([...next,{role:'assistant',content:'**'+target.name+'** · '+(state.uncertain?'Status unverified':state.running?'Running':state.deployed?'Stopped':'Not deployed')+'. Last signal: '+String(state.lastSignal||'not reported')+'.'+(state.error?' Runtime issue: '+String(state.error):'')}]);}
+      else setChat([...next,{role:'assistant',content:'Open '+target.name+' in Code to verify its deployment status. There is no verified direct status shortcut for this venue.'}]);
+     }catch(error){setChat([...next,{role:'assistant',content:'Could not verify '+target.name+': '+err(error)}])}return;
+    }
     setChat([...next,{role:'assistant',content:'Checking the current execution runtime status…'}]);
     setBusy('chat');
     try{const status=await getRuntimeStatus();setChat([...next,{role:'assistant',content:status}]);}
@@ -331,6 +345,10 @@ function App(){
     return;
    }
    if(command!=='deploy'&&command!=='stop')return;
+   if(command==='deploy'&&referenced?.bot&&referenced.bot.id!==draftId){
+    const target=referenced.bot;setChat([...next,{role:'assistant',content:'Loading '+target.name+' for an authorization review. Nothing will be deployed without your approval.'}]);
+    try{await openCloudBot(target,{keepChat:true});setPendingCodeDeployBotId(target.id)}catch(error){setChat(current=>[...current,{role:'assistant',content:'Could not load '+target.name+': '+err(error)}])}return;
+   }
    actionReview.current=createActionReview({uid:activeProfile?.uid||'',botId:draftId,code,venue});
    setChatOperation(command);
    setChat([...next,{role:'assistant',content:command==='deploy'?'I can open the existing deployment review. You must explicitly approve settings before anything starts.':'I can prepare a stop request. Please confirm it in the card below; no command has been sent yet.'}]);
