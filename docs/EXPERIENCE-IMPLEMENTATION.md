@@ -9,7 +9,7 @@ Change type: UX only. No broker contract, risk engine, simulation model or Worke
 - Signed-out marketing entry: fresh chat-first visual language, honest capabilities and risk disclaimer.
 - S02 first-run intent: one decision, four paths, skip, persisted per account/device.
 - S05 guided learning: five interactive educational lessons, progress saved on this device, knowledge checks and optional AI follow-up. Content is education, not financial advice.
-- S03–S04 AI chat: authenticated streaming via existing \`/api/ai\`, cancellation, visible failures, conversation history stored locally on this device, loading indicators and contextual actions. This chat does not pretend to have tool access it does not have.
+- S03–S04 AI chat: safe contextual task cards preserve user strategy ideas into the existing create flow, direct backtest requests to actual saved strategies without running anything silently, and authenticated streaming via existing \`/api/ai\`, cancellation, visible failures, conversation history stored locally on this device, loading indicators and contextual actions. This chat does not pretend to have tool access it does not have.
 - S06–S07 markets: watchlist saved on this device, real venue market discovery, search, historical OHLC chart with timeframe selection, source and last completed candle timestamp, and data-grounded AI context with stated limitations.
 - S08–S09 creation entry: agent-create action wired to existing builder; searchable mobile market sheet replacing dense dropdown in creation.
 - S13 agent library: actual account bots, draft/backtest distinctions and link to existing workspace. No fabricated active/running badges.

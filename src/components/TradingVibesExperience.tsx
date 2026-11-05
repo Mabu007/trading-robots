@@ -21,6 +21,7 @@ type Props = {
   area: ExperienceTab;
   onAreaChange: (area: ExperienceTab) => void;
   onCreate: () => void;
+  onCreateFromIdea: (idea: string) => void;
   onOpenBot: (bot: CloudBot) => void;
   onRenameBot: (bot: CloudBot, name: string, localOnly: boolean) => Promise<void>;
   onDeleteBot: (bot: CloudBot, localOnly: boolean) => Promise<void>;
@@ -43,6 +44,17 @@ const suggestions = [
   { icon: ShieldCheck, title: 'Manage risk', prompt: 'Explain position sizing, stop losses and drawdown using a R500 example.' },
 ] as const;
 const venues: Venue[] = ['valr', 'hyperliquid', 'propdao', 'ctrader'];
+// Intent only suggests a visible UI action. It never submits orders, starts bots or claims a tool was run.
+type SuggestedTask = 'create' | 'backtest' | 'agents' | 'markets' | 'learn' | null;
+function suggestedTaskFor(text: string): SuggestedTask {
+  const t = text.toLowerCase();
+  if (/\b(backtest|back-test|historical test|test my strategy)\b/.test(t)) return 'backtest';
+  if (/\b(build|create|make|write|generate|code)\b/.test(t) && /\b(robot|bot|strategy|agent)\b/.test(t)) return 'create';
+  if (/\b(stop|pause|start|deploy|running|my agent|my robot|my bot)\b/.test(t)) return 'agents';
+  if (/\b(chart|market|gold price|xauusd|goldusdc)\b/.test(t)) return 'markets';
+  if (/\b(learn|lesson|teach me|explain basics)\b/.test(t)) return 'learn';
+  return null;
+}
 const support: Record<Venue, string> = {
   valr: 'South African exchange · account connection',
   hyperliquid: 'Decentralised markets · market-data integration',
@@ -92,7 +104,7 @@ const initialGoal: Record<Goal, string> = {
   create: 'I want to create my own trading robot. Help me understand how strategies work.',
   agents: 'Explain how to test and safely manage an automated trading strategy.',
 };
-export function TradingVibesExperience({ client, bots, area, onAreaChange, onCreate, onOpenBot, onRenameBot, onDeleteBot, onShareBot, onSettings, onConnect, onAiSettings, onExplore, onSignOut, cloudStatus, cloudMessage, onRetry }: Props) {
+export function TradingVibesExperience({ client, bots, area, onAreaChange, onCreate, onCreateFromIdea, onOpenBot, onRenameBot, onDeleteBot, onShareBot, onSettings, onConnect, onAiSettings, onExplore, onSignOut, cloudStatus, cloudMessage, onRetry }: Props) {
   const profile = client.getProfile();
   const uid = profile?.uid || 'guest';
   const [threads, setThreads] = useState<Thread[]>(() => { const loaded = loadThreads(uid); return loaded.length ? loaded : [newThread()]; });
@@ -128,6 +140,8 @@ export function TradingVibesExperience({ client, bots, area, onAreaChange, onCre
   const current = threads.find(t => t.id === threadId) || threads[0];
   const currentId = current?.id || threadId;
   const hasMessages = !!current?.messages.length;
+  const mostRecentQuestion = current?.messages.filter(m => m.role === 'user').at(-1)?.content || '';
+  const suggestedTask = suggestedTaskFor(mostRecentQuestion);
   const isChat = area === 'chat';
   const setPage = (next: ExperienceTab) => { onAreaChange(next); setHistoryOpen(false); if (next !== 'you') setYouPanel('overview'); };
   const updateThread = (id: string, apply: (thread: Thread) => Thread) => setThreads(all => all.map(t => t.id === id ? apply(t) : t));
@@ -215,6 +229,7 @@ export function TradingVibesExperience({ client, bots, area, onAreaChange, onCre
       : <div className="tvx-messages">{current.messages.map(message => <article className={['tvx-message', 'tvx-message-' + message.role].join(' ')} key={message.id}>
         {message.role === 'assistant' && <span className="tvx-message-avatar"><Sparkles size={15}/></span>}
         <div className="tvx-message-body">{message.content ? <FriendlyText text={message.content}/> : <span className="tvx-dots" aria-label="Thinking"><i/><i/><i/></span>}{message.state === 'failed' && <span className="tvx-message-error"><AlertCircle size={13}/> Request did not complete. Your earlier messages are still available.</span>}</div></article>)}
+        {!pending && suggestedTask && <div className="tvx-chat-tool-card"><header><span><Sparkles size={17}/>{suggestedTask === 'create' ? 'Strategy workflow' : suggestedTask === 'backtest' ? 'Historical testing' : suggestedTask === 'agents' ? 'Agent control' : suggestedTask === 'markets' ? 'Research workspace' : 'Learning studio'}</span><small>ACTION AVAILABLE</small></header><div className="tvx-chat-tool-body">{suggestedTask === 'create' ? <><strong>Your idea is ready to review.</strong><p>Open the actual strategy builder with your message prefilled. Select the market, clarify the rules and test before deploying.</p><button onClick={() => onCreateFromIdea(mostRecentQuestion)}>Continue in robot builder <ArrowRight size={16}/></button></> : suggestedTask === 'backtest' ? <><strong>Choose a saved strategy.</strong><p>Historical results require a real strategy, selected instrument and price data. The backtest runs in its workspace.</p>{bots.slice(0, 3).map(b => <button key={b.id} onClick={() => onOpenBot(b)}><Bot size={15}/>{b.name || 'Untitled strategy'}<ArrowRight size={16}/></button>)}{!bots.length && <button onClick={onCreate}>Create your first strategy <ArrowRight size={16}/></button>}</> : suggestedTask === 'agents' ? <><strong>Review your agents safely.</strong><p>Running and order status must be verified from the venue. Open an agent to see controls and confirmed activity.</p><button onClick={() => setPage('agents')}>Open agent library <ArrowRight size={16}/></button></> : suggestedTask === 'markets' ? <><strong>Use actual market history.</strong><p>Open a sourced chart and choose an instrument. Historical candles are not live quotes.</p><button onClick={() => setPage('markets')}>Explore market data <ArrowRight size={16}/></button></> : <><strong>Learn one concept at a time.</strong><p>Five beginner lessons include examples, practice questions and saved progress.</p><button onClick={() => setLessonOpen(true)}>Continue learning <ArrowRight size={16}/></button></>}</div></div>}
         {!pending && <div className="tvx-context-actions"><button onClick={() => setLessonOpen(true)}><BookOpen size={16}/> Continue learning</button><button onClick={onCreate}><Bot size={16}/> Build a robot</button><button onClick={() => setPage('markets')}><TrendingUp size={16}/> Explore markets</button><button onClick={() => setPage('agents')}><Layers3 size={16}/> My agents</button></div>}
         <div ref={endRef}/></div>}
     </div>
