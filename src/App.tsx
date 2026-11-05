@@ -300,6 +300,20 @@ function App(){
   setBusy('');
   if(command==='create'&&!/\b(propdao|valr|hyperliquid|ctrader)\b/i.test(message)){setChatInput('');setChat([...next,{role:'assistant',content:'Which market and venue should the new strategy use? For example: Create a GOLDUSDC strategy on PropDAO that trades M1 liquidity sweeps.'}]);return;}
 
+  if(command==='find_code'){
+   if(!referenced){const suggestions=codeSuggestions(message,cloudBots);setChatInput('');setChat([...next,{role:'assistant',content:suggestions.length?'I found these saved Code items:\n'+suggestions.map(b=>'- **'+b.name+'** · '+b.asset+' · '+venueLabel[b.venue||'valr']).join('\n')+'\n\nWhich one do you mean? You can also open Code in the sidebar.':'I could not find matching saved code. Open Code to browse or ask me to create one.'}]);return;}
+   try{const loaded=await userBotRequest<{code:string}>('/api/user-bots/'+encodeURIComponent(referenced.bot.id)+'/current','GET');focusedCode={bot:referenced.bot,source:loaded.code};command=null}
+   catch(error){setChat([...next,{role:'assistant',content:'Found '+referenced.bot.name+', but could not load its source: '+err(error)}]);return;}
+  }
+  if(command==='create'){
+   const venueMatch=message.match(/\b(propdao|valr|hyperliquid|ctrader)\b/i);
+   const marketMatch=message.match(/\b([A-Z]{2,12}(?:USDC|USDT|ZAR|USD))\b/i);
+   if(!venueMatch||!marketMatch){setChatInput('');setChat([...next,{role:'assistant',content:'Specify a market and venue, for example: Create a GOLDUSDC trading strategy on PropDAO named Gold Sweeper.'}]);return;}
+   const requestedVenue=venueOf(venueMatch[1].toLowerCase()),requestedAsset=marketMatch[1].toUpperCase();
+   if(!marketAvailability.some(m=>m.asset===requestedAsset)){setChatInput('');setChat([...next,{role:'assistant',content:'The market '+requestedAsset+' is not available in your current verified market catalogue. Choose an available market before creating code.'}]);return;}
+   const title=(message.match(/(?:named|called)\s+["“]?([^"“”,.]{3,48})/i)?.[1]||requestedAsset+' AI strategy').trim().slice(0,64);
+   setNewCodeTarget({id:makeBotId(),name:title,asset:requestedAsset,venue:requestedVenue,prompt:message});
+  }
   if(command&&command!=='edit'){
    setChatInput('');setAiError('');
    if(command==='backtest'){
