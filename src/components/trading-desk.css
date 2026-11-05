@@ -1,5 +1,5 @@
 /* Trading desk is a read-only presentation of provider account data. */
-.tv-chat-first .tv-trading-desk{max-width:1260px;width:100%;box-sizing:border-box;padding:27px clamp(16px,3vw,36px) 52px;}
+.tv-chat-first .tv-trades-page.tv-trading-desk{max-width:1260px;width:100%;box-sizing:border-box;padding:27px clamp(16px,3vw,36px) 52px;}
 .tv-chat-first .tv-desk-heading{margin-bottom:18px}
 .tv-chat-first .tv-desk-heading h1{margin-bottom:5px}
 .tv-chat-first .tv-desk-account-strip{display:flex;align-items:center;gap:24px;flex-wrap:wrap;border:1px solid var(--tv-shell-line);background:var(--tv-shell-panel);border-radius:15px;padding:16px 20px;min-height:76px;box-sizing:border-box}
@@ -44,4 +44,4 @@
 .tv-chat-first .tv-desk-warning{display:flex;align-items:flex-start;gap:8px;margin:12px 20px;padding:11px 13px;border:1px solid #b57e544a;border-radius:9px;background:rgba(196,123,45,.07);color:var(--tv-shell-muted);font-size:12px;line-height:1.5}
 .tv-chat-first .tv-desk-warning svg{flex:none;margin-top:1px;color:#d19b53}
 @media(max-width:800px){.tv-chat-first .tv-desk-account-strip{gap:14px;padding:14px}.tv-chat-first .tv-desk-account-title{flex-basis:100%}.tv-chat-first .tv-desk-table{min-width:800px}.tv-chat-first .tv-desk-history .tv-desk-table{min-width:1040px}.tv-chat-first .tv-desk-section-heading{padding:14px}.tv-chat-first .tv-desk-table th:first-child,.tv-chat-first .tv-desk-table td:first-child{padding-left:14px}}
-@media(max-width:480px){.tv-chat-first .tv-trading-desk{padding:18px 12px 36px}.tv-chat-first .tv-desk-account-strip{gap:10px}.tv-chat-first .tv-desk-state{order:0}.tv-chat-first .tv-desk-balance{flex:1}.tv-chat-first .tv-desk-section-heading{align-items:flex-start}.tv-chat-first .tv-desk-section-heading>span{margin-top:3px}.tv-chat-first .tv-desk-inspect span{display:none}.tv-chat-first .tv-desk-inspect{min-width:32px;padding:6px}}
+@media(max-width:480px){ .tv-chat-first .tv-trades-page.tv-trading-desk{padding:18px 12px 36px}.tv-chat-first .tv-desk-account-strip{gap:10px}.tv-chat-first .tv-desk-state{order:0}.tv-chat-first .tv-desk-balance{flex:1}.tv-chat-first .tv-desk-section-heading{align-items:flex-start}.tv-chat-first .tv-desk-section-heading>span{margin-top:3px}.tv-chat-first .tv-desk-inspect span{display:none}.tv-chat-first .tv-desk-inspect{min-width:32px;padding:6px}}
