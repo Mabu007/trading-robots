@@ -4,8 +4,8 @@ const supported = ['m1', 'm5', 'm15', 'm30', 'h1', 'h4', 'd1'];
 
 /** Instructions copied to an external AI. Keep this aligned with the strategy runtime. */
 export function strategyDocumentation(asset: string, availableTimeframes: string[]): string {
-  const available = availableTimeframes.filter(tf => supported.includes(tf));
-  const exampleTimeframe = available.includes('m1') ? 'm1' : available[0] || 'm1';
+  const adapterTimeframes = availableTimeframes.filter(tf => supported.includes(tf));
+  const exampleTimeframe = adapterTimeframes.includes('m1') ? 'm1' : adapterTimeframes[0] || 'm1';
   const example = starterCode.replaceAll('"m1"', `"${exampleTimeframe}"`);
   return `# Trading Vibes strategy-writing guide
 
@@ -13,8 +13,8 @@ You are writing a single JavaScript strategy for Trading Vibes. Turn the user's 
 
 ## Current workspace
 - Selected instrument: ${asset}.
-- Listed historical timeframes: ${available.length ? available.join(', ') : 'not loaded yet; ask which stored timeframes are available'}.
-- Supported timeframe names: ${supported.join(', ')}. Use only timeframes that have historical data for this instrument.
+- Supported strategy intervals: ${adapterTimeframes.length ? adapterTimeframes.join(', ') : supported.join(', ')}.
+- Historical candle coverage has not been verified yet. Request the selected interval and dates from the venue history service; use only candles that the service actually returns.
 
 ## Required file
 Return the complete contents of one plain JavaScript ES module named strategy.js. It must have exactly these two exports:

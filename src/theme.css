@@ -1,0 +1,227 @@
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f5f7f6;
+  --panel: #ffffff;
+  --panel2: #edf1ef;
+  --line: #dce3df;
+  --muted: #64736b;
+  --soft: #53635b;
+  --bright: #18251e;
+  --green: #16875f;
+  --red: #ca4f59;
+  --mint: #147b58;
+  font-family: 'DM Sans', sans-serif;
+  color: #1c2922;
+  background: #f5f7f6;
+}
+:root[data-theme="light"] body { background: #f5f7f6; color: #1c2922; }
+:root[data-theme="light"] .studio.tv-chat-first,
+:root[data-theme="light"] .studio { background: #f5f7f6; color: #1c2922; }
+:root[data-theme="light"] .tv-chat-first .topbar,
+:root[data-theme="light"] .tv-chat-first .tv-primary-nav,
+:root[data-theme="light"] .tv-chat-first .tv-conversation-bar,
+:root[data-theme="light"] .tv-chat-first .workspace-head,
+:root[data-theme="light"] .tv-chat-first .side-head,
+:root[data-theme="light"] .tv-chat-first .terminal-head,
+:root[data-theme="light"] .tv-chat-first .statusbar,
+:root[data-theme="light"] .tv-chat-first .replaybar {
+  background: #fff;
+  border-color: #dce3df;
+  color: #26352d;
+  box-shadow: none;
+}
+:root[data-theme="light"] .tv-chat-first .topbar::after { background: linear-gradient(90deg, transparent, #16875f30 52%, transparent); }
+:root[data-theme="light"] .tv-chat-first .bot-title strong,
+:root[data-theme="light"] .tv-chat-first .side-head strong,
+:root[data-theme="light"] .tv-chat-first .workspace-tabs button.selected,
+:root[data-theme="light"] .tv-chat-first .chat-empty strong,
+:root[data-theme="light"] .tv-chat-first .tv-agent-home,
+:root[data-theme="light"] .tv-chat-first .tv-destination-heading h1 { color: #1d2a23; }
+:root[data-theme="light"] .tv-chat-first .bot-title span,
+:root[data-theme="light"] .tv-chat-first .chat-empty > p,
+:root[data-theme="light"] .tv-chat-first .workspace-tabs button,
+:root[data-theme="light"] .tv-chat-first .tv-conversation-bar button,
+:root[data-theme="light"] .tv-chat-first .chat-footer,
+:root[data-theme="light"] .tv-chat-first .chat-footer button { color: #62716a; }
+:root[data-theme="light"] .tv-chat-first .tv-primary-nav button { color: #59685f; }
+:root[data-theme="light"] .tv-chat-first .tv-primary-nav button[aria-current="page"] { color: #145c42; background: #e6f3ec; border-color: #b9dfca; }
+:root[data-theme="light"] .tv-chat-first .tv-primary-nav button:focus-visible { outline-color: #16875f; }
+:root[data-theme="light"] .tv-chat-first .chat-side,
+:root[data-theme="light"] .tv-chat-first.tv-area-chat .chat-side,
+:root[data-theme="light"] .tv-chat-first .main-column,
+:root[data-theme="light"] .tv-chat-first .studio-body,
+:root[data-theme="light"] .tv-chat-first .tv-destination-shell,
+:root[data-theme="light"] .tv-chat-first .tv-agent-home { background: #f5f7f6; color: #243229; }
+:root[data-theme="light"] .tv-chat-first .chat-context { background: #f1f5f2; border-color: #dce3df; }
+:root[data-theme="light"] .tv-chat-first .chat-context strong,
+:root[data-theme="light"] .tv-chat-first .chat-context p { color: #53635b; }
+:root[data-theme="light"] .tv-chat-first .chat-context > span,
+:root[data-theme="light"] .tv-chat-first .chat-context small { color: #68766e; }
+:root[data-theme="light"] .tv-chat-first .chat-context small { background: #e4ebe6; }
+:root[data-theme="light"] .tv-chat-first .chat-empty-icon,
+:root[data-theme="light"] .tv-chat-first .message-avatar,
+:root[data-theme="light"] .tv-chat-first .ai-orb { color: #176545; background: #e4f2e9; }
+:root[data-theme="light"] .tv-chat-first .message.user .message-content { background: #e8f3ec; border-color: #cfdfd4; color: #23382b; }
+:root[data-theme="light"] .tv-chat-first .message.assistant .message-content,
+:root[data-theme="light"] .tv-chat-first .message.assistant:last-child .message-content { background: #fff; border-color: #dfe5e1; color: #29372f; }
+:root[data-theme="light"] .tv-chat-first .chat-composer { background: #fff; border-color: #cbd8d0; box-shadow: 0 10px 28px #18291f0c; }
+:root[data-theme="light"] .tv-chat-first .chat-composer textarea { color: #1f2d25; }
+:root[data-theme="light"] .tv-chat-first .chat-composer textarea::placeholder { color: #7c8981; }
+:root[data-theme="light"] .tv-chat-first .chat-composer > div > span { color: #738178; }
+:root[data-theme="light"] .tv-chat-first .suggestions button { background: #fff; color: #34473b; border-color: #dce5df; }
+:root[data-theme="light"] .tv-chat-first .suggestions button:hover { background: #f0f7f2; border-color: #9dc9ae; }
+:root[data-theme="light"] .tv-chat-first .tv-connect-ai { background: #e7f3eb; border-color: #bdddc8; color: #205a3b; }
+:root[data-theme="light"] .tv-chat-first .tv-chat-result-card,
+:root[data-theme="light"] .tv-chat-first .proposal,
+:root[data-theme="light"] .tv-chat-first .tv-agent-card { background: #fff; border-color: #dce5df; color: #243229; }
+:root[data-theme="light"] .tv-chat-first .tv-chat-result-card p,
+:root[data-theme="light"] .tv-chat-first .tv-agent-card span { color: #5e6d64; }
+:root[data-theme="light"] .tv-chat-first .tv-chat-result-card button,
+:root[data-theme="light"] .tv-chat-first .tv-agent-card button { background: #e6f3eb; border-color: #b9dbc5; color: #20583a; }
+:root[data-theme="light"] .tv-chat-first .tv-action-dismiss { color: #58675f; border-color: #cbd7cf; }
+:root[data-theme="light"] .tv-chat-first .tv-proposal-diff pre { background: #f0f3f1; color: #26352d; }
+:root[data-theme="light"] .tv-chat-first .tv-backtest-toolbar { background: #fff; border-color: #dce3df; }
+:root[data-theme="light"] .tv-chat-first .tv-backtest-toolbar > button { background: #e8f3ec; border-color: #bcdcc7; color: #20583a; }
+:root[data-theme="light"] .tv-chat-first .workspace-content,
+:root[data-theme="light"] .tv-chat-first .chart-workspace,
+:root[data-theme="light"] .tv-chat-first .chart-toolbar,
+:root[data-theme="light"] .tv-chat-first .chart-stats,
+:root[data-theme="light"] .tv-chat-first .trade-list-title,
+:root[data-theme="light"] .tv-chat-first .terminal,
+:root[data-theme="light"] .tv-chat-first .result-summary,
+:root[data-theme="light"] .tv-chat-first .terminal-content { background: #fff; color: #25342b; }
+:root[data-theme="light"] .tv-chat-first .workspace-content,
+:root[data-theme="light"] .tv-chat-first .chart-toolbar,
+:root[data-theme="light"] .tv-chat-first .chart-stats,
+:root[data-theme="light"] .tv-chat-first .trade-list-title,
+:root[data-theme="light"] .tv-chat-first .terminal,
+:root[data-theme="light"] .tv-chat-first .terminal-head,
+:root[data-theme="light"] .tv-chat-first .statusbar,
+:root[data-theme="light"] .tv-chat-first .editor-filebar,
+:root[data-theme="light"] .tv-chat-first .trade-row,
+:root[data-theme="light"] .tv-chat-first .trade-detail { border-color: #e1e7e3; }
+:root[data-theme="light"] .tv-chat-first .chart-toolbar strong,
+:root[data-theme="light"] .tv-chat-first .chart-stats strong,
+:root[data-theme="light"] .tv-chat-first .trade-row strong,
+:root[data-theme="light"] .tv-chat-first .summary-grid b { color: #243229; }
+:root[data-theme="light"] .tv-chat-first .chart-tf,
+:root[data-theme="light"] .tv-chat-first .chart-stats span,
+:root[data-theme="light"] .tv-chat-first .date-controls label,
+:root[data-theme="light"] .tv-chat-first .terminal-content,
+:root[data-theme="light"] .tv-chat-first .trade-row,
+:root[data-theme="light"] .tv-chat-first .trade-detail,
+:root[data-theme="light"] .tv-chat-first .statusbar { color: #627168; }
+:root[data-theme="light"] .tv-chat-first .date-controls input,
+:root[data-theme="light"] .tv-chat-first .replaybar select,
+:root[data-theme="light"] .tv-chat-first .tv-backtest-toolbar input,
+:root[data-theme="light"] .tv-chat-first .tv-backtest-toolbar select { background: #fff; color: #26352d; border-color: #ccd7d0; color-scheme: light; }
+:root[data-theme="light"] .tv-chat-first .trade-row:hover { background: #f3f7f4; }
+:root[data-theme="light"] .tv-chat-first .result-summary { border-color: #dce5df; box-shadow: none; }
+:root[data-theme="light"] .tv-chat-first .result-summary .summary-head { color: #226242; }
+:root[data-theme="light"] .tv-chat-first .result-summary .summary-grid b { color: #26352d; }
+:root[data-theme="light"] .tv-chat-first .empty-chart-icon { background: #e8f3ec; border-color: #cee2d4; color: #23734c; }
+:root[data-theme="light"] .tv-chat-first .chart-empty > p,
+:root[data-theme="light"] .tv-chat-first .chart-empty > span { color: #67766d; }
+:root[data-theme="light"] .tv-chat-first .terminal-placeholder,
+:root[data-theme="light"] .tv-chat-first .log-prompt { color: #22704b; }
+:root[data-theme="light"] .tv-chat-first .tv-destination-shell { background: #f5f7f6; }
+:root[data-theme="light"] .tv-destination-shell,
+:root[data-theme="light"] .tv-destination { background: #f5f7f6; color: #26352d; }
+:root[data-theme="light"] .tv-destination-heading h1,
+:root[data-theme="light"] .tv-destination .tv-hub-empty h2,
+:root[data-theme="light"] .tv-destination .tv-hub-empty h3,
+:root[data-theme="light"] .tv-persistent-agents > header h2 { color: #1d2a23; }
+:root[data-theme="light"] .tv-destination-heading p,
+:root[data-theme="light"] .tv-market-detail-head p,
+:root[data-theme="light"] .tv-market-source,
+:root[data-theme="light"] .tv-market-provenance,
+:root[data-theme="light"] .tv-destination .tv-hub-empty p,
+:root[data-theme="light"] .tv-persistent-agents > header p { color: #65736b; }
+:root[data-theme="light"] .tv-destination-kicker { color: #397252; }
+:root[data-theme="light"] .tv-market-list,
+:root[data-theme="light"] .tv-market-detail,
+:root[data-theme="light"] .tv-active-agent,
+:root[data-theme="light"] .tv-identity-card,
+:root[data-theme="light"] .tv-library-agent,
+:root[data-theme="light"] .tv-persistent-agent,
+:root[data-theme="light"] .tv-you-list,
+:root[data-theme="light"] .tv-persistent-agent-empty { background: #fff; border-color: #dce4df; color: #29372f; }
+:root[data-theme="light"] .tv-market-search,
+:root[data-theme="light"] .tv-market-chart-wrap,
+:root[data-theme="light"] .tv-venue-picker select,
+:root[data-theme="light"] .tv-market-detail-head select,
+:root[data-theme="light"] .tv-hub-secondary,
+:root[data-theme="light"] .tv-active-agent-actions > button:not(.tv-hub-primary) { background: #f7f9f8; border-color: #d3ddd6; color: #304239; }
+:root[data-theme="light"] .tv-market-search input { color: #25342b; }
+:root[data-theme="light"] .tv-market-search input::placeholder { color: #78867e; }
+:root[data-theme="light"] .tv-market-row { color: #304239; }
+:root[data-theme="light"] .tv-market-row:hover,
+:root[data-theme="light"] .tv-market-row.selected,
+:root[data-theme="light"] .tv-you-list > button:hover { background: #f0f6f2; border-color: #cfe0d5; }
+:root[data-theme="light"] .tv-market-symbol,
+:root[data-theme="light"] .tv-market-provenance strong,
+:root[data-theme="light"] .tv-library-agent h3,
+:root[data-theme="light"] .tv-persistent-agent-copy h3,
+:root[data-theme="light"] .tv-persistent-agent-copy .tv-agent-audit li strong,
+:root[data-theme="light"] .tv-you-list strong,
+:root[data-theme="light"] .tv-you-info strong { color: #25342b; }
+:root[data-theme="light"] .tv-market-row-note,
+:root[data-theme="light"] .tv-market-empty,
+:root[data-theme="light"] .tv-identity-card p,
+:root[data-theme="light"] .tv-identity-card div > span,
+:root[data-theme="light"] .tv-you-list small,
+:root[data-theme="light"] .tv-you-info small,
+:root[data-theme="light"] .tv-library-agent p,
+:root[data-theme="light"] .tv-persistent-agent-copy p,
+:root[data-theme="light"] .tv-persistent-agent-copy > small,
+:root[data-theme="light"] .tv-persistent-agent-empty,
+:root[data-theme="light"] .tv-agent-audit { color: #65736b; }
+:root[data-theme="light"] .tv-agent-mark { background: #eef4ef; border-color: #d8e3dc; color: #397252; }
+:root[data-theme="light"] .tv-you-section-title { color: #53635a; }
+:root[data-theme="light"] .tv-you-list > button,
+:root[data-theme="light"] .tv-you-info { border-color: #e3e9e5; color: #397252; }
+:root[data-theme="light"] .tv-you-list > button > svg:last-child,
+:root[data-theme="light"] .tv-you-info > span { color: #68766e; }
+:root[data-theme="light"] .tv-signout-link { color: #a34a53; }
+:root[data-theme="light"] .tv-chart-grid { stroke: #e0e7e2; }
+:root[data-theme="light"] .tv-chart-label { fill: #6f7b74; }
+:root[data-theme="light"] .tv-theme-toggle { color: #51635a; border-radius: 9px; }
+:root[data-theme="light"] .tv-theme-toggle:hover { background: #edf3ef; color: #1c5f40; }
+:root[data-theme="light"] .create-shell,
+:root[data-theme="light"] .profile-shell,
+:root[data-theme="light"] .bot-library { background: #f5f7f6; color: #25342b; }
+:root[data-theme="light"] .create-shell { background: radial-gradient(ellipse 65% 44% at 50% 40%, #e5f1e9 0%, #f0f4f1 48%, #f7f9f8 82%); }
+:root[data-theme="light"] .create-brand,
+:root[data-theme="light"] .profile-top,
+:root[data-theme="light"] .library-top { border-color: #dce4df; background: #ffffffd9; color: #26352d; }
+:root[data-theme="light"] .create-content h1,
+:root[data-theme="light"] .library-title-row h1,
+:root[data-theme="light"] .profile-heading h1 { color: #1f2d25; }
+:root[data-theme="light"] .create-sub,
+:root[data-theme="light"] .library-title-row p,
+:root[data-theme="light"] .profile-heading p { color: #637168; }
+:root[data-theme="light"] .prompt-card,
+:root[data-theme="light"] .profile-form-card,
+:root[data-theme="light"] .profile-status-card,
+:root[data-theme="light"] .robot-card { background: #fff; border-color: #dce4df; color: #26352d; box-shadow: 0 14px 40px #1b31250b; }
+:root[data-theme="light"] .prompt-card label,
+:root[data-theme="light"] .prompt-foot > span,
+:root[data-theme="light"] .example-prompt,
+:root[data-theme="light"] .create-data-note { color: #68776e; }
+:root[data-theme="light"] .prompt-card input,
+:root[data-theme="light"] .prompt-card select,
+:root[data-theme="light"] .prompt-card textarea,
+:root[data-theme="light"] .profile-form input,
+:root[data-theme="light"] .library-search input,
+:root[data-theme="light"] .library-search select { background: #fff; border-color: #cfdad3; color: #243229; color-scheme: light; }
+:root[data-theme="light"] .prompt-card input::placeholder,
+:root[data-theme="light"] .prompt-card textarea::placeholder { color: #849087; }
+:root[data-theme="light"] .phase-pill { color: #587064; border-color: #d4ded7; }
+:root[data-theme="light"] .profile-top > strong,
+:root[data-theme="light"] .profile-card-heading h2,
+:root[data-theme="light"] .profile-form-card h2 { color: #25342b; }
+:root[data-theme="light"] .profile-form-card p,
+:root[data-theme="light"] .profile-status-card small { color: #66756c; }
+:root[data-theme="light"] .tv-chat-first .monaco-editor,
+:root[data-theme="light"] .tv-chat-first .monaco-editor-background,
+:root[data-theme="light"] .tv-chat-first .monaco-editor .margin { background: #fff !important; }

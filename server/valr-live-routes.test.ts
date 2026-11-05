@@ -3,6 +3,7 @@ import {afterEach,expect,it,vi} from 'vitest';
 import {createHash} from 'node:crypto';
 import {ValrLiveService,valrLiveRoutes} from './valr-live-routes';
 import {LIVE_ACKNOWLEDGEMENT} from '../shared/valr-live-authorization';
+import type {AgentRegistry} from './agent-registry.ts';
 const creds={apiKey:'a'.repeat(64),apiSecret:'b'.repeat(64)},keyId=createHash('sha256').update(creds.apiKey).digest('hex');
 function fixture(){const objects=new Map<string,string>();const storage={read:async(k:string)=>objects.get(k)||null,write:async(k:string,v:string)=>{objects.set(k,v)},remove:async(k:string)=>{objects.delete(k)}};const request=vi.fn(async(url:any)=>String(url).includes('api-keys/current')?Response.json({permissions:['View access','Trade']}):String(url).includes('/balances')?Response.json([]):Response.json({state:{bots:{},active:null}}));return {objects,storage,request,service:new ValrLiveService(storage,request as typeof fetch)}}
 const bot={asset:'ETHZAR',code:'export const config={timeframes:["m1"],executionTimeframe:"m1",riskPercent:1,riskReward:2}; export function onCandle(){return {action:"WAIT"}};'};
@@ -22,4 +23,10 @@ it('reports actual connection and Worker readiness without exposing keys or sour
 });
 it('rejects short runtime secrets and keeps a pending deployment from racing a disconnect',async()=>{
  enable();const f=fixture();await f.service.accounts.connect('alice',creds);await f.service.deploy('alice','bot',bot,input);await expect(f.service.beforeKeyChange('alice')).rejects.toThrow('outcome is pending');vi.stubEnv('VALR_LIVE_INTERNAL_SECRET','short');expect(f.service.enabled()).toBe(false);
+});
+it('links an authorized VALR Durable Object grant to the owner agent identity and audits the permission grant',async()=>{
+ enable();const f=fixture(),events:any[]=[],agents={idFor:()=>`agent_${'a'.repeat(32)}`,liveTransition:vi.fn(async(_uid:string,_bot:any,event:any)=>{events.push(event)})} as unknown as AgentRegistry;
+ const service=new ValrLiveService(f.storage,f.request as typeof fetch,agents);await service.accounts.connect('alice',creds);await service.deploy('alice','bot',bot,input);
+ const grant=await service.grant('alice'),deployCall=(f.request.mock.calls as unknown as [any,RequestInit][]).at(-1),sent=JSON.parse(String(deployCall?.[1]?.body));
+ expect(grant?.agentId).toBe(`agent_${'a'.repeat(32)}`);expect(sent.agentId).toBe(grant?.agentId);expect(events[0]).toMatchObject({state:'deployment_pending',action:'deployment_authorized',authorized:true,grantId:grant?.id});
 });

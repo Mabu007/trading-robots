@@ -15,8 +15,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      # Repository uses bun.lock, not npm package-lock.json; npm ci fails here.
-      - run: npm install --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
       - run: npm test
       - run: npm run build
       - run: npm run check:runtime
