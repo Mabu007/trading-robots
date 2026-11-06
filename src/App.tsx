@@ -788,7 +788,8 @@ SAVED CODE CATALOGUE (user-owned names/metadata; load the exact source before de
   try{
    parseStrategyConfig(proposal);validateStrategySyntax(proposal);setBusy('sync');
    await botMutations.current.run(botMutationKey(target.bot.id),async()=>{
-    if(import.meta.env.VITE_AI_SDK_CHAT_ENABLED==='true'){
+    if(import.meta.env.VITE_AI_SDK_CHAT_ENABLED==='true'
+      &&(await userBotRequest<{strategyApprovals:boolean}>('/api/agent/capabilities','GET')).strategyApprovals){
       // A user-clicked review applies an exact, expiring, single-use server approval.
       // The AI SDK cannot call this approve endpoint as a tool.
       const base='/api/agent/strategy-reviews';

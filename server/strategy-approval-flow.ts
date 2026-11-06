@@ -58,6 +58,10 @@ export class ReviewedStrategyUpdates {
  }
  async stage(uid:string,botId:string,expectedCode:unknown,proposedCode:unknown){
   const meta=await this.owned(uid,botId);
+  // cTrader's live gateway has its own deployment lifecycle. Until an explicit
+  // stopped-runtime reconciliation is connected here, never update its source
+  // through this new SDK approval path.
+  if(meta.venue==='ctrader')throw Error('cTrader code review requires verified stopped gateway state.');
   const expected=this.validate(expectedCode),proposed=this.validate(proposedCode);
   if(expected===proposed)throw Error('No code changes to review');
   const current=await this.current(uid,botId);

@@ -9,7 +9,7 @@ import {ctraderRoutes,CTraderService} from './ctrader.ts';
 import {selectOpenRouterApiKey} from './openrouter-credentials.ts';
 import {chatToolRoutes} from './chat-tools.ts';
 import {registerAIPlatformRoutes} from './ai-platform.ts';
-import {createAgentBacktestTool} from './agent-backtest-tools.ts';
+import {createAgentBacktestTool,agentBacktestInputSchema} from './agent-backtest-tools.ts';
 import {createBrokerConnectionReadTool} from './agent-broker-read.ts';
 import {ValrAccounts} from './valr-account.ts';
 import {scopePrivateTools} from './agent-tool-discovery.ts';
@@ -269,6 +269,17 @@ async function commitReviewedCode(uid:string,botId:string,code:string,expectedCo
   return storageKey;
  }));
 }
+function ownedHyperliquidBacktest(uid:string){
+ return createAgentBacktestTool(uid,{
+  readObject:readR2Object,
+  getOwnedBot:async(owner,botId)=>{
+   if(!FirestoreStore.configured())return null;
+   const bot=await marketplace.store.get(`users/${owner}/bots/${botId}`);
+   return bot?{id:botId,asset:String(bot.asset||''),venue:String(bot.venue||''),userId:typeof bot.userId==='string'?bot.userId:undefined,ownerUid:typeof bot.ownerUid==='string'?bot.ownerUid:undefined}:null;
+  },
+  market:venueMarketData
+ });
+}
 const strategyReviews=new ReviewedStrategyUpdates({
  approvals:new ApprovalIntents(marketplace.store),
  read:readR2Object,write:writeR2Object,
@@ -278,6 +289,46 @@ const strategyReviews=new ReviewedStrategyUpdates({
   return bot?{id:botId,asset:String(bot.asset||''),venue:String(bot.venue||''),userId:typeof bot.userId==='string'?bot.userId:undefined,ownerUid:typeof bot.ownerUid==='string'?bot.ownerUid:undefined}:null;
  },
  commit:commitReviewedCode
+});
+app.get('/api/agent/capabilities',async(req,res)=>{
+ res.setHeader('Cache-Control','private, no-store');
+ const uid=await firebaseUidOrReply(req,res);if(!uid)return;
+ return res.json({
+  sdkStreamAvailable:true,
+  strategyApprovals:process.env.AI_SDK_STRATEGY_APPROVAL_ENABLED==='true'&&FirestoreStore.configured()&&Boolean(getR2Config()),
+  verifiedHyperliquidBacktest:process.env.AI_SDK_SERVER_BACKTEST_ENABLED==='true'&&FirestoreStore.configured()&&Boolean(getR2Config()),
+  financialAgentExecution:false,
+  verification:'Feature availability, not provider/market/broker health'
+ });
+});
+const directBacktestHits=new Map<string,{until:number;count:number}>();
+const directBacktestBusy=new Set<string>();
+app.post('/api/agent/backtest/verify',async(req,res)=>{
+ res.setHeader('Cache-Control','private, no-store');
+ const uid=await firebaseUidOrReply(req,res);if(!uid)return;
+ if(process.env.AI_SDK_SERVER_BACKTEST_ENABLED!=='true'||!getR2Config()||!FirestoreStore.configured()){
+  return res.status(503).json({error:'Server-side verified backtesting is not enabled.'});
+ }
+ const validated=agentBacktestInputSchema.safeParse(req.body);
+ if(!validated.success)return res.status(400).json({error:'Choose a saved bot ID and 120–600 completed candles.'});
+ const now=Date.now(),previous=directBacktestHits.get(uid);
+ const counter=previous&&previous.until>now?previous:{until:now+600000,count:0};
+ if(counter.count>=3||directBacktestBusy.has(uid))return res.status(429).json({error:'Backtest execution capacity reached. Retry later.'});
+ counter.count++;directBacktestHits.set(uid,counter);
+ if(directBacktestHits.size>500)for(const [k,v]of directBacktestHits)if(v.until<now)directBacktestHits.delete(k);
+ directBacktestBusy.add(uid);
+ try{
+  const runner=ownedHyperliquidBacktest(uid);
+  const value=await runner.execute!(validated.data,{
+   toolCallId:'verified-server-backtest',
+   messages:[],
+   context:{},
+   abortSignal:AbortSignal.timeout(45000)
+  });
+  return res.json(value);
+ }catch{
+  return res.status(503).json({error:'Backtest could not be executed securely.'});
+ }finally{directBacktestBusy.delete(uid)}
 });
 function strategyReviewEnabled(res:express.Response){
  if(process.env.AI_SDK_STRATEGY_APPROVAL_ENABLED==='true'&&FirestoreStore.configured()&&Boolean(getR2Config()))return true;
@@ -771,15 +822,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
         }
       }),{query:String(lastUser?.content||''),researchMode}):{}),
       ...(process.env.AI_SDK_SERVER_BACKTEST_ENABLED==='true'&&!researchMode&&/\b(backtest|retest|replay|simulation)\b/i.test(String(lastUser?.content||''))?{
-        runVerifiedBacktest:createAgentBacktestTool(uid,{
-          readObject:readR2Object,
-          getOwnedBot:async(owner,botId)=>{
-            if(!FirestoreStore.configured())return null;
-            const bot=await marketplace.store.get(`users/${owner}/bots/${botId}`);
-            return bot?{id:botId,asset:String(bot.asset||''),venue:String(bot.venue||''),userId:typeof bot.userId==='string'?bot.userId:undefined,ownerUid:typeof bot.ownerUid==='string'?bot.ownerUid:undefined}:null;
-          },
-          market:venueMarketData
-        })
+        runVerifiedBacktest:ownedHyperliquidBacktest(uid)
       }:{}),
       ...(!researchMode&&/\b(brokers?|accounts?|connections?|propdao|ctrader|valr)\b/i.test(String(lastUser?.content||''))?{
        getBrokerConnections:createBrokerConnectionReadTool(uid,{

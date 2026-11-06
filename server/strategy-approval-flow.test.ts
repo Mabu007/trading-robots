@@ -37,6 +37,12 @@ describe('owner-bound staged strategy approval flow',()=>{
   expect(JSON.parse(m.objects.get(m.codeKey)!).code).toBe(revised);
   await expect(m.service.apply('alice','bot-1',stage.intentId)).rejects.toThrow();
  });
+ it('refuses cTrader source mutation before a gateway stop-reconciliation adapter is verified',async()=>{
+  const m=memory();
+  const connector=(m.service as any).deps;
+  connector.getOwnedBot=async()=>({id:'bot-1',userId:'alice',asset:'XAUUSD',venue:'ctrader'});
+  await expect(m.service.stage('alice','bot-1',original,revised)).rejects.toThrow(/verified stopped gateway/);
+ });
  it('rejects a different user and rejects approval identity tampering',async()=>{
   const m=memory(),stage=await m.service.stage('alice','bot-1',original,revised);
   await expect(m.service.approve('bob','bot-1',stage.intentId)).rejects.toThrow();

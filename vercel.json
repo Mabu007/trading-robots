@@ -1,7 +1,7 @@
 {
   "functions": {
     "api/index.ts": {
-      "includeFiles": "{server/**,shared/**,src/strategy.ts,src/types.ts}",
+      "includeFiles": "{server/**,shared/**,src/strategy.ts,src/types.ts,src/engine.ts,src/entry-fill-guard.ts,src/strategy-runtime.ts,workers/strategy-sandbox.ts}",
       "maxDuration": 60
     }
   },
