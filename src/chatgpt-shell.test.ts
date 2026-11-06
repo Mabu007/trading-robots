@@ -13,12 +13,14 @@ describe('seamless workspace layout',()=>{
  it('uses one scroll container for Code, Apps, and chats',()=>{
   const start=app.indexOf('<div className="tv-sidebar-scroll">');
   const code=app.indexOf('<span>Code</span>',start);
+  const skills=app.indexOf('<span>Skills</span>',start);
   const apps=app.indexOf('<span>Apps</span>',start);
   const chats=app.indexOf('className="tv-sidebar-chats"',start);
   const close=app.indexOf('</div><footer className="tv-sidebar-profile">',start);
   expect(start).toBeGreaterThan(0);
   expect(code).toBeGreaterThan(start);
-  expect(apps).toBeGreaterThan(code);
+  expect(skills).toBeGreaterThan(code);
+  expect(apps).toBeGreaterThan(skills);
   expect(chats).toBeGreaterThan(apps);
   expect(app).not.toContain('className="tv-sidebar-strategies"');
   expect(app).not.toContain('<span>Scheduled</span>');
