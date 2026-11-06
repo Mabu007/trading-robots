@@ -69,6 +69,7 @@ export async function postApiStream(
   onText: (chunk: string, fullText: string) => void,
   signal?: AbortSignal,
   idToken?: string,
+  onToolEvent?: (event: unknown) => void,
 ): Promise<string> {
   let response: Response;
   try {
@@ -102,6 +103,7 @@ export async function postApiStream(
     let item: any;
     try { item = JSON.parse(data); }
     catch { throw new Error(`${service} sent malformed streaming data.`); }
+    if (item.tvTool && onToolEvent) onToolEvent(item.tvTool);
     if (item.error) throw new Error(typeof item.error === 'string' ? item.error : item.error.message || `${service} streaming failed.`);
     if (item.choices?.[0]?.finish_reason === 'length') truncated = true;
     const content = item.choices?.[0]?.delta?.content;

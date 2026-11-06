@@ -1,3 +1,5 @@
+import {generateText,tool,jsonSchema} from 'ai';
+import {createOpenAICompatible} from '@ai-sdk/openai-compatible';
 import type {Express,Request,Response as Reply} from 'express';
 import type {OpenRouterAccounts} from './openrouter-account.ts';
 
@@ -54,6 +56,28 @@ export function parsePlannedAction(message:any):Planned{
 }
 export function parseToolSelection(message:any):ChatTool|null{return parsePlannedAction(message).tool}
 export function chatToolRoutes(app:Express,accounts:OpenRouterAccounts,authenticate:(req:Request,res:Reply)=>Promise<string|null>,request:typeof fetch=fetch){
+ // SDK planner only proposes an action; it cannot execute or approve one.
+ app.post('/api/chat/sdk-plan',async(req,res)=>{
+  res.setHeader('Cache-Control','no-store');
+  const uid=await authenticate(req,res);if(!uid)return;
+  const {message,model,skills,personality}=req.body||{};
+  if(typeof message!=='string'||!message.trim()||message.length>12000)return res.status(400).json({error:'Send a message under 12,000 characters.'});
+  if(model!==undefined&&(typeof model!=='string'||!/^[a-zA-Z0-9_.:/-]{1,200}$/.test(model)))return res.status(400).json({error:'Choose a valid OpenRouter model.'});
+  const skillNames=Array.isArray(skills)?skills.filter((v:unknown)=>typeof v==='string'&&v.length<=80).slice(0,50):[];
+  const profile=typeof personality==='string'?personality.slice(0,4000):'';
+  try{
+   const account=await accounts.load(uid);if(!account)return res.status(409).json({error:'Connect OpenRouter in Apps.'});
+   if(model&&!(await accounts.models()).some(m=>m.id===model))return res.status(400).json({error:'This model is not in the current OpenRouter catalogue.'});
+   const provider=createOpenAICompatible({name:'openrouter',baseURL:'https://openrouter.ai/api/v1',apiKey:account.apiKey,fetch:request});
+   const tools=Object.fromEntries(toolDefinitions.map(def=>[def.function.name,tool({description:def.function.description,inputSchema:jsonSchema(def.function.parameters as any)})]));
+   const result=await generateText({model:provider.chatModel(model||account.model),temperature:0,maxOutputTokens:1800,maxRetries:0,
+    instructions:'Select a tool only when the user explicitly requests that action. General education and explanation need no tool, except use find_code for questions about named saved source. Never claim an action happened or infer approval. Changes to skills, personality, code or brokers require a review; never execute them. Skill names: '+JSON.stringify(skillNames)+'. Existing personality: '+JSON.stringify(profile),
+    prompt:message,tools,toolChoice:'auto',abortSignal:AbortSignal.timeout(30000)});
+   const calls=result.toolCalls.map(call=>({type:'function',function:{name:call.toolName,arguments:JSON.stringify(call.input)}}));
+   const plan=parsePlannedAction({tool_calls:calls});
+   return res.json({tool:plan.tool,...(Object.keys(plan.args).length?{args:plan.args}:{}),requiresConfirmation:['deploy','stop','edit','create','manage_skill','edit_personality','rename_code','delete_code','manage_broker'].includes(plan.tool||'')});
+  }catch{return res.status(502).json({error:'AI tool selection failed. No action was executed.'})}
+ });
  app.post('/api/chat/plan',async(req,res)=>{
   res.setHeader('Cache-Control','no-store');
   const uid=await authenticate(req,res);if(!uid)return;

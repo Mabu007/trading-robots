@@ -1,3 +1,4 @@
+import {readMonitorStatus} from './monitor-read-status.ts';
 import {createAgentReadTools} from './agent-read-tools.ts';
 import {streamText,tool,stepCountIs} from 'ai';
 import {createOpenAICompatible} from '@ai-sdk/openai-compatible';
@@ -8,10 +9,17 @@ import {ctraderRoutes,CTraderService} from './ctrader.ts';
 import {selectOpenRouterApiKey} from './openrouter-credentials.ts';
 import {chatToolRoutes} from './chat-tools.ts';
 import {registerAIPlatformRoutes} from './ai-platform.ts';
+import {phase2FeatureEnabled,phase2SharedModelTestEnabled} from './phase2-feature-gates.ts';
+import {createAgentBacktestTool,agentBacktestInputSchema} from './agent-backtest-tools.ts';
+import {createBrokerConnectionReadTool} from './agent-broker-read.ts';
+import {ValrAccounts} from './valr-account.ts';
+import {scopePrivateTools} from './agent-tool-discovery.ts';
+import {ApprovalIntents} from './approval-intents.ts';
+import {ReviewedStrategyUpdates} from './strategy-approval-flow.ts';
 import {registerComposioApps} from './composio-apps.ts';
 import {GdeltNews,registerGdeltNews} from './gdelt-news.ts';
 import {codeWatchRoutes} from './code-watch-routes.ts';
-import {AgentRegistry,agentRoutes,type AgentBot} from './agent-registry.ts';
+import {AgentRegistry,agentRoutes,type AgentBot,type AgentRecord} from './agent-registry.ts';
 import {venueOf} from '../shared/venues.ts';
 import 'dotenv/config';
 import {requestLimit} from './request-limits.ts';
@@ -41,7 +49,7 @@ const app = express();
 const valrMarketData = new ValrMarketData();
 const venueMarketData = new VenueMarketData();
 const dwellirHistory = new DwellirHistory();
-app.use(['/api/marketplace','/api/economy','/api/valr','/api/venues','/api/openrouter','/api/chat','/api/code-watches','/api/apps','/api/ai-sdk','/api/news'],requestLimit);
+app.use(['/api/marketplace','/api/economy','/api/valr','/api/venues','/api/openrouter','/api/chat','/api/code-watches','/api/apps','/api/ai-sdk','/api/news','/api/agent'],requestLimit);
 app.use(express.json({ limit: '10mb' }));
 
 
@@ -191,9 +199,10 @@ const ctraderStore={read:readR2Object,write:writeR2Object,remove:deleteR2Object,
 const ctraderBroker=new CTraderService(ctraderStore,fetch,(uid,work)=>{if(!FirestoreStore.configured())throw Error('cTrader account locking is unavailable.');return ctraderTokenLock.run(uid,work)});
 ctraderRoutes(app,ctraderStore,firebaseUidOrReply,{service:ctraderBroker});
 const liveService=valrLiveRoutes(app,{lockReady:()=>FirestoreStore.configured(),exclusive:valrExclusive,uid:firebaseUidOrReply,bot:ownedValrBot,agents:agentRegistry,read:readR2Object,write:writeR2Object,remove:deleteR2Object});
+const valrConnectionReader=new ValrAccounts({read:readR2Object,write:writeR2Object,remove:deleteR2Object});
 valrAccountRoutes(app,{uid:firebaseUidOrReply,read:readR2Object,write:writeR2Object,remove:deleteR2Object,beforeChange:uid=>liveService.beforeKeyChange(uid),mutate:valrExclusive});
 valrPaperRoutes(app,{uid:firebaseUidOrReply,bot:ownedValrBot});
-agentRoutes(app,{uid:firebaseUidOrReply,registry:agentRegistry,bot:ownedAgentBot,ready:()=>FirestoreStore.configured(),runtimeStatus:async(uid,agent)=>{
+const agentRuntimeStatus=async(uid:string,agent:AgentRecord)=>{
  if(agent.mode!=='live'||!agent.deployment?.grantId)return {agentId:agent.id,state:agent.state,verified:false,updatedAt:agent.updatedAt};
  if(agent.venue==='propdao'){
   const status=await propdaoLiveService.status(uid,agent.botId);
@@ -206,7 +215,8 @@ agentRoutes(app,{uid:firebaseUidOrReply,registry:agentRegistry,bot:ownedAgentBot
   return {agentId:agent.id,state,verified:!status.runtimeError&&Boolean(status.enabled),lastSignal:botState?.lastResult||null,nextCheck:botState?.nextCheck||null,openPositions:status.state?.active?1:0,error:status.runtimeError?String(status.runtimeError).slice(0,300):null,checkedAt:Date.now()};
  }
  return {agentId:agent.id,state:'unknown',verified:false,error:'This venue has no verified execution-status adapter.'};
-}});
+};
+agentRoutes(app,{uid:firebaseUidOrReply,registry:agentRegistry,bot:ownedAgentBot,ready:()=>FirestoreStore.configured(),runtimeStatus:agentRuntimeStatus});
 economyRoutes(app,economy,async(req,res)=>{const uid=await firebaseUidOrReply(req,res);return uid?res.locals.identity:null;});
 const publications = sharedBotRoutes(app, { read: readR2Object, write: writeR2Object, remove: deleteR2Object, uid: firebaseUidOrReply, root: userBotRoot,...(FirestoreStore.configured()?{onPublish:(bot:any)=>economy.publishSharedBot(bot),onAcquire:async(uid:string,id:string,bot:any)=>{if(!await marketplace.store.get(`marketplaceBots/${id}`))await marketplace.publish(bot);return economy.acquireSharedBot(uid,bot)},onUnpublish:(uid:string,id:string)=>marketplace.unpublish(uid,id),onView:(bot:any,visitor:string)=>marketplace.view(bot,visitor)}:{}) });
 marketplaceRoutes(app,{uid:firebaseUidOrReply,read:readR2Object,write:writeR2Object,root:userBotRoot});
@@ -246,24 +256,112 @@ app.get('/api/user-bots/:botId/current', async (req, res) => {
 
 // An assistant proposal is saved only if the reviewed source is still current
 // and the bot is not running. Both venues' deployment locks cover this write.
+async function commitReviewedCode(uid:string,botId:string,code:string,expectedCode:string,beforeCommit:()=>Promise<void>=async()=>{},expectedVenue?:string){
+ return valrExclusive(uid,()=>propBotExclusive(uid,botId,async()=>{
+  await propdaoLiveService.assertDeletable(uid,botId);
+  const grant=await liveService.grant(uid);if(grant?.botId===botId)await liveService.beforeKeyChange(uid);
+  const storageKey=`${userBotRoot(uid,botId)}/current.json`,raw=await readR2Object(storageKey);
+  if(!raw)throw Error('Saved code was not found.');
+  const saved=JSON.parse(raw);
+  if(saved.userId!==uid||saved.botId!==botId||typeof saved.code!=='string')throw Error('Saved code failed its ownership check.');
+  if(saved.code!==expectedCode)throw Error('Saved code changed since review. Request a new proposal.');
+  await beforeCommit();
+  await writeR2Object(storageKey,JSON.stringify({...saved,code,updatedAt:new Date().toISOString()}));
+  return storageKey;
+ }));
+}
+function ownedHyperliquidBacktest(uid:string){
+ return createAgentBacktestTool(uid,{
+  readObject:readR2Object,
+  getOwnedBot:async(owner,botId)=>{
+   if(!FirestoreStore.configured())return null;
+   const bot=await marketplace.store.get(`users/${owner}/bots/${botId}`);
+   return bot?{id:botId,asset:String(bot.asset||''),venue:String(bot.venue||''),userId:typeof bot.userId==='string'?bot.userId:undefined,ownerUid:typeof bot.ownerUid==='string'?bot.ownerUid:undefined}:null;
+  },
+  market:venueMarketData
+ });
+}
+const strategyReviews=new ReviewedStrategyUpdates({
+ approvals:new ApprovalIntents(marketplace.store),
+ read:readR2Object,write:writeR2Object,
+ getOwnedBot:async(uid,botId)=>{
+  if(!FirestoreStore.configured())return null;
+  const bot=await marketplace.store.get(`users/${uid}/bots/${botId}`);
+  return bot?{id:botId,asset:String(bot.asset||''),venue:String(bot.venue||''),userId:typeof bot.userId==='string'?bot.userId:undefined,ownerUid:typeof bot.ownerUid==='string'?bot.ownerUid:undefined}:null;
+ },
+ commit:commitReviewedCode
+});
+app.get('/api/agent/capabilities',async(req,res)=>{
+ res.setHeader('Cache-Control','private, no-store');
+ const uid=await firebaseUidOrReply(req,res);if(!uid)return;
+ return res.json({
+  sdkStreamAvailable:true,
+  strategyApprovals:phase2FeatureEnabled(uid,'AI_SDK_STRATEGY_APPROVAL_ENABLED',process.env,req.headers['x-tv-phase2-qa'])&&FirestoreStore.configured()&&Boolean(getR2Config()),
+  verifiedHyperliquidBacktest:phase2FeatureEnabled(uid,'AI_SDK_SERVER_BACKTEST_ENABLED',process.env,req.headers['x-tv-phase2-qa'])&&FirestoreStore.configured()&&Boolean(getR2Config()),
+  financialAgentExecution:false,
+  verification:'Feature availability, not provider/market/broker health'
+ });
+});
+const directBacktestHits=new Map<string,{until:number;count:number}>();
+const directBacktestBusy=new Set<string>();
+app.post('/api/agent/backtest/verify',async(req,res)=>{
+ res.setHeader('Cache-Control','private, no-store');
+ const uid=await firebaseUidOrReply(req,res);if(!uid)return;
+ if(!phase2FeatureEnabled(uid,'AI_SDK_SERVER_BACKTEST_ENABLED',process.env,req.headers['x-tv-phase2-qa'])||!getR2Config()||!FirestoreStore.configured()){
+  return res.status(503).json({error:'Server-side verified backtesting is not enabled.'});
+ }
+ const validated=agentBacktestInputSchema.safeParse(req.body);
+ if(!validated.success)return res.status(400).json({error:'Choose a saved bot ID and 120–600 completed candles.'});
+ const now=Date.now(),previous=directBacktestHits.get(uid);
+ const counter=previous&&previous.until>now?previous:{until:now+600000,count:0};
+ if(counter.count>=3||directBacktestBusy.has(uid))return res.status(429).json({error:'Backtest execution capacity reached. Retry later.'});
+ counter.count++;directBacktestHits.set(uid,counter);
+ if(directBacktestHits.size>500)for(const [k,v]of directBacktestHits)if(v.until<now)directBacktestHits.delete(k);
+ directBacktestBusy.add(uid);
+ try{
+  const runner=ownedHyperliquidBacktest(uid);
+  const value=await runner.execute!(validated.data,{
+   toolCallId:'verified-server-backtest',
+   messages:[],
+   context:{},
+   abortSignal:AbortSignal.timeout(45000)
+  });
+  return res.json(value);
+ }catch{
+  return res.status(503).json({error:'Backtest could not be executed securely.'});
+ }finally{directBacktestBusy.delete(uid)}
+});
+function strategyReviewEnabled(uid:string,req:express.Request,res:express.Response){
+ if(phase2FeatureEnabled(uid,'AI_SDK_STRATEGY_APPROVAL_ENABLED',process.env,req.headers['x-tv-phase2-qa'])&&FirestoreStore.configured()&&Boolean(getR2Config()))return true;
+ res.status(503).json({error:'Reviewed strategy updates are not enabled for this environment.'});
+ return false;
+}
+app.post('/api/agent/strategy-reviews',async(req,res)=>{
+ const uid=await firebaseUidOrReply(req,res);if(!uid||!strategyReviewEnabled(uid,req,res))return;
+ try{
+  const botId=String(req.body?.botId||'');
+  if(!validBotId(botId))return res.status(400).json({error:'Invalid strategy ID.'});
+  const result=await strategyReviews.stage(uid,botId,req.body?.expectedCode,req.body?.proposedCode);
+  return res.status(201).json(result);
+ }catch(error){return res.status(409).json({error:error instanceof Error?error.message:'Could not stage strategy review.'})}
+});
+for(const action of ['approve','deny','apply'] as const){
+ app.post('/api/agent/strategy-reviews/:botId/:intentId/'+action,async(req,res)=>{
+  const uid=await firebaseUidOrReply(req,res);if(!uid||!strategyReviewEnabled(uid,req,res))return;
+  try{
+   const botId=String(req.params.botId||''),intentId=String(req.params.intentId||'');
+   if(!validBotId(botId)||!validBotId(intentId))return res.status(400).json({error:'Invalid review identity.'});
+   return res.json(await strategyReviews[action](uid,botId,intentId));
+  }catch(error){return res.status(409).json({error:error instanceof Error?error.message:'Strategy review could not be verified.'})}
+ });
+}
 app.patch('/api/user-bots/:botId/current',async(req,res)=>{
  const uid=await firebaseUidOrReply(req,res);if(!uid)return;
  const {botId}=req.params,{code,expectedCode}=req.body||{};
  if(!validBotId(botId)||typeof code!=='string'||!code.trim()||code.length>180000||typeof expectedCode!=='string'||expectedCode.length>180000)return res.status(400).json({error:'Invalid reviewed code update.'});
  if(!getR2Config()||!FirestoreStore.configured())return res.status(503).json({error:'Safe code update is unavailable.'});
- try{
-  const storageKey=await valrExclusive(uid,()=>propBotExclusive(uid,botId,async()=>{
-   await propdaoLiveService.assertDeletable(uid,botId);
-   const grant=await liveService.grant(uid);if(grant?.botId===botId)await liveService.beforeKeyChange(uid);
-   const storageKey=`${userBotRoot(uid,botId)}/current.json`,raw=await readR2Object(storageKey);
-   if(!raw)throw Error('Saved code was not found.');
-   const saved=JSON.parse(raw);
-   if(saved.userId!==uid||saved.botId!==botId||typeof saved.code!=='string')throw Error('Saved code failed its ownership check.');
-   if(saved.code!==expectedCode)throw Error('Saved code changed since review. Request a new proposal.');
-   await writeR2Object(storageKey,JSON.stringify({...saved,code,updatedAt:new Date().toISOString()}));return storageKey;
-  }));
-  return res.json({storageKey});
- }catch(error){const message=error instanceof Error?error.message:'Code update failed.';return res.status(409).json({error:message});}
+ try{return res.json({storageKey:await commitReviewedCode(uid,botId,code,expectedCode)})}
+ catch(error){return res.status(409).json({error:error instanceof Error?error.message:'Code update failed.'})}
 });
 
 app.delete('/api/user-bots/:botId', async (req, res) => {
@@ -620,7 +718,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
   const uid = await firebaseUidOrReply(req, res); if (!uid) return;
   let personalAI: Awaited<ReturnType<typeof openRouterAccounts.load>>;
   try { personalAI = await openRouterAccounts.load(uid); } catch { return res.status(503).json({ error: 'Unable to access AI credentials. Reconnect your key.' }); }
-  const apiKey = selectOpenRouterApiKey(personalAI?.apiKey,process.env.OPENROUTER_API_KEY,process.env.ALLOW_SHARED_OPENROUTER_KEY==='true');
+  const apiKey = selectOpenRouterApiKey(personalAI?.apiKey,process.env.OPENROUTER_API_KEY,process.env.ALLOW_SHARED_OPENROUTER_KEY==='true'||phase2SharedModelTestEnabled(uid,process.env,req.headers['x-tv-phase2-qa']));
   if (!apiKey) return res.status(503).json({ error: 'Connect your OpenRouter API key to enable AI.' });
   const messages = req.body?.messages;
   if (!Array.isArray(messages) || messages.length < 1 || messages.length > 24
@@ -649,7 +747,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     try{available=await openRouterAccounts.models()}catch{return res.status(503).json({error:'Cannot verify the selected OpenRouter model right now. Retry model selection.'})}
     if(!available.some(m=>m.id===requestedModel))return res.status(400).json({error:'This OpenRouter model is not in the current model catalogue.'});
   }
-  const model = requestedModel || personalAI?.model || process.env.OPENROUTER_MODEL?.trim() || 'minimax/minimax-m3:free';
+  const model = phase2SharedModelTestEnabled(uid,process.env,req.headers['x-tv-phase2-qa']) ? 'openrouter/free' : (requestedModel || personalAI?.model || process.env.OPENROUTER_MODEL?.trim() || 'minimax/minimax-m3:free');
   // Only conversational public-info queries can use web research; editing
   // strategy.js and all live execution paths remain unchanged.
   const lastUser=[...messages].reverse().find((m:any)=>m.role==='user');
@@ -705,7 +803,35 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     // Private tools are disabled during external web research so saved user code
     // and results cannot be sent to a third-party search tool.
     const marketTools=req.body?.includeMarketContext===true?{
-      ...(!researchMode?createAgentReadTools(uid,readR2Object):{}),
+      ...(!researchMode?scopePrivateTools(createAgentReadTools(uid,readR2Object,{
+        runtimeStatus:async(agentId)=>{
+          if(!FirestoreStore.configured())throw Error('Agent storage unavailable');
+          const agent=await agentRegistry.get(uid,agentId);
+          return agentRuntimeStatus(uid,agent);
+        },
+        listStrategies:async()=> {
+          if(!FirestoreStore.configured())throw Error('Strategy storage unavailable');
+          return marketplace.store.query(`users/${uid}/bots`);
+        },
+        listAgents:async()=> {
+          if(!FirestoreStore.configured())throw Error('Agent registry unavailable');
+          return agentRegistry.list(uid);
+        },
+        monitorStatus:async(monitorId)=>{
+          if(!FirestoreStore.configured())throw Error('Monitor storage unavailable');
+          return readMonitorStatus(uid,monitorId,marketplace.store);
+        }
+      }),{query:String(lastUser?.content||''),researchMode}):{}),
+      ...(phase2FeatureEnabled(uid,'AI_SDK_SERVER_BACKTEST_ENABLED',process.env,req.headers['x-tv-phase2-qa'])&&!researchMode&&/\b(backtest|retest|replay|simulation)\b/i.test(String(lastUser?.content||''))?{
+        runVerifiedBacktest:ownedHyperliquidBacktest(uid)
+      }:{}),
+      ...(!researchMode&&/\b(brokers?|accounts?|connections?|propdao|ctrader|valr)\b/i.test(String(lastUser?.content||''))?{
+       getBrokerConnections:createBrokerConnectionReadTool(uid,{
+        propdao:user=>propdaoAccounts.list(user),
+        ctrader:user=>ctraderBroker.list(user),
+        valr:async user=>Boolean(await valrConnectionReader.load(user))
+       })
+      }:{}),
       getHyperliquidOrderBook:tool({
         description:'Read a public Hyperliquid L2 snapshot for an exact Hyperliquid identifier. This is visible resting liquidity, not broker fills, hidden orders or trade aggression.',
         inputSchema:z.object({coin:hyperliquidCoinSchema}),
@@ -723,6 +849,9 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     for await (const part of result.fullStream){
       if(part.type==='text-delta'){
         const event='data: '+JSON.stringify({choices:[{delta:{content:part.text}}]})+'\n\n';
+        if(!res.write(event))await new Promise<void>(resolve=>res.once('drain',resolve));
+      } else if(part.type==='tool-call'||part.type==='tool-result'){
+        const event='data: '+JSON.stringify({tvTool:part})+'\n\n';
         if(!res.write(event))await new Promise<void>(resolve=>res.once('drain',resolve));
       } else if(part.type==='error') throw part.error;
     }

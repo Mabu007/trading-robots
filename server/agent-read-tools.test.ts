@@ -25,8 +25,49 @@ describe('user-scoped agent read tools',()=>{
   expect((await (tradeTool as any).execute({botId:'bot-1',tradeIndex:1},{toolCallId:'test',messages:[]})).available).toBe(false);
   record.uncompressedBytes++;expect((await call(createAgentReadTools('alice',async()=>JSON.stringify(record)).getSavedBacktest,'bot-1')).available).toBe(false);
  });
+ it('reads scoped agent state without exposing unrelated fields or fabricating certainty',async()=>{
+  const runtimeStatus=vi.fn(async(agentId:string)=>({agentId,state:'unknown',verified:false,checkedAt:10,secret:'must not escape'}));
+  const t=createAgentReadTools('alice',async()=>null,{runtimeStatus}).getAgentRuntimeStatus as any;
+  const x=await t.execute({agentId:'agent-1'},{toolCallId:'test',messages:[]});
+  expect(x).toMatchObject({available:true,agentId:'agent-1',state:'unknown',verified:false,checkedAt:10});
+  expect(x).not.toHaveProperty('secret');expect(runtimeStatus).toHaveBeenCalledWith('agent-1');
+  const bad=createAgentReadTools('alice',async()=>null,{runtimeStatus:async()=>({agentId:'wrong',state:'running',verified:true})}).getAgentRuntimeStatus as any;
+  expect((await bad.execute({agentId:'agent-1'},{toolCallId:'test',messages:[]})).available).toBe(false);
+ });
  it('exposes read-only descriptors and rejects invalid IDs before storage access',()=>{
   expect(agentReadToolRegistry.every(x=>x.classification==='read'&&!x.approvalRequired)).toBe(true);
   expect(agentReadToolRegistry[0].inputSchema.safeParse({botId:'../bob'}).success).toBe(false);
+ });
+});
+
+
+describe('scoped read-only resource discovery',()=>{
+ const invocation=(tool:any,limit=20)=>tool.execute({limit},{toolCallId:'list',messages:[],abortSignal:new AbortController().signal});
+ it('lists bounded owned strategy metadata and excludes foreign owner records',async()=>{
+  const tools=createAgentReadTools('alice',async()=>null,{listStrategies:async()=>[
+    {id:'owned-1',name:'Gold strategy',asset:'GOLDUSDC',venue:'propdao',userId:'alice',lastBacktest:{netR:2}},
+    {id:'foreign-1',name:'Private broker key',userId:'bob'},
+    {id:'../invalid',name:'Invalid identifier'},
+    {id:'owned-2',name:'Second bot',userId:'alice',secret:'do not expose'}
+  ]});
+  const r:any=await invocation(tools.listSavedStrategies);
+  expect(r.available).toBe(true);
+  expect(r.strategies.map((x:any)=>x.id)).toEqual(['owned-1','owned-2']);
+  expect(JSON.stringify(r)).not.toMatch(/Private broker key|do not expose|foreign-1/);
+  expect(r.strategies[0].hasBacktest).toBe(true);
+ });
+ it('lists only owner-scoped agent IDs, never secrets, and marks live status unverified',async()=>{
+  const tools=createAgentReadTools('alice',async()=>null,{listAgents:async()=>[
+    {id:'a-1',ownerUid:'alice',botId:'owned-1',state:'running',venue:'propdao',name:'A',token:'top-secret',updatedAt:2000},
+    {id:'a-2',ownerUid:'bob',botId:'foreign-1',state:'running'}
+  ]});
+  const r:any=await invocation(tools.listUserAgents);
+  expect(r.agents).toHaveLength(1);
+  expect(r.agents[0]).toMatchObject({agentId:'a-1',savedState:'running',verifiedLive:false});
+  expect(JSON.stringify(r)).not.toContain('top-secret');
+ });
+ it('fails closed when listing service cannot be verified',async()=>{
+  const tools=createAgentReadTools('alice',async()=>null,{listStrategies:async()=>{throw Error('offline')}});
+  expect((await invocation(tools.listSavedStrategies) as any).available).toBe(false);
  });
 });

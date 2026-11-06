@@ -1,4 +1,4 @@
-import { STRATEGY_RUNTIME_SOURCE } from '../src/strategy-runtime';
+import { STRATEGY_RUNTIME_SOURCE } from '../src/strategy-runtime.ts';
 
 // QuickJS runs user strategy code inside a WebAssembly VM with no host APIs,
 // credentials, bindings or network. Inputs and outputs cross as JSON only.
