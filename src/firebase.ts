@@ -1,6 +1,7 @@
 import {venueOf,type Venue} from '../shared/venues';
 import {cloudBotFromRecord} from './cloud-bot';
 import type {CodeAnalysis} from './code-analysis';
+import {validateSkill,type UserSkill} from './skills';
 export type CloudBot = {
   id: string;
   name: string;
@@ -16,9 +17,16 @@ export type CloudBot = {
 export type BotVersion = { id: string; name: string; storageKey: string; createdAt: string };
 
 export type CloudClient = {
-  listConversations: () => Promise<{id:string;title:string}[]>;
+  listConversations: () => Promise<{id:string;title:string;model?:string|null}[]>;
   loadConversation: (id:string) => Promise<any[]|null>;
+  loadConversationRecord: (id:string) => Promise<{messages:any[];model:string|null;title:string}|null>;
   saveConversation: (id:string, messages:any[]) => Promise<void>;
+  renameConversation: (id:string,title:string) => Promise<void>;
+  deleteConversation: (id:string) => Promise<void>;
+  selectConversationModel: (id:string,model:string|null) => Promise<void>;
+  listSkills: () => Promise<UserSkill[]>;
+  saveSkill: (skill:UserSkill) => Promise<void>;
+  deleteSkill: (id:string) => Promise<void>;
   listBots: () => Promise<CloudBot[]>;
   listCodeAnalyses: () => Promise<CodeAnalysis[]>;
   saveCodeAnalysis: (analysis:CodeAnalysis) => Promise<void>;
@@ -78,6 +86,8 @@ export function connectFirebase(): Promise<CloudClient | null> {
       return user;
     };
     const currentUserId = async () => (await signedInUser()).uid;
+    const deletedConversationIds = new Set<string>();
+    const pendingConversationWrites = new Map<string,Promise<void>>();
 
     return {
       async listBots() {
@@ -131,22 +141,77 @@ export function connectFirebase(): Promise<CloudClient | null> {
         batch.delete(reference);
         await batch.commit();
       },
-      async listConversations() {
-        const reference=storeSdk.collection(db,'users',await currentUserId(),'conversations');
+      async listConversations(){
+        const uid=await currentUserId();
+        const reference=storeSdk.collection(db,'users',uid,'conversations');
         const snapshot=await storeSdk.getDocs(storeSdk.query(reference,storeSdk.orderBy('updatedAt','desc'),storeSdk.limit(100)));
-        return snapshot.docs.map((doc:any)=>({id:doc.id,title:String(doc.data().title||'Conversation')}));
+        return snapshot.docs.filter((doc:any)=>!deletedConversationIds.has(uid+':'+doc.id)).map((doc:any)=>{
+          const data=doc.data()||{},first=Array.isArray(data.messages)?data.messages.find((m:any)=>m.role==='user'&&typeof m.content==='string'):null;
+          return {id:doc.id,title:String(data.title||first?.content||'New chat').slice(0,80),model:typeof data.model==='string'?data.model:null};
+        });
       },
-      async loadConversation(id:string) {
-        const snapshot=await storeSdk.getDoc(storeSdk.doc(db,'users',await currentUserId(),'conversations',id));
+      async loadConversationRecord(id:string){
+        const uid=await currentUserId();
+        if(deletedConversationIds.has(uid+':'+id))return null;
+        const snapshot=await storeSdk.getDoc(storeSdk.doc(db,'users',uid,'conversations',id));
         if(!snapshot.exists())return null;
-        const messages=snapshot.data()?.messages;
-        return Array.isArray(messages)?messages.filter((m:any)=>m&&['user','assistant'].includes(m.role)&&typeof m.content==='string'):[];
+        const data=snapshot.data()||{},messages=data.messages;
+        return {messages:Array.isArray(messages)?messages.filter((m:any)=>m&&['user','assistant'].includes(m.role)&&typeof m.content==='string'):[],model:typeof data.model==='string'?data.model:null,title:String(data.title||'New chat')};
       },
-      async saveConversation(id:string, chat:any[]) {
+      async loadConversation(id:string){
+        return (await this.loadConversationRecord(id))?.messages??null;
+      },
+      async saveConversation(id:string,chat:any[]){
+        const uid=await currentUserId(),key=uid+':'+id;
+        if(deletedConversationIds.has(key))return;
         let messages=chat.slice(-60);
         while(messages.length>1&&JSON.stringify(messages).length>650000)messages=messages.slice(1);
         if(JSON.stringify(messages).length>650000)throw Error('Conversation is too large to save.');
-        await storeSdk.setDoc(storeSdk.doc(db,'users',await currentUserId(),'conversations',id),{messages:JSON.parse(JSON.stringify(messages)),title:String(messages.find((m:any)=>m.role==='user')?.content||'New conversation').slice(0,80),updatedAt:storeSdk.serverTimestamp()});
+        const payload=JSON.parse(JSON.stringify(messages));
+        const previous=pendingConversationWrites.get(key);
+        const task=(previous||Promise.resolve()).catch(()=>undefined).then(async()=>{
+          if(deletedConversationIds.has(key))return;
+          await storeSdk.setDoc(storeSdk.doc(db,'users',uid,'conversations',id),{messages:payload,updatedAt:storeSdk.serverTimestamp()},{merge:true});
+        });
+        pendingConversationWrites.set(key,task);
+        try{await task}finally{if(pendingConversationWrites.get(key)===task)pendingConversationWrites.delete(key)}
+      },
+      async renameConversation(id:string,title:string){
+        const name=title.trim();
+        if(!name||name.length>80)throw Error('Chat name must be 1–80 characters.');
+        const uid=await currentUserId(),key=uid+':'+id;
+        if(deletedConversationIds.has(key))throw Error('This conversation was deleted.');
+        await pendingConversationWrites.get(key)?.catch(()=>undefined);
+        await storeSdk.setDoc(storeSdk.doc(db,'users',uid,'conversations',id),{title:name,titleEdited:true,updatedAt:storeSdk.serverTimestamp()},{merge:true});
+      },
+      async deleteConversation(id:string){
+        const uid=await currentUserId(),key=uid+':'+id;
+        deletedConversationIds.add(key);
+        try{
+          await pendingConversationWrites.get(key)?.catch(()=>undefined);
+          await storeSdk.deleteDoc(storeSdk.doc(db,'users',uid,'conversations',id));
+        }catch(error){deletedConversationIds.delete(key);throw error}
+      },
+      async selectConversationModel(id:string,model:string|null){
+        const uid=await currentUserId();
+        if(deletedConversationIds.has(uid+':'+id))throw Error('This conversation was deleted.');
+        if(model!==null&&!/^[a-zA-Z0-9_.:/-]{1,200}$/.test(model))throw Error('Choose an available OpenRouter model.');
+        await storeSdk.setDoc(storeSdk.doc(db,'users',uid,'conversations',id),{model,updatedAt:storeSdk.serverTimestamp()},{merge:true});
+      },
+      async listSkills(){
+        const reference=storeSdk.collection(db,'users',await currentUserId(),'skills');
+        const snapshot=await storeSdk.getDocs(storeSdk.query(reference,storeSdk.orderBy('updatedAt','desc'),storeSdk.limit(100)));
+        return snapshot.docs.flatMap((doc:any)=>{
+          try{const data=doc.data();return [validateSkill({id:doc.id,name:String(data.name||''),description:String(data.description||''),instructions:String(data.instructions||''),triggers:Array.isArray(data.triggers)?data.triggers:[],enabled:data.enabled===true,alwaysOn:data.alwaysOn===true,updatedAt:data.updatedAt?.toMillis?.()})]}catch{return []}
+        });
+      },
+      async saveSkill(raw:UserSkill){
+        const skill=validateSkill(raw);
+        await storeSdk.setDoc(storeSdk.doc(db,'users',await currentUserId(),'skills',skill.id),{name:skill.name,description:skill.description,instructions:skill.instructions,triggers:skill.triggers,enabled:skill.enabled,alwaysOn:skill.alwaysOn,updatedAt:storeSdk.serverTimestamp()},{merge:false});
+      },
+      async deleteSkill(id:string){
+        if(!/^skill-[a-zA-Z0-9_-]{8,90}$/.test(id))throw Error('Invalid skill ID.');
+        await storeSdk.deleteDoc(storeSdk.doc(db,'users',await currentUserId(),'skills',id));
       },
       async loadChats(botId: string) {
         const reference = storeSdk.doc(db, 'users', await currentUserId(), 'bots', botId, 'chats', 'current');
