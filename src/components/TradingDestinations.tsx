@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import {ConnectedApps} from './ConnectedApps';
+import type {CloudClient} from '../firebase';
 import { Activity, ArrowRight, Bot, ChartCandlestick, CircleHelp, Clock3, Code2, Database, Plug, Search, Sparkles, Wallet } from 'lucide-react';
 import { venueLabel, type Venue } from '../../shared/venues';
 import type { CloudBot } from '../firebase';
@@ -152,11 +154,12 @@ export function AgentLibrary({ mode='strategies', bots, current, runtime, search
   </section>;
 }
 
-export function YouHub({ onAISettings, onBroker }: {
-  onAISettings: () => void; onBroker: (venue:'propdao'|'ctrader'|'valr') => void;
+export function YouHub({ onAISettings, onBroker, client, active }: {
+  onAISettings: () => void; onBroker: (venue:'propdao'|'ctrader'|'valr') => void; client:CloudClient|null; active:boolean;
 }) {
   return <section className="tv-destination tv-you-hub" aria-labelledby="tv-apps-title">
     <header className="tv-destination-heading"><div><span className="tv-destination-kicker"><Plug size={15}/> CONNECTED APPS</span><h1 id="tv-apps-title">Apps</h1><p>Connect the AI and broker services Trading Vibes can use on your behalf.</p></div></header>
+    <ConnectedApps client={client} active={active}/>
     <div className="tv-you-list tv-app-connections">
       <button type="button" onClick={onAISettings}><span><Sparkles size={18}/></span><span><strong>OpenRouter AI</strong><small>Connect your account, choose a model and manage spending limits</small></span><ArrowRight size={15}/></button>
       {([['propdao','PropDAO','Connect your PropDAO developer key'],['ctrader','cTrader','Connect your cTrader ID'],['valr','VALR','Connect your VALR account']] as const).map(([id,label,description])=><button type="button" key={id} onClick={()=>onBroker(id)}><span><Wallet size={18}/></span><span><strong>{label}</strong><small>{description}</small></span><ArrowRight size={15}/></button>)}
