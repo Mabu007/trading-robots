@@ -1,3 +1,4 @@
+import {readMonitorStatus} from './monitor-read-status.ts';
 import {createAgentReadTools} from './agent-read-tools.ts';
 import {streamText,tool,stepCountIs} from 'ai';
 import {createOpenAICompatible} from '@ai-sdk/openai-compatible';
@@ -11,7 +12,7 @@ import {registerAIPlatformRoutes} from './ai-platform.ts';
 import {registerComposioApps} from './composio-apps.ts';
 import {GdeltNews,registerGdeltNews} from './gdelt-news.ts';
 import {codeWatchRoutes} from './code-watch-routes.ts';
-import {AgentRegistry,agentRoutes,type AgentBot} from './agent-registry.ts';
+import {AgentRegistry,agentRoutes,type AgentBot,type AgentRecord} from './agent-registry.ts';
 import {venueOf} from '../shared/venues.ts';
 import 'dotenv/config';
 import {requestLimit} from './request-limits.ts';
@@ -193,7 +194,7 @@ ctraderRoutes(app,ctraderStore,firebaseUidOrReply,{service:ctraderBroker});
 const liveService=valrLiveRoutes(app,{lockReady:()=>FirestoreStore.configured(),exclusive:valrExclusive,uid:firebaseUidOrReply,bot:ownedValrBot,agents:agentRegistry,read:readR2Object,write:writeR2Object,remove:deleteR2Object});
 valrAccountRoutes(app,{uid:firebaseUidOrReply,read:readR2Object,write:writeR2Object,remove:deleteR2Object,beforeChange:uid=>liveService.beforeKeyChange(uid),mutate:valrExclusive});
 valrPaperRoutes(app,{uid:firebaseUidOrReply,bot:ownedValrBot});
-agentRoutes(app,{uid:firebaseUidOrReply,registry:agentRegistry,bot:ownedAgentBot,ready:()=>FirestoreStore.configured(),runtimeStatus:async(uid,agent)=>{
+const agentRuntimeStatus=async(uid:string,agent:AgentRecord)=>{
  if(agent.mode!=='live'||!agent.deployment?.grantId)return {agentId:agent.id,state:agent.state,verified:false,updatedAt:agent.updatedAt};
  if(agent.venue==='propdao'){
   const status=await propdaoLiveService.status(uid,agent.botId);
@@ -206,7 +207,8 @@ agentRoutes(app,{uid:firebaseUidOrReply,registry:agentRegistry,bot:ownedAgentBot
   return {agentId:agent.id,state,verified:!status.runtimeError&&Boolean(status.enabled),lastSignal:botState?.lastResult||null,nextCheck:botState?.nextCheck||null,openPositions:status.state?.active?1:0,error:status.runtimeError?String(status.runtimeError).slice(0,300):null,checkedAt:Date.now()};
  }
  return {agentId:agent.id,state:'unknown',verified:false,error:'This venue has no verified execution-status adapter.'};
-}});
+};
+agentRoutes(app,{uid:firebaseUidOrReply,registry:agentRegistry,bot:ownedAgentBot,ready:()=>FirestoreStore.configured(),runtimeStatus:agentRuntimeStatus});
 economyRoutes(app,economy,async(req,res)=>{const uid=await firebaseUidOrReply(req,res);return uid?res.locals.identity:null;});
 const publications = sharedBotRoutes(app, { read: readR2Object, write: writeR2Object, remove: deleteR2Object, uid: firebaseUidOrReply, root: userBotRoot,...(FirestoreStore.configured()?{onPublish:(bot:any)=>economy.publishSharedBot(bot),onAcquire:async(uid:string,id:string,bot:any)=>{if(!await marketplace.store.get(`marketplaceBots/${id}`))await marketplace.publish(bot);return economy.acquireSharedBot(uid,bot)},onUnpublish:(uid:string,id:string)=>marketplace.unpublish(uid,id),onView:(bot:any,visitor:string)=>marketplace.view(bot,visitor)}:{}) });
 marketplaceRoutes(app,{uid:firebaseUidOrReply,read:readR2Object,write:writeR2Object,root:userBotRoot});
@@ -705,7 +707,17 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     // Private tools are disabled during external web research so saved user code
     // and results cannot be sent to a third-party search tool.
     const marketTools=req.body?.includeMarketContext===true?{
-      ...(!researchMode?createAgentReadTools(uid,readR2Object):{}),
+      ...(!researchMode?createAgentReadTools(uid,readR2Object,{
+        runtimeStatus:async(agentId)=>{
+          if(!FirestoreStore.configured())throw Error('Agent storage unavailable');
+          const agent=await agentRegistry.get(uid,agentId);
+          return agentRuntimeStatus(uid,agent);
+        },
+        monitorStatus:async(monitorId)=>{
+          if(!FirestoreStore.configured())throw Error('Monitor storage unavailable');
+          return readMonitorStatus(uid,monitorId,marketplace.store);
+        }
+      }):{}),
       getHyperliquidOrderBook:tool({
         description:'Read a public Hyperliquid L2 snapshot for an exact Hyperliquid identifier. This is visible resting liquidity, not broker fills, hidden orders or trade aggression.',
         inputSchema:z.object({coin:hyperliquidCoinSchema}),
@@ -723,6 +735,9 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     for await (const part of result.fullStream){
       if(part.type==='text-delta'){
         const event='data: '+JSON.stringify({choices:[{delta:{content:part.text}}]})+'\n\n';
+        if(!res.write(event))await new Promise<void>(resolve=>res.once('drain',resolve));
+      } else if(part.type==='tool-call'||part.type==='tool-result'){
+        const event='data: '+JSON.stringify({tvTool:part})+'\n\n';
         if(!res.write(event))await new Promise<void>(resolve=>res.once('drain',resolve));
       } else if(part.type==='error') throw part.error;
     }

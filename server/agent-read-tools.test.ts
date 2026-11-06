@@ -25,6 +25,15 @@ describe('user-scoped agent read tools',()=>{
   expect((await (tradeTool as any).execute({botId:'bot-1',tradeIndex:1},{toolCallId:'test',messages:[]})).available).toBe(false);
   record.uncompressedBytes++;expect((await call(createAgentReadTools('alice',async()=>JSON.stringify(record)).getSavedBacktest,'bot-1')).available).toBe(false);
  });
+ it('reads scoped agent state without exposing unrelated fields or fabricating certainty',async()=>{
+  const runtimeStatus=vi.fn(async(agentId:string)=>({agentId,state:'unknown',verified:false,checkedAt:10,secret:'must not escape'}));
+  const t=createAgentReadTools('alice',async()=>null,{runtimeStatus}).getAgentRuntimeStatus as any;
+  const x=await t.execute({agentId:'agent-1'},{toolCallId:'test',messages:[]});
+  expect(x).toMatchObject({available:true,agentId:'agent-1',state:'unknown',verified:false,checkedAt:10});
+  expect(x).not.toHaveProperty('secret');expect(runtimeStatus).toHaveBeenCalledWith('agent-1');
+  const bad=createAgentReadTools('alice',async()=>null,{runtimeStatus:async()=>({agentId:'wrong',state:'running',verified:true})}).getAgentRuntimeStatus as any;
+  expect((await bad.execute({agentId:'agent-1'},{toolCallId:'test',messages:[]})).available).toBe(false);
+ });
  it('exposes read-only descriptors and rejects invalid IDs before storage access',()=>{
   expect(agentReadToolRegistry.every(x=>x.classification==='read'&&!x.approvalRequired)).toBe(true);
   expect(agentReadToolRegistry[0].inputSchema.safeParse({botId:'../bob'}).success).toBe(false);

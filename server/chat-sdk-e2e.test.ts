@@ -3,7 +3,10 @@ import {generateKeyPairSync,sign} from 'node:crypto';
 import {gzipSync} from 'node:zlib';
 import {OpenRouterAccounts} from './openrouter-account.ts';
 import {postApiStream} from '../src/api.ts';
+import {Chat} from '@ai-sdk/react';
+import {sdkChatTransport,type SdkBridgeRequest} from '../src/sdk-chat-transport.ts';
 import * as r2 from './r2.ts';
+import * as research from './ai-research.ts';
 
 it('authenticates a Firebase token and streams a model response through the SDK chat route',async()=>{
  const oldProject=process.env.FIREBASE_PROJECT_ID,oldWeb=process.env.VITE_FIREBASE_PROJECT_ID;
@@ -14,7 +17,8 @@ it('authenticates a Firebase token and streams a model response through the SDK 
  const unsigned=encode({alg:'RS256',kid:'test-key'})+'.'+encode({aud:'test-project',iss:'https://securetoken.google.com/test-project',sub:'test-user',iat:now,exp:now+300});
  const token=unsigned+'.'+sign('RSA-SHA256',Buffer.from(unsigned),privateKey).toString('base64url');
  process.env.FIREBASE_PROJECT_ID='test-project';process.env.VITE_FIREBASE_PROJECT_ID='test-project';
- let bookRequests=0,toolCalls=0,strategyCalls=0,backtestCalls=0;
+ let bookRequests=0,toolCalls=0,strategyCalls=0,backtestCalls=0,researchCalls=0;
+ const researchBrief=vi.spyOn(research,'researchBrief').mockResolvedValue({context:'Verified public research fixture.'} as any);
  const simulation=Buffer.from(JSON.stringify({asset:'GOLDUSDC',from:'2026-01-01',to:'2026-01-02',logs:[],result:{candles:[{},{}],trades:[{id:1,pnl:-1}],metrics:{netReturn:-1}}}));
  const savedRead=vi.spyOn(r2,'readR2Object').mockImplementation(async(key)=>{
   if(key==='user-bots/dGVzdC11c2Vy/bot-1/current.json')return JSON.stringify({userId:'test-user',botId:'bot-1',code:'export function onCandle() {}'});
@@ -30,6 +34,13 @@ it('authenticates a Firebase token and streams a model response through the SDK 
   }
   if(url==='https://openrouter.ai/api/v1/chat/completions'){
    const sent=JSON.parse(String(init?.body));
+   if(sent.messages.some((x:{content:unknown})=>x.content==='Gold news today')){
+    researchCalls++;
+    const sentText=JSON.stringify(sent);
+    expect(sentText).not.toContain('private strategy marker');
+    expect(sentText).not.toContain('getSavedStrategy');
+    expect(sentText).not.toContain('getSavedBacktest');
+   }
    expect(sent.messages.some((x:{content:unknown})=>typeof x.content==='string'&&x.content.includes('untrusted evidence'))).toBe(true);
    const isBook=sent.messages.some((x:{content:unknown})=>x.content==='Book');
    const isStrategy=sent.messages.some((x:{content:unknown})=>x.content==='Strategy');
@@ -85,12 +96,28 @@ it('authenticates a Firebase token and streams a model response through the SDK 
   expect(book).toBe('Hello trader');expect(toolCalls).toBe(2);expect(bookRequests).toBe(1);
   const strategy=await postApiStream(url,{messages:[{role:'user',content:'Strategy'}],includeMarketContext:true},'AI',()=>undefined,undefined,token);
   expect(strategy).toBe('Hello trader');expect(strategyCalls).toBe(2);
+  let completion:{error:unknown;result?:string}|undefined;
+  const sdkChat=new Chat({transport:sdkChatTransport(((_url,payload,service,onText,signal,idToken,onToolEvent)=>postApiStream(url,payload,service,onText,signal,idToken,onToolEvent)) as typeof postApiStream)});
+  const bridge:SdkBridgeRequest={payload:{messages:[{role:'system',content:'Use saved context.'},{role:'user',content:'Hello'}]},token,signal:new AbortController().signal,onText:()=>{},complete:(error,result)=>{completion={error,result}}};
+  await sdkChat.sendMessage({text:'Hello'},{body:{bridge}});
+  expect(completion).toEqual({error:null,result:'Hello trader'});
+  expect(sdkChat.messages.at(-1)?.parts).toMatchObject([{type:'text',text:'Hello trader'}]);
+  sdkChat.messages=[];
+  let completedTool:{error:unknown;result?:string}|undefined;
+  const toolBridge:SdkBridgeRequest={payload:{messages:[{role:'user',content:'Strategy'}],includeMarketContext:true},token,signal:new AbortController().signal,onText:()=>{},complete:(error,result)=>{completedTool={error,result}}};
+  await sdkChat.sendMessage({text:'Strategy'},{body:{bridge:toolBridge}});
+  expect(completedTool).toEqual({error:null,result:'Hello trader'});
+  const sdkParts=sdkChat.messages.at(-1)?.parts||[];
+  expect(sdkParts.some((part:any)=>part.type==='tool-getSavedStrategy'&&part.state==='output-available'&&part.output.available===true)).toBe(true);
+
   expect(savedRead).toHaveBeenCalledWith('user-bots/dGVzdC11c2Vy/bot-1/current.json');
   const backtest=await postApiStream(url,{messages:[{role:'user',content:'Backtest result'}],includeMarketContext:true},'AI',()=>undefined,undefined,token);
   expect(backtest).toBe('Hello trader');expect(backtestCalls).toBe(2);
   expect(savedRead).toHaveBeenCalledWith('user-bots/dGVzdC11c2Vy/bot-1/backtest.json');
+  const researched=await postApiStream(url,{messages:[{role:'system',content:'private strategy marker'},{role:'user',content:'Gold news today'}],includeMarketContext:true,researchMode:true},'AI',()=>undefined,undefined,token);
+  expect(researched).toBe('Hello trader');expect(researchCalls).toBe(1);
  }finally{
-  await new Promise<void>(resolve=>server.close(()=>resolve()));load.mockRestore();mockFetch.mockRestore();savedRead.mockRestore();
+  await new Promise<void>(resolve=>server.close(()=>resolve()));load.mockRestore();mockFetch.mockRestore();savedRead.mockRestore();researchBrief.mockRestore();
   if(oldProject===undefined)delete process.env.FIREBASE_PROJECT_ID;else process.env.FIREBASE_PROJECT_ID=oldProject;
   if(oldWeb===undefined)delete process.env.VITE_FIREBASE_PROJECT_ID;else process.env.VITE_FIREBASE_PROJECT_ID=oldWeb;
  }
