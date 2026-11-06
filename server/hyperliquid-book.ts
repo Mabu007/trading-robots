@@ -20,4 +20,12 @@ export async function getHyperliquidBook(coin:string,fetcher:typeof fetch=fetch)
  const bids=b.levels[0].map(x=>({price:Number(x.px),size:Number(x.sz),orders:x.n}));
  const asks=b.levels[1].map(x=>({price:Number(x.px),size:Number(x.sz),orders:x.n}));
  if(bids.some((x,i)=>i>0 && bids[i-1].price<=x.price) || asks.some((x,i)=>i>0 && asks[i-1].price>=x.price))
-  throw new Error('Invalid Hyperliquid order book orderin¶»§q«^
+  throw new Error('Invalid Hyperliquid order book ordering');
+ const bestBid=bids[0]?.price??null,bestAsk=asks[0]?.price??null;
+ if(bestBid!==null && bestAsk!==null && bestBid>bestAsk)throw new Error('Invalid crossed Hyperliquid order book');
+ const bidSize=bids.reduce((n,x)=>n+x.size,0),askSize=asks.reduce((n,x)=>n+x.size,0),total=bidSize+askSize;
+ return {provider:'Hyperliquid',market:symbol,source:'public l2Book snapshot',asOf:new Date(b.time).toISOString(),
+  receivedAt:new Date().toISOString(),bestBid,bestAsk,spread:bestBid!==null&&bestAsk!==null?bestAsk-bestBid:null,
+  bidSize,askSize,imbalance:total>0?(bidSize-askSize)/total:null,bids,asks,
+  limitations:'Visible resting orders only, up to 20 levels per side. Not hidden liquidity, stop orders, broker execution prices, or evidence of buyer/seller aggression.'};
+}

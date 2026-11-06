@@ -19,4 +19,6 @@ describe('Hyperliquid visible order book',()=>{
  });
  it('fails closed for provider errors and invalid identifiers',async()=>{
   await expect(getHyperliquidBook('BTC',mock({},429))).rejects.toThrow();
-  await expect(getHyperliquidBook('../invalid?',mock(b¶»§q«^
+  await expect(getHyperliquidBook('../invalid?',mock(body))).rejects.toThrow();
+ });
+});
