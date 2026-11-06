@@ -135,3 +135,8 @@ export async function postApiStream(
   if (!fullText.trim()) throw new Error(`${service} returned an empty assistant response.`);
   return fullText;
 }
+
+/** SDK chat is opt-in until production parity and real-user checks are verified. */
+export function chatStreamPath(flag: unknown): string {
+  return flag === 'true' ? '/api/ai-sdk/stream' : '/api/ai';
+}

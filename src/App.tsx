@@ -35,7 +35,7 @@ import { runBacktest } from './backtest';import { starterCode,parseStrategyConfi
 import type {AgentAuditEvent,PersistentAgent} from './agents';
 import { demoBots, type DemoBot } from './demos';
 import { connectFirebase, firebaseConfigured, readableFirebaseError, type BotVersion, type CloudBot, type CloudClient } from './firebase';
-import { AiOutputLimitError, joinAiContinuation, postApiJson, postApiStream, readApiJson } from './api';
+import { AiOutputLimitError, chatStreamPath, joinAiContinuation, postApiJson, postApiStream, readApiJson } from './api';
 import { DateRangePicker } from './components/ui/DateRangePicker';
 import { installChartTools } from './chart-tools';
 import { MonetaryControls, type SimulationSettings } from './components/MonetaryControls';
@@ -552,7 +552,7 @@ SAVED CODE CATALOGUE (user-owned names/metadata; load the exact source before de
     return {role:item.role,content};
    });
    let lastChatPaint=0;
-   const text=await ai([{role:'system',content:system},...history],asset,fullText=>{if(performance.now()-lastChatPaint<70)return;lastChatPaint=performance.now();const safeText=wantsCode?'Preparing a strategy edit…':conciseAssistantText(fullText);setChat([...next,{role:'assistant',content:safeText||'Thinking…'}])},wantsCode?6000:1800,false,!wantsCode&&!focusedCode,conversationModel,userGuidance);
+   const text=await ai([{role:'system',content:system},...history],asset,fullText=>{if(performance.now()-lastChatPaint<70)return;lastChatPaint=performance.now();const safeText=wantsCode?'Preparing a strategy edit…':conciseAssistantText(fullText);setChat([...next,{role:'assistant',content:safeText||'Thinking…'}])},wantsCode?6000:1800,!wantsCode&&!focusedCode,!wantsCode&&!focusedCode,conversationModel,userGuidance);
    const proposed=wantsCode?extractCodeIfPresent(text):'';let proposalError='';
    const baseline=focusedCode?.source||code;
    if(wantsCode&&proposed&&proposed!==baseline){try{if(command!=='create'&&!focusedCode&&(editorIdentityRef.current.draftId!==requestedEditor.draftId||editorIdentityRef.current.code!==requestedEditor.code))throw new Error('The editor changed while the response was being prepared');const proposedConfig=parseStrategyConfig(proposed);if(command!=='create'&&!focusedCode&&selectedMarket&&proposedConfig.timeframes.some((tf:string)=>!selectedMarket.timeframes.includes(tf)))throw new Error(`Available history is ${selectedMarket.timeframes.join(', ')} only.`);if(!/export\s+function\s+onCandle\s*\(/.test(proposed))throw new Error('Missing onCandle(ctx) export');validateStrategySyntax(proposed);setProposal(proposed);setProposalSummary(conciseAssistantText(text)||'A strategy update is ready. Review the changes before saving.');log('AI prepared a strategy edit · review before saving.')}catch(error){proposalError=`The strategy edit was incomplete (${err(error)}). Retry to prepare a complete editor update.`;log(`AI code was not staged · ${err(error)} Ask AI to try again.`)}}
@@ -582,7 +582,7 @@ SAVED CODE CATALOGUE (user-owned names/metadata; load the exact source before de
    const controller=new AbortController(),timer=window.setTimeout(()=>controller.abort(),55_000);
    try{
     const token=await cloudClient!.getIdToken();
-    const segment=await postApiStream('/api/ai',{messages:currentMessages,...(selectedAsset?{asset:selectedAsset}:{}),maxTokens,includeMarketContext:attempt===0&&includeMarketContext,researchMode:attempt===0&&allowWebResearch,...(modelOverride?{model:modelOverride}:{}),...(skillContext?{skillContext}:{})},'OpenRouter',(_chunk,partial)=>onText(joinAiContinuation(collected,partial)),controller.signal,token);
+    const segment=await postApiStream(chatStreamPath(import.meta.env.VITE_AI_SDK_CHAT_ENABLED),{messages:currentMessages,...(selectedAsset?{asset:selectedAsset}:{}),maxTokens,includeMarketContext:attempt===0&&includeMarketContext,researchMode:attempt===0&&allowWebResearch,...(modelOverride?{model:modelOverride}:{}),...(skillContext?{skillContext}:{})},'OpenRouter',(_chunk,partial)=>onText(joinAiContinuation(collected,partial)),controller.signal,token);
     return joinAiContinuation(collected,segment);
    }catch(error){
     if(!(error instanceof AiOutputLimitError)||!error.partialText.trim())throw error;
