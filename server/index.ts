@@ -1,4 +1,5 @@
 import {openRouterOAuthRoutes} from './openrouter-oauth.ts';
+import {ctraderRoutes,CTraderService} from './ctrader.ts';
 import {selectOpenRouterApiKey} from './openrouter-credentials.ts';
 import {chatToolRoutes} from './chat-tools.ts';
 import {codeWatchRoutes} from './code-watch-routes.ts';
@@ -166,10 +167,17 @@ const ownedAgentBot=async(uid:string,id:string,_req:express.Request):Promise<Age
  if(saved.venue&&venueOf(saved.venue)!==venue)return null;
  return {id,ownerUid:uid,name:String(bot.name||'Untitled strategy'),asset:bot.asset,venue,code:saved.code,updatedAt:typeof bot.updatedAt==='number'?bot.updatedAt:undefined};
 };
-const propdaoLiveService=propDAOLiveRoutes(app,{uid:firebaseUidOrReply,bot:ownedPropDAOBot,accounts:propdaoAccounts,agents:agentRegistry,read:readR2Object,write:writeR2Object,remove:deleteR2Object,list:listR2Objects});
-propDAORoutes(app,propdaoAccounts,firebaseUidOrReply,uid=>propdaoLiveService.beforeCredentialChange(uid));
 const valrLock=new ValrAccountLock(marketplace.store);
+const propBotLock=new ValrAccountLock(marketplace.store,'propdaoBotLocks','PropDAO bot change');
+const ctraderTokenLock=new ValrAccountLock(marketplace.store,'ctraderTokenLocks','cTrader account change');
 const valrExclusive=<T>(uid:string,task:()=>Promise<T>)=>FirestoreStore.configured()?valrLock.run(uid,task):task();
+// Serialize changes to one PropDAO bot with deletion across server instances.
+const propBotExclusive=<T>(uid:string,id:string,task:()=>Promise<T>)=>FirestoreStore.configured()?propBotLock.run(uid+':'+id,task):task();
+const propdaoLiveService=propDAOLiveRoutes(app,{uid:firebaseUidOrReply,bot:ownedPropDAOBot,accounts:propdaoAccounts,agents:agentRegistry,read:readR2Object,write:writeR2Object,remove:deleteR2Object,list:listR2Objects,exclusive:propBotExclusive});
+propDAORoutes(app,propdaoAccounts,firebaseUidOrReply,uid=>propdaoLiveService.beforeCredentialChange(uid));
+const ctraderStore={read:readR2Object,write:writeR2Object,remove:deleteR2Object,list:listR2Objects};
+const ctraderBroker=new CTraderService(ctraderStore,fetch,(uid,work)=>{if(!FirestoreStore.configured())throw Error('cTrader account locking is unavailable.');return ctraderTokenLock.run(uid,work)});
+ctraderRoutes(app,ctraderStore,firebaseUidOrReply,{service:ctraderBroker});
 const liveService=valrLiveRoutes(app,{lockReady:()=>FirestoreStore.configured(),exclusive:valrExclusive,uid:firebaseUidOrReply,bot:ownedValrBot,agents:agentRegistry,read:readR2Object,write:writeR2Object,remove:deleteR2Object});
 valrAccountRoutes(app,{uid:firebaseUidOrReply,read:readR2Object,write:writeR2Object,remove:deleteR2Object,beforeChange:uid=>liveService.beforeKeyChange(uid),mutate:valrExclusive});
 valrPaperRoutes(app,{uid:firebaseUidOrReply,bot:ownedValrBot});
@@ -224,23 +232,49 @@ app.get('/api/user-bots/:botId/current', async (req, res) => {
   }
 });
 
+// An assistant proposal is saved only if the reviewed source is still current
+// and the bot is not running. Both venues' deployment locks cover this write.
+app.patch('/api/user-bots/:botId/current',async(req,res)=>{
+ const uid=await firebaseUidOrReply(req,res);if(!uid)return;
+ const {botId}=req.params,{code,expectedCode}=req.body||{};
+ if(!validBotId(botId)||typeof code!=='string'||!code.trim()||code.length>180000||typeof expectedCode!=='string'||expectedCode.length>180000)return res.status(400).json({error:'Invalid reviewed code update.'});
+ if(!getR2Config()||!FirestoreStore.configured())return res.status(503).json({error:'Safe code update is unavailable.'});
+ try{
+  const storageKey=await valrExclusive(uid,()=>propBotExclusive(uid,botId,async()=>{
+   await propdaoLiveService.assertDeletable(uid,botId);
+   const grant=await liveService.grant(uid);if(grant?.botId===botId)await liveService.beforeKeyChange(uid);
+   const storageKey=`${userBotRoot(uid,botId)}/current.json`,raw=await readR2Object(storageKey);
+   if(!raw)throw Error('Saved code was not found.');
+   const saved=JSON.parse(raw);
+   if(saved.userId!==uid||saved.botId!==botId||typeof saved.code!=='string')throw Error('Saved code failed its ownership check.');
+   if(saved.code!==expectedCode)throw Error('Saved code changed since review. Request a new proposal.');
+   await writeR2Object(storageKey,JSON.stringify({...saved,code,updatedAt:new Date().toISOString()}));return storageKey;
+  }));
+  return res.json({storageKey});
+ }catch(error){const message=error instanceof Error?error.message:'Code update failed.';return res.status(409).json({error:message});}
+});
+
 app.delete('/api/user-bots/:botId', async (req, res) => {
   const uid = await firebaseUidOrReply(req, res); if (!uid) return;
   const { botId } = req.params;
   if (!validBotId(botId)) return res.status(400).json({ error: 'Robot ID is invalid.' });
   if (!getR2Config()) return res.status(503).json({ error: 'Robot storage is not configured.' });
   try {
-    await valrExclusive(uid,async()=>{
+    if(!FirestoreStore.configured())throw Error('Cannot safely verify live bot state while account locking is unavailable.');
+    await valrExclusive(uid,()=>propBotExclusive(uid,botId,async()=>{
+    await propdaoLiveService.assertDeletable(uid,botId);
     const grant=await liveService.grant(uid);if(grant?.botId===botId)await liveService.beforeKeyChange(uid);
     const prefix = `${userBotRoot(uid, botId)}/`;
     const keys = await listR2Objects(prefix, 1001);
     if (keys.length > 1000) throw Error('This robot has too many stored versions to delete safely. Contact support.');
     await publications.removePublication(uid, botId);
     for (let i = 0; i < keys.length; i += 10) await Promise.all(keys.slice(i, i + 10).map(deleteR2Object));
-    });
+    }));
     return res.json({ deleted: true });
   } catch (error) {
     console.error('Robot deletion failed', { botId, error });
+    const message=error instanceof Error?error.message:'';
+    if(/Stop and reconcile|safely verify live bot state/.test(message))return res.status(409).json({error:message});
     return res.status(502).json({ error: 'Could not delete all robot files. Retry the deletion.' });
   }
 });

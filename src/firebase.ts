@@ -27,9 +27,12 @@ export type CloudClient = {
   listSkills: () => Promise<UserSkill[]>;
   saveSkill: (skill:UserSkill) => Promise<void>;
   deleteSkill: (id:string) => Promise<void>;
+  loadPersonality: () => Promise<string>;
+  savePersonality: (instructions:string) => Promise<void>;
   listBots: () => Promise<CloudBot[]>;
   listCodeAnalyses: () => Promise<CodeAnalysis[]>;
   saveCodeAnalysis: (analysis:CodeAnalysis) => Promise<void>;
+  deleteCodeAnalysis: (id:string) => Promise<void>;
   getIdToken: (forceRefresh?: boolean) => Promise<string>;
   saveBot: (bot: CloudBot, storageKey: string) => Promise<void>;
   deleteBot: (botId: string) => Promise<void>;
@@ -127,6 +130,10 @@ export function connectFirebase(): Promise<CloudClient | null> {
        const uid=await currentUserId();
        await storeSdk.setDoc(storeSdk.doc(db,'users',uid,'codeAnalyses',analysis.id),{name:analysis.name.slice(0,80),kind:analysis.kind,asset:analysis.asset.slice(0,50),venue:venueOf(analysis.venue),timeframe:analysis.timeframe,lookback:analysis.lookback,source:analysis.source,updatedAt:storeSdk.serverTimestamp()},{merge:false});
       },
+      async deleteCodeAnalysis(id:string){
+        if(!/^analysis-[a-z0-9_-]{8,100}$/.test(id))throw Error('Invalid Code analysis ID.');
+        await storeSdk.deleteDoc(storeSdk.doc(db,'users',await currentUserId(),'codeAnalyses',id));
+      },
       async deleteBot(botId: string) {
         const uid = await currentUserId();
         const reference = storeSdk.doc(db, 'users', uid, 'bots', botId);
@@ -212,6 +219,15 @@ export function connectFirebase(): Promise<CloudClient | null> {
       async deleteSkill(id:string){
         if(!/^skill-[a-zA-Z0-9_-]{8,90}$/.test(id))throw Error('Invalid skill ID.');
         await storeSdk.deleteDoc(storeSdk.doc(db,'users',await currentUserId(),'skills',id));
+      },
+      async loadPersonality(){
+        const snapshot=await storeSdk.getDoc(storeSdk.doc(db,'users',await currentUserId(),'preferences','personality'));
+        const value=snapshot.exists()?snapshot.data()?.instructions:'';
+        return typeof value==='string'?value.slice(0,4000):'';
+      },
+      async savePersonality(instructions:string){
+        if(typeof instructions!=='string'||instructions.length>4000)throw Error('Personality must be under 4,000 characters.');
+        await storeSdk.setDoc(storeSdk.doc(db,'users',await currentUserId(),'preferences','personality'),{instructions:instructions.trim(),updatedAt:storeSdk.serverTimestamp()},{merge:true});
       },
       async loadChats(botId: string) {
         const reference = storeSdk.doc(db, 'users', await currentUserId(), 'bots', botId, 'chats', 'current');

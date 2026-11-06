@@ -79,3 +79,57 @@
 .studio.tv-chat-first.tv-area-chat .chat-model-picker,
 .studio.tv-chat-first.tv-area-chat .tv-model-picker{z-index:120}
 @media(min-width:721px){.studio.tv-chat-first.tv-area-chat .studio-body>.chat-side{overflow:visible}}
+
+/* The chat shell keeps workspace actions in their own views. */
+.studio.tv-chat-first .top-left > .back-button,
+.studio.tv-chat-first .top-left > .brand-logo,
+.studio.tv-chat-first .top-left > .market-symbol,
+.studio.tv-chat-first .top-left > .phase-pill,
+.studio.tv-chat-first .top-left > .muted,
+.studio.tv-chat-first .top-left > .bot-title span,
+.studio.tv-chat-first .top-actions > :not(.tv-theme-toggle){display:none!important}
+.studio.tv-chat-first.tv-area-chat .chat-composer{
+ display:grid!important;grid-template-columns:auto 1fr auto auto;grid-template-rows:auto auto;
+ align-items:center;column-gap:8px!important;row-gap:5px!important;min-height:104px;
+ padding:13px 14px 10px!important;border-radius:26px!important;
+}
+.studio.tv-chat-first.tv-area-chat .chat-composer textarea{
+ grid-column:1/-1;grid-row:1;align-self:start;width:100%;min-height:32px;
+ max-height:120px;font-size:15px;line-height:1.5;padding:0 2px!important;
+}
+.studio.tv-chat-first.tv-area-chat .chat-composer .tv-composer-add{grid-column:1;grid-row:2}
+.studio.tv-chat-first.tv-area-chat .chat-composer .tv-model-picker{grid-column:3;grid-row:2;justify-self:end}
+.studio.tv-chat-first.tv-area-chat .chat-composer .send-button{
+ grid-column:4;grid-row:2;width:36px!important;height:36px!important;min-width:36px;
+ display:grid;place-items:center;border:0;border-radius:50%;background:#4b55d9!important;color:#fff!important;
+}
+.studio.tv-chat-first.tv-area-chat .chat-composer .send-button:disabled{opacity:.42}
+.tv-personality-label,.tv-code-action-label{display:grid;gap:8px;margin:16px 0;font-weight:600}
+.tv-personality-label textarea,.tv-code-action-label input{width:100%;box-sizing:border-box;padding:12px;border:1px solid var(--tv-shell-line);border-radius:12px;background:var(--tv-shell-bg);color:var(--tv-shell-ink);font:inherit}
+.tv-personality-button{display:inline-flex;align-items:center;gap:6px;padding:8px 11px;border:1px solid var(--tv-shell-line);border-radius:10px;background:var(--tv-shell-panel);color:var(--tv-shell-ink);cursor:pointer}
+.tv-profile-modal .profile-shell{min-height:0;background:transparent}
+.tv-profile-modal .profile-top{display:none}
+.tv-profile-modal .profile-content{width:auto;max-width:none;margin:0;padding:0}
+.tv-profile-modal .profile-content>.market-buttons{display:none}
+@media(max-width:720px){
+ .studio.tv-chat-first.tv-area-chat .chat-composer{width:calc(100% - 20px)!important;min-height:96px;max-height:min(42dvh,220px);padding:12px!important}
+ .studio.tv-chat-first.tv-area-chat .chat-composer textarea{font-size:16px;min-height:30px}
+ .tv-skills-toolbar{flex-wrap:wrap}
+ .tv-model-panel{bottom:calc(122px + env(safe-area-inset-bottom))!important}
+}
+.tv-broker-picker{display:grid;gap:10px}
+.tv-broker-picker>button{display:flex;align-items:center;gap:12px;width:100%;padding:15px;border:1px solid var(--tv-shell-line);border-radius:12px;background:var(--tv-shell-panel);color:var(--tv-shell-ink);text-align:left;cursor:pointer}
+.tv-broker-picker>button>span{display:grid;gap:4px;flex:1}
+.tv-broker-picker small{color:var(--tv-shell-muted)}
+.tv-review-content{max-height:45dvh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:12px;border:1px solid var(--tv-shell-line);border-radius:10px;background:var(--tv-shell-bg);color:var(--tv-shell-ink);font:inherit;font-size:12px;line-height:1.5}
+.studio.tv-chat-first.tv-area-chat .chat-composer textarea{resize:none!important}
+.studio.tv-chat-first .app-dialog{background:var(--tv-shell-panel)!important;color:var(--tv-shell-ink)!important;border-color:var(--tv-shell-line)!important}
+.studio.tv-chat-first .app-dialog-header{background:var(--tv-shell-panel)!important;border-color:var(--tv-shell-line)!important}
+.studio.tv-chat-first .app-dialog-header h2{color:var(--tv-shell-ink)!important}
+.studio.tv-chat-first .app-dialog-content p,.studio.tv-chat-first .app-dialog-content small{color:var(--tv-shell-muted)}
+.tv-profile-summary{display:flex;align-items:center;gap:12px;margin:8px 0 16px}
+.tv-profile-summary>span{display:grid;place-items:center;width:42px;height:42px;border-radius:50%;background:var(--tv-shell-panel-muted)}
+.tv-profile-summary strong,.tv-profile-summary small{display:block}
+.tv-profile-summary small{margin-top:4px}
+.tv-profile-name{display:grid;gap:8px;margin:18px 0;font-weight:600}
+.tv-profile-name input{width:100%;box-sizing:border-box;padding:12px;border:1px solid var(--tv-shell-line);border-radius:10px;background:var(--tv-shell-bg);color:var(--tv-shell-ink);font:inherit}

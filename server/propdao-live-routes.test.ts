@@ -18,6 +18,17 @@ const setup=()=>{
  return {svc,fetcher,accounts,saved,storage};
 };
 describe('PropDAO live execution authorization',()=>{
+ it('blocks deletion while a bot is running or its runtime cannot be verified',async()=>{
+  vi.stubEnv('PROPDAO_LIVE_ENABLED','true');vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
+  const {svc,fetcher,saved}=setup();
+  await svc.assertDeletable('alice','bot-1');
+  await svc.deploy('alice','bot-1',{body:{accountId:'prop-1',riskUsd:2,leverage:1,confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'}} as any);
+  const grant=JSON.parse([...saved.values()][0]);
+  fetcher.mockImplementation(async(url:string)=>String(url).endsWith('/health')?Response.json({ready:true}):Response.json({grant:{id:grant.id},running:true,paused:false,pendingIntent:null}));
+  await expect(svc.assertDeletable('alice','bot-1')).rejects.toThrow(/Stop and reconcile/);
+  fetcher.mockRejectedValue(Error('offline'));
+  await expect(svc.assertDeletable('alice','bot-1')).rejects.toThrow(/Stop and reconcile/);
+ });
  it('is fail-closed without a verified Cloudflare Worker and secret',async()=>{
   const {svc,fetcher}=setup();
   vi.stubEnv('PROPDAO_LIVE_ENABLED','false');

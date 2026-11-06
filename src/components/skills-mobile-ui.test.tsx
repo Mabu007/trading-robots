@@ -12,8 +12,8 @@ const mobile=readFileSync(new URL('../mobile-shell-polish.css',import.meta.url),
 const skills:UserSkill[]=[{id:'skill-abcdef123',name:'Risk research',description:'Verify evidence',instructions:'Do not invent trades.',triggers:['market research'],enabled:true,alwaysOn:false}];
 describe('Skills, chat model and mobile shell',()=>{
  it('renders reusable account skills with edit, enable, search and delete',()=>{
-  const html=renderToStaticMarkup(<SkillsLibrary skills={skills} busy={false} onSave={async()=>undefined} onDelete={async()=>undefined}/>);
-  expect(html).toContain('Risk research');expect(html).toContain('Search skills');expect(html).toContain('View / edit');expect(html).toContain('Delete Risk research');expect(html).toContain('market research');
+  const html=renderToStaticMarkup(<SkillsLibrary skills={skills} busy={false} onSave={async()=>undefined} onDelete={async()=>undefined} onPersonality={()=>undefined}/>);
+  expect(html).toContain('Risk research');expect(html).toContain('Search skills');expect(html).toContain('View / edit');expect(html).toContain('Delete Risk research');expect(html).toContain('market research');expect(html).toContain('Personality');
  });
  it('renders a conversation-specific AI picker and current chosen model',()=>{
   const html=renderToStaticMarkup(<ChatModelSelector client={null} selected="openai/gpt-4o" onSelect={async()=>undefined} onSettings={()=>undefined} disabled={false}/>);

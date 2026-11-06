@@ -126,12 +126,16 @@ export class PropDAOAccounts {
   const apiKey=await this.load(uid);if(!apiKey)throw Error('Connect your PropDAO key first');
   const body=await this.get(apiKey,`/accounts/${encodeURIComponent(id)}/trades?limit=50`);
   if(!Array.isArray(body?.data))throw Error('Invalid PropDAO trade history');
-  return body.data.slice(0,50).map((t:any)=>({
-   id:String(t.id||''),symbol:String(t.symbol||''),side:t.side,qty:Number(t.qty),entry:Number(t.entry),
-   exit:Number(t.exit),pnl:Number(t.pnl),openedAt:Number(t.openedAt),closedAt:Number(t.closedAt),
-   reason:String(t.reason||''),fee:Number(t.fee||0)
-  })).filter((t:any)=>t.id&&t.symbol&&['BUY','SELL'].includes(t.side)&&
-   [t.qty,t.entry,t.exit,t.pnl,t.openedAt,t.closedAt,t.fee].every(Number.isFinite));
+  const number=(value:unknown)=>value===undefined||value===null||value===''?null:Number(value);
+  const trades=body.data.slice(0,50).map((t:any)=>({
+   id:String(t.id||''),symbol:String(t.symbol||''),side:t.side,qty:number(t.qty),entry:number(t.entry),
+   exit:number(t.exit),pnl:number(t.pnl),openedAt:number(t.openedAt),closedAt:number(t.closedAt),
+   reason:String(t.reason||''),fee:number(t.fee)
+  }));
+  if(trades.some((t:any)=>!t.id||!t.symbol||!['BUY','SELL'].includes(t.side)||
+   [t.qty,t.entry,t.exit,t.pnl].some(v=>typeof v!=='number'||!Number.isFinite(v))||
+   [t.openedAt,t.closedAt,t.fee].some(v=>v!==null&&!Number.isFinite(v))))throw Error('Invalid PropDAO trade history');
+  return trades;
  }
  /**
   * Read-only two-stage operator reconciliation. Never retries the ambiguous order.
@@ -176,5 +180,13 @@ export function propDAORoutes(app:Express,accounts:PropDAOAccounts,uid:(req:Requ
  app.post('/api/venues/propdao/connect',handle(async(id,req)=>{if(beforeChange)await beforeChange(id);return accounts.connect(id,req.body?.apiKey)}));
  app.get('/api/venues/propdao/accounts',handle(id=>accounts.list(id)));
  app.get('/api/venues/propdao/accounts/:accountId',handle((id,req)=>accounts.snapshot(id,req.params.accountId)));
+ app.get('/api/venues/propdao/accounts/:accountId/activity',handle(async(id,req)=>{
+  const accountId=String(req.params.accountId);
+  const snapshot=await accounts.accountRisk(id,accountId);
+  let trades:Awaited<ReturnType<PropDAOAccounts['recentTrades']>>|null=null;
+  try{trades=await accounts.recentTrades(id,accountId)}catch{}
+  const pick=(item:any,fields:string[])=>Object.fromEntries(fields.filter(field=>['string','number','boolean'].includes(typeof item?.[field])||item?.[field]===null).map(field=>[field,item[field]]));
+  return {account:snapshot.account,risk:pick(snapshot.risk,['equity','balance','roomUsd','breached']),positions:snapshot.positions.slice(0,100).map((item:any)=>pick(item,['id','symbol','side','qty','entry','mark','unrealizedPnl','slPrice','tpPrice','openedAt'])),orders:snapshot.orders.slice(0,100).map((item:any)=>pick(item,['id','orderId','symbol','side','qty','quantity','price','limitPrice','status','type','orderType','createdAt'])),trades,historyAvailable:trades!==null,checkedAt:new Date().toISOString()};
+ }));
  app.post('/api/venues/propdao/disconnect',handle(async id=>{if(beforeChange)await beforeChange(id);return accounts.disconnect(id)}));
 }

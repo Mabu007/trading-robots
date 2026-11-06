@@ -152,14 +152,14 @@ export function AgentLibrary({ mode='strategies', bots, current, runtime, search
   </section>;
 }
 
-export function YouHub({ onAISettings, onVenues }: {
-  onAISettings: () => void; onVenues: () => void;
+export function YouHub({ onAISettings, onBroker }: {
+  onAISettings: () => void; onBroker: (venue:'propdao'|'ctrader'|'valr') => void;
 }) {
   return <section className="tv-destination tv-you-hub" aria-labelledby="tv-apps-title">
     <header className="tv-destination-heading"><div><span className="tv-destination-kicker"><Plug size={15}/> CONNECTED APPS</span><h1 id="tv-apps-title">Apps</h1><p>Connect the AI and broker services Trading Vibes can use on your behalf.</p></div></header>
     <div className="tv-you-list tv-app-connections">
       <button type="button" onClick={onAISettings}><span><Sparkles size={18}/></span><span><strong>OpenRouter AI</strong><small>Connect your account, choose a model and manage spending limits</small></span><ArrowRight size={15}/></button>
-      <button type="button" onClick={onVenues}><span><Wallet size={18}/></span><span><strong>Broker connections</strong><small>Manage supported venue credentials and execution access</small></span><ArrowRight size={15}/></button>
+      {([['propdao','PropDAO','Connect your PropDAO developer key'],['ctrader','cTrader','Connect your cTrader ID'],['valr','VALR','Connect your VALR account']] as const).map(([id,label,description])=><button type="button" key={id} onClick={()=>onBroker(id)}><span><Wallet size={18}/></span><span><strong>{label}</strong><small>{description}</small></span><ArrowRight size={15}/></button>)}
       
     </div>
   </section>;

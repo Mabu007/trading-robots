@@ -45,3 +45,8 @@
 .tv-chat-first .tv-desk-warning svg{flex:none;margin-top:1px;color:#d19b53}
 @media(max-width:800px){.tv-chat-first .tv-desk-account-strip{gap:14px;padding:14px}.tv-chat-first .tv-desk-account-title{flex-basis:100%}.tv-chat-first .tv-desk-table{min-width:800px}.tv-chat-first .tv-desk-history .tv-desk-table{min-width:1040px}.tv-chat-first .tv-desk-section-heading{padding:14px}.tv-chat-first .tv-desk-table th:first-child,.tv-chat-first .tv-desk-table td:first-child{padding-left:14px}}
 @media(max-width:480px){ .tv-chat-first .tv-trades-page.tv-trading-desk{padding:18px 12px 36px}.tv-chat-first .tv-desk-account-strip{gap:10px}.tv-chat-first .tv-desk-state{order:0}.tv-chat-first .tv-desk-balance{flex:1}.tv-chat-first .tv-desk-section-heading{align-items:flex-start}.tv-chat-first .tv-desk-section-heading>span{margin-top:3px}.tv-chat-first .tv-desk-inspect span{display:none}.tv-chat-first .tv-desk-inspect{min-width:32px;padding:6px}}
+.tv-chat-first .tv-desk-connect{display:flex;flex-direction:column;align-items:center;text-align:center;gap:12px;padding:40px 24px;border:1px solid var(--tv-shell-line);border-radius:20px;background:var(--tv-shell-panel)}
+.tv-chat-first .tv-desk-connect h2,.tv-chat-first .tv-desk-connect p{margin:0}
+.tv-chat-first .tv-desk-connect p,.tv-chat-first .tv-desk-summary{color:var(--tv-shell-muted);font-size:13px}
+.tv-chat-first .tv-desk-account-strip label{display:grid;gap:6px;color:var(--tv-shell-muted);font-size:11px}
+.tv-chat-first .tv-desk-account-strip select{min-width:180px;padding:8px;border:1px solid var(--tv-shell-line);border-radius:8px;background:var(--tv-shell-bg);color:var(--tv-shell-ink)}
