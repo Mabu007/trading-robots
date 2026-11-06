@@ -453,7 +453,14 @@ app.post('/api/ai', async (req, res) => {
   aiHits.set(clientId, current);
   for (const [id, entry] of aiHits) if (now - entry.started > 120_000) aiHits.delete(id);
 
-  const model = personalAI?.model || process.env.OPENROUTER_MODEL?.trim() || 'minimax/minimax-m3:free';
+  const requestedModel=req.body?.model;
+  if(requestedModel!==undefined&&(typeof requestedModel!=='string'||!/^[a-zA-Z0-9_.:/-]{1,200}$/.test(requestedModel)))return res.status(400).json({error:'Choose a valid OpenRouter model for this chat.'});
+  if(requestedModel){
+    let available;
+    try{available=await openRouterAccounts.models()}catch{return res.status(503).json({error:'Cannot verify the selected OpenRouter model right now. Retry model selection.'})}
+    if(!available.some(m=>m.id===requestedModel))return res.status(400).json({error:'This OpenRouter model is not in the current model catalogue.'});
+  }
+  const model = requestedModel || personalAI?.model || process.env.OPENROUTER_MODEL?.trim() || 'minimax/minimax-m3:free';
   // Only conversational public-info queries can use web research; editing
   // strategy.js and all live execution paths remain unchanged.
   const lastUser=[...messages].reverse().find((m:any)=>m.role==='user');
