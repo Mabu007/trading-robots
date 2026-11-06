@@ -16,7 +16,7 @@ export function biquoteSymbol(query:string):string|null {
  if(/\b(bitcoin|btc|btcusd)\b/i.test(query))return 'BTCUSD';
  if(/\b(ethereum|ether|eth|ethusd)\b/i.test(query))return 'ETHUSD';
  const currencies=new Set(['USD','EUR','GBP','JPY','ZAR','AUD','NZD','CAD','CHF']);
- const pairs=query.toUpperCase().match(/\b[A-Z]{6}\b/g)||[];
+ const pairs: string[] = Array.from(query.toUpperCase().match(/\b[A-Z]{6}\b/g) ?? []);
  const forex=pairs.find(pair=>currencies.has(pair.slice(0,3))&&currencies.has(pair.slice(3)));if(forex)return forex;
  const named:Record<string,string>={apple:'AAPL',tesla:'TSLA',nvidia:'NVDA',microsoft:'MSFT'};
  for(const [name,symbol] of Object.entries(named))if(new RegExp('\\b'+name+'\\b','i').test(query))return symbol;
