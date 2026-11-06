@@ -13,6 +13,9 @@ const project=process.env.TV_E2E_FIREBASE_PROJECT_ID||'';
 const base=process.env.TV_E2E_BASE_URL||'https://trading-robots.vercel.app';
 const enabled=process.env.TV_E2E_ALLOW_WRITES==='1';
 const result=[];
+const startedAt=new Date().toISOString();
+const qaHeader=process.env.TV_E2E_QA_SECRET||'';
+const qaHeaders=qaHeader?{'x-phase2-e2e-secret':qaHeader}:{};
 function check(name,success,detail=''){result.push({name,success:Boolean(success),detail:String(detail).slice(0,100)});if(!success)throw Error('Verification failed: '+name)}
 if(!enabled||!token||!project||!/^https:\/\/[A-Za-z0-9.-]+$/.test(base))throw Error('A dedicated test Firebase identity, project and explicit write permission are required.');
 const parts=token.split('.');
@@ -27,7 +30,7 @@ const code='export const config={timeframes:["m1"],executionTimeframe:"m1",riskP
 const edited=code.replace('riskReward:2','riskReward:3');
 const auth={Authorization:'Bearer '+token};
 const api=async(path,method='GET',payload)=> {
- const response=await fetch(base+path,{method,headers:{...auth,...(payload?{'Content-Type':'application/json'}:{})},...(payload?{body:JSON.stringify(payload)}:{}),signal:AbortSignal.timeout(58000)});
+ const response=await fetch(base+path,{method,headers:{...auth,...qaHeaders,...(payload?{'Content-Type':'application/json'}:{})},...(payload?{body:JSON.stringify(payload)}:{}),signal:AbortSignal.timeout(58000)});
  const data=await response.json().catch(()=>null);
  return {status:response.status,body:data};
 };
@@ -54,7 +57,7 @@ try{
   const secondParts=secondary.split('.');
   const secondClaims=secondParts.length===3?JSON.parse(Buffer.from(secondParts[1],'base64url').toString('utf8')):{};
   check('second test user is a different Firebase project account',secondClaims.aud===project&&secondClaims.sub!==uid&&/^tv-phase2-e2e-[\w-]+@example\.(com|test)$/i.test(String(secondClaims.email)));
-  const other=await fetch(base+'/api/user-bots/'+id+'/current',{headers:{Authorization:'Bearer '+secondary},signal:AbortSignal.timeout(20000)});
+  const other=await fetch(base+'/api/user-bots/'+id+'/current',{headers:{Authorization:'Bearer '+secondary,...qaHeaders},signal:AbortSignal.timeout(20000)});
   check('live cross-tenant R2 read is forbidden',other.status===404||other.status===409,other.status);
  }
  const doc={fields:{name:{stringValue:'Phase2 QA sandbox strategy'},asset:{stringValue:'BTC'},venue:{stringValue:'hyperliquid'},prompt:{stringValue:'Isolated end-to-end verification'},storage:{mapValue:{fields:{provider:{stringValue:'r2'},key:{stringValue:String(save.body?.storageKey||'')}}}}}};
@@ -83,7 +86,7 @@ try{
   // This is an actual authenticated OpenRouter invocation using ONLY the
   // disposable user's own connected key. It may consume that user's credits.
   const response=await fetch(base+'/api/ai-sdk/stream',{
-   method:'POST',headers:{...auth,'Content-Type':'application/json'},
+   method:'POST',headers:{...auth,...qaHeaders,'Content-Type':'application/json'},
    body:JSON.stringify({messages:[{role:'user',content:'Inspect my saved strategy '+id+' using the getSavedStrategy tool. Confirm its code is a WAIT-only strategy.'}],includeMarketContext:true,maxTokens:400}),
    signal:AbortSignal.timeout(58000)
   });
@@ -106,5 +109,6 @@ try{
   result.push({name:'temporary Firestore data cleanup',success:removed.status===200,detail:String(removed.status)});
   if(removed.status!==200)process.exitCode=1;
  }
- console.log(JSON.stringify({completed:result.filter(x=>x.success).length,failed:result.filter(x=>!x.success).length,results:result},null,2));
+ const report={environment:base,executedAt:startedAt,completed:result.filter(x=>x.success).length,failed:result.filter(x=>!x.success).length,cleanup:{r2:r2Saved?result.find(x=>x.name==='temporary R2 data cleanup')?.success:false,firestore:firestoreSaved?result.find(x=>x.name==='temporary Firestore data cleanup')?.success:false,identity:'external test runner must delete both Firebase Auth users'},results:result};
+ console.log(JSON.stringify(report,null,2));
 }
