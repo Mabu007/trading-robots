@@ -15,7 +15,7 @@ const enabled=process.env.TV_E2E_ALLOW_WRITES==='1';
 const result=[];
 const startedAt=new Date().toISOString();
 const qaHeader=process.env.TV_E2E_QA_SECRET||'';
-const qaHeaders=qaHeader?{'x-phase2-e2e-secret':qaHeader}:{};
+const qaHeaders=qaHeader?{'x-tv-phase2-qa':qaHeader}:{};
 function check(name,success,detail=''){result.push({name,success:Boolean(success),detail:String(detail).slice(0,100)});if(!success)throw Error('Verification failed: '+name)}
 if(!enabled||!token||!project||!/^https:\/\/[A-Za-z0-9.-]+$/.test(base))throw Error('A dedicated test Firebase identity, project and explicit write permission are required.');
 const parts=token.split('.');
