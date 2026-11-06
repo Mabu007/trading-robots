@@ -17,7 +17,8 @@
   ],
   "git": {
     "deploymentEnabled": {
-      "codex/phase2-complete": false
+      "codex/phase2-complete": false,
+      "codex/phase2-auth-rollout-validation-20261106": false
     }
   }
 }

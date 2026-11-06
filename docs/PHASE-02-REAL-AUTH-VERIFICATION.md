@@ -51,3 +51,39 @@ Only after all of these gates pass should Phase 2 be merged **once** into `main`
 - GitHub Actions green CI (billing lock remains outside this codebase's control)
 
 Do not switch to Phase 3 on the assumption that these checks have passed. The saved code, mocked HTTP fixture, and live Hyperliquid read-only checks are useful progress, but they are distinct evidence categories.
+
+## Verified real Firebase / deployed Firestore / R2 smoke test (2026-11-06)
+
+A disposable email/password Firebase account with the exact `tv-phase2-e2e-*@example.com` identity pattern was created using the production application's public Firebase client configuration. Its **genuine Firebase ID token** was accepted by the production API; no human user's token or broker credentials were used. The check ran as one ephemeral process and printed only result status codes, never credentials or tokens.
+
+| Production check | Actual outcome |
+| --- | --- |
+| Firebase email/password account creation | PASS |
+| Authorized `GET /api/agents` (Firebase signature verification plus server-side Firestore listing) | HTTP 200 |
+| Authorized `PUT /api/user-bots/{test-id}/current` (R2 write) | HTTP 200 |
+| Authorized `GET /api/user-bots/{test-id}/current` (byte-identical stored source) | HTTP 200 |
+| Signed-in Firestore REST `PATCH users/{qa-uid}/bots/{test-id}` | HTTP 200 |
+| Signed-in Firestore REST readback | HTTP 200 |
+| Temporary R2 strategy deletion | HTTP 200 |
+| Temporary Firestore document deletion | HTTP 200 |
+| Disposable Firebase Auth identity deletion | HTTP 200 |
+
+The actual public Hyperliquid `candleSnapshot` integration and isolated QuickJS backtest returned **available=true, BTC M1, 120 completed candles**, zero simulated trades from a WAIT-only strategy, and explicitly labeled simulated R-based results rather than broker fills. This request ran in the isolated sandbox, **not as a new production Vercel endpoint**.
+
+These real checks prove that the existing deployed authentication, R2 storage, signed-in Firestore client access, server-side agent listing and public market-data pipeline are operational for a disposable account. They do **not** prove that the new unpublished staged approval transaction or new unpublished server-side backtest API has been exercised against production Firestore and R2. The signed HTTP integration fixture is separate and uses mocked storage with Firebase-format signed tokens.
+
+## QA-user-only verification capability
+
+A default-disabled, exact-UID `PHASE2_E2E_ENABLED=true` / `PHASE2_E2E_UID=<test Firebase UID>` gate may selectively enable the new approval and backtest routes for a specifically authorized, disposable signed-in user. A separate `PHASE2_E2E_ALLOW_SHARED_MODEL=true` can allow **only that exact UID** to use the existing server OpenRouter key for a tightly controlled model test; it is **default off** and must not be enabled for ordinary accounts. The existing global flags remain default off. No environment variable was added or enabled in production in this run.
+
+Reproducible new-route E2E runner: `scripts/phase2-real-auth-e2e.mjs`, requiring an explicitly provisioned test identity and an authorized, flag-enabled deployment. It cleans its temporary Firestore/R2 records and intentionally refuses ordinary users' ID tokens. Use separate test account teardown for Firebase Auth itself.
+
+## Blockers and release decision
+
+- **Not yet verified**: real OpenRouter model streaming/tool selection for an authorized disposable account. Ordinary user-managed API keys cannot be borrowed from another person's account. Global shared model fallback remains disabled.
+- **Not yet verified**: staging/approving/consuming a strategy change through the *deployed* new endpoints against the production Firestore transaction backend and R2. The code is on the isolated branch, not production.
+- **Not yet verified**: the deployed Vercel Node function's actual server-side QuickJS+Hyperliquid backtest route, though the same code passed real Hyperliquid in the sandbox and signed-route fixtures.
+- **Do not claim Phase 2 accepted or enable the global SDK/approval/backtest flags** until these end-to-end gates pass. No live financial execution or risk changes are authorized by this new release.
+- The GitHub Actions billing issue remains external; local tests must not be called a green GitHub CI run.
+
+**Status: Phase 2 acceptance HOLD, source safe on `codex/phase2-complete`, production unchanged.**

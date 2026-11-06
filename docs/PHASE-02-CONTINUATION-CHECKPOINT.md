@@ -52,3 +52,9 @@ This branch has been extended in a separate named Vercel Sandbox without any Ver
 - GitHub Actions remained blocked by account billing in the previous handoff. Recheck before final merge; independent sandbox tests are not CI.
 - Check actual Cloudflare Workers, R2 datasets, auth and broker account configurations through authorized connectors before claiming external verification.
 - Keep automatic Vercel deployment disabled for `codex/phase2-complete`. Do not merge until all Phase 2 acceptance criteria are satisfied, or the user explicitly authorizes releasing a partial feature-flagged build.
+
+### November 6 final verification attempt
+- Confirmed actual disposable Firebase Auth signup, production API authentication, production R2 write/read and cleanup, signed-in Firestore write/read and cleanup. All returned success (HTTP 200); test Firebase Auth user deletion also returned HTTP 200. No private user credentials used.
+- Confirmed real Hyperliquid completed BTC M1 data, 120 candles, evaluated by QuickJS sandbox with a WAIT-only simulation. No live orders.
+- Added signed HTTP fixture for staged review and server-run simulation, plus strict QA-UID-only test gating. Full test suite **493 passed across 95 files**, build/runtime passed. See `docs/PHASE-02-REAL-AUTH-VERIFICATION.md`.
+- Remaining live E2E: actual OpenRouter model tool use, new approval Firestore transaction and R2 integration under a deployed Vercel function, and deployed QuickJS route. Because the branch is not deployed and no authorized test model connection exists, **do not merge, enable global flags or mark Phase 2 complete**.

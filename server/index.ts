@@ -9,6 +9,7 @@ import {ctraderRoutes,CTraderService} from './ctrader.ts';
 import {selectOpenRouterApiKey} from './openrouter-credentials.ts';
 import {chatToolRoutes} from './chat-tools.ts';
 import {registerAIPlatformRoutes} from './ai-platform.ts';
+import {phase2FeatureEnabled,phase2SharedModelTestEnabled} from './phase2-feature-gates.ts';
 import {createAgentBacktestTool,agentBacktestInputSchema} from './agent-backtest-tools.ts';
 import {createBrokerConnectionReadTool} from './agent-broker-read.ts';
 import {ValrAccounts} from './valr-account.ts';
@@ -295,8 +296,8 @@ app.get('/api/agent/capabilities',async(req,res)=>{
  const uid=await firebaseUidOrReply(req,res);if(!uid)return;
  return res.json({
   sdkStreamAvailable:true,
-  strategyApprovals:process.env.AI_SDK_STRATEGY_APPROVAL_ENABLED==='true'&&FirestoreStore.configured()&&Boolean(getR2Config()),
-  verifiedHyperliquidBacktest:process.env.AI_SDK_SERVER_BACKTEST_ENABLED==='true'&&FirestoreStore.configured()&&Boolean(getR2Config()),
+  strategyApprovals:phase2FeatureEnabled(uid,'AI_SDK_STRATEGY_APPROVAL_ENABLED')&&FirestoreStore.configured()&&Boolean(getR2Config()),
+  verifiedHyperliquidBacktest:phase2FeatureEnabled(uid,'AI_SDK_SERVER_BACKTEST_ENABLED')&&FirestoreStore.configured()&&Boolean(getR2Config()),
   financialAgentExecution:false,
   verification:'Feature availability, not provider/market/broker health'
  });
@@ -306,7 +307,7 @@ const directBacktestBusy=new Set<string>();
 app.post('/api/agent/backtest/verify',async(req,res)=>{
  res.setHeader('Cache-Control','private, no-store');
  const uid=await firebaseUidOrReply(req,res);if(!uid)return;
- if(process.env.AI_SDK_SERVER_BACKTEST_ENABLED!=='true'||!getR2Config()||!FirestoreStore.configured()){
+ if(!phase2FeatureEnabled(uid,'AI_SDK_SERVER_BACKTEST_ENABLED')||!getR2Config()||!FirestoreStore.configured()){
   return res.status(503).json({error:'Server-side verified backtesting is not enabled.'});
  }
  const validated=agentBacktestInputSchema.safeParse(req.body);
@@ -330,13 +331,13 @@ app.post('/api/agent/backtest/verify',async(req,res)=>{
   return res.status(503).json({error:'Backtest could not be executed securely.'});
  }finally{directBacktestBusy.delete(uid)}
 });
-function strategyReviewEnabled(res:express.Response){
- if(process.env.AI_SDK_STRATEGY_APPROVAL_ENABLED==='true'&&FirestoreStore.configured()&&Boolean(getR2Config()))return true;
+function strategyReviewEnabled(uid:string,res:express.Response){
+ if(phase2FeatureEnabled(uid,'AI_SDK_STRATEGY_APPROVAL_ENABLED')&&FirestoreStore.configured()&&Boolean(getR2Config()))return true;
  res.status(503).json({error:'Reviewed strategy updates are not enabled for this environment.'});
  return false;
 }
 app.post('/api/agent/strategy-reviews',async(req,res)=>{
- const uid=await firebaseUidOrReply(req,res);if(!uid||!strategyReviewEnabled(res))return;
+ const uid=await firebaseUidOrReply(req,res);if(!uid||!strategyReviewEnabled(uid,res))return;
  try{
   const botId=String(req.body?.botId||'');
   if(!validBotId(botId))return res.status(400).json({error:'Invalid strategy ID.'});
@@ -346,7 +347,7 @@ app.post('/api/agent/strategy-reviews',async(req,res)=>{
 });
 for(const action of ['approve','deny','apply'] as const){
  app.post('/api/agent/strategy-reviews/:botId/:intentId/'+action,async(req,res)=>{
-  const uid=await firebaseUidOrReply(req,res);if(!uid||!strategyReviewEnabled(res))return;
+  const uid=await firebaseUidOrReply(req,res);if(!uid||!strategyReviewEnabled(uid,res))return;
   try{
    const botId=String(req.params.botId||''),intentId=String(req.params.intentId||'');
    if(!validBotId(botId)||!validBotId(intentId))return res.status(400).json({error:'Invalid review identity.'});
@@ -717,7 +718,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
   const uid = await firebaseUidOrReply(req, res); if (!uid) return;
   let personalAI: Awaited<ReturnType<typeof openRouterAccounts.load>>;
   try { personalAI = await openRouterAccounts.load(uid); } catch { return res.status(503).json({ error: 'Unable to access AI credentials. Reconnect your key.' }); }
-  const apiKey = selectOpenRouterApiKey(personalAI?.apiKey,process.env.OPENROUTER_API_KEY,process.env.ALLOW_SHARED_OPENROUTER_KEY==='true');
+  const apiKey = selectOpenRouterApiKey(personalAI?.apiKey,process.env.OPENROUTER_API_KEY,process.env.ALLOW_SHARED_OPENROUTER_KEY==='true'||phase2SharedModelTestEnabled(uid));
   if (!apiKey) return res.status(503).json({ error: 'Connect your OpenRouter API key to enable AI.' });
   const messages = req.body?.messages;
   if (!Array.isArray(messages) || messages.length < 1 || messages.length > 24
@@ -821,7 +822,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
           return readMonitorStatus(uid,monitorId,marketplace.store);
         }
       }),{query:String(lastUser?.content||''),researchMode}):{}),
-      ...(process.env.AI_SDK_SERVER_BACKTEST_ENABLED==='true'&&!researchMode&&/\b(backtest|retest|replay|simulation)\b/i.test(String(lastUser?.content||''))?{
+      ...(phase2FeatureEnabled(uid,'AI_SDK_SERVER_BACKTEST_ENABLED')&&!researchMode&&/\b(backtest|retest|replay|simulation)\b/i.test(String(lastUser?.content||''))?{
         runVerifiedBacktest:ownedHyperliquidBacktest(uid)
       }:{}),
       ...(!researchMode&&/\b(brokers?|accounts?|connections?|propdao|ctrader|valr)\b/i.test(String(lastUser?.content||''))?{
