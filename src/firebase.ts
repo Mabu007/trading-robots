@@ -142,16 +142,18 @@ export function connectFirebase(): Promise<CloudClient | null> {
         await batch.commit();
       },
       async listConversations(){
-        const reference=storeSdk.collection(db,'users',await currentUserId(),'conversations');
+        const uid=await currentUserId();
+        const reference=storeSdk.collection(db,'users',uid,'conversations');
         const snapshot=await storeSdk.getDocs(storeSdk.query(reference,storeSdk.orderBy('updatedAt','desc'),storeSdk.limit(100)));
-        return snapshot.docs.filter((doc:any)=>!deletedConversationIds.has(doc.id)).map((doc:any)=>{
+        return snapshot.docs.filter((doc:any)=>!deletedConversationIds.has(uid+':'+doc.id)).map((doc:any)=>{
           const data=doc.data()||{},first=Array.isArray(data.messages)?data.messages.find((m:any)=>m.role==='user'&&typeof m.content==='string'):null;
           return {id:doc.id,title:String(data.title||first?.content||'New chat').slice(0,80),model:typeof data.model==='string'?data.model:null};
         });
       },
       async loadConversationRecord(id:string){
-        if(deletedConversationIds.has(id))return null;
-        const snapshot=await storeSdk.getDoc(storeSdk.doc(db,'users',await currentUserId(),'conversations',id));
+        const uid=await currentUserId();
+        if(deletedConversationIds.has(uid+':'+id))return null;
+        const snapshot=await storeSdk.getDoc(storeSdk.doc(db,'users',uid,'conversations',id));
         if(!snapshot.exists())return null;
         const data=snapshot.data()||{},messages=data.messages;
         return {messages:Array.isArray(messages)?messages.filter((m:any)=>m&&['user','assistant'].includes(m.role)&&typeof m.content==='string'):[],model:typeof data.model==='string'?data.model:null,title:String(data.title||'New chat')};
@@ -160,37 +162,41 @@ export function connectFirebase(): Promise<CloudClient | null> {
         return (await this.loadConversationRecord(id))?.messages??null;
       },
       async saveConversation(id:string,chat:any[]){
-        if(deletedConversationIds.has(id))return;
+        const uid=await currentUserId(),key=uid+':'+id;
+        if(deletedConversationIds.has(key))return;
         let messages=chat.slice(-60);
         while(messages.length>1&&JSON.stringify(messages).length>650000)messages=messages.slice(1);
         if(JSON.stringify(messages).length>650000)throw Error('Conversation is too large to save.');
         const payload=JSON.parse(JSON.stringify(messages));
-        const previous=pendingConversationWrites.get(id);
+        const previous=pendingConversationWrites.get(key);
         const task=(previous||Promise.resolve()).catch(()=>undefined).then(async()=>{
-          if(deletedConversationIds.has(id))return;
-          await storeSdk.setDoc(storeSdk.doc(db,'users',await currentUserId(),'conversations',id),{messages:payload,updatedAt:storeSdk.serverTimestamp()},{merge:true});
+          if(deletedConversationIds.has(key))return;
+          await storeSdk.setDoc(storeSdk.doc(db,'users',uid,'conversations',id),{messages:payload,updatedAt:storeSdk.serverTimestamp()},{merge:true});
         });
-        pendingConversationWrites.set(id,task);
-        try{await task}finally{if(pendingConversationWrites.get(id)===task)pendingConversationWrites.delete(id)}
+        pendingConversationWrites.set(key,task);
+        try{await task}finally{if(pendingConversationWrites.get(key)===task)pendingConversationWrites.delete(key)}
       },
       async renameConversation(id:string,title:string){
         const name=title.trim();
         if(!name||name.length>80)throw Error('Chat name must be 1–80 characters.');
-        if(deletedConversationIds.has(id))throw Error('This conversation was deleted.');
-        await pendingConversationWrites.get(id)?.catch(()=>undefined);
-        await storeSdk.setDoc(storeSdk.doc(db,'users',await currentUserId(),'conversations',id),{title:name,titleEdited:true,updatedAt:storeSdk.serverTimestamp()},{merge:true});
+        const uid=await currentUserId(),key=uid+':'+id;
+        if(deletedConversationIds.has(key))throw Error('This conversation was deleted.');
+        await pendingConversationWrites.get(key)?.catch(()=>undefined);
+        await storeSdk.setDoc(storeSdk.doc(db,'users',uid,'conversations',id),{title:name,titleEdited:true,updatedAt:storeSdk.serverTimestamp()},{merge:true});
       },
       async deleteConversation(id:string){
-        deletedConversationIds.add(id);
+        const uid=await currentUserId(),key=uid+':'+id;
+        deletedConversationIds.add(key);
         try{
-          await pendingConversationWrites.get(id)?.catch(()=>undefined);
-          await storeSdk.deleteDoc(storeSdk.doc(db,'users',await currentUserId(),'conversations',id));
-        }catch(error){deletedConversationIds.delete(id);throw error}
+          await pendingConversationWrites.get(key)?.catch(()=>undefined);
+          await storeSdk.deleteDoc(storeSdk.doc(db,'users',uid,'conversations',id));
+        }catch(error){deletedConversationIds.delete(key);throw error}
       },
       async selectConversationModel(id:string,model:string|null){
-        if(deletedConversationIds.has(id))throw Error('This conversation was deleted.');
+        const uid=await currentUserId();
+        if(deletedConversationIds.has(uid+':'+id))throw Error('This conversation was deleted.');
         if(model!==null&&!/^[a-zA-Z0-9_.:/-]{1,200}$/.test(model))throw Error('Choose an available OpenRouter model.');
-        await storeSdk.setDoc(storeSdk.doc(db,'users',await currentUserId(),'conversations',id),{model,updatedAt:storeSdk.serverTimestamp()},{merge:true});
+        await storeSdk.setDoc(storeSdk.doc(db,'users',uid,'conversations',id),{model,updatedAt:storeSdk.serverTimestamp()},{merge:true});
       },
       async listSkills(){
         const reference=storeSdk.collection(db,'users',await currentUserId(),'skills');
