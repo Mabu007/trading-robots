@@ -37,8 +37,14 @@ export class HyperliquidBookCache {
  private cache=new Map<string,{value:Book;expires:number}>();
  private pending=new Map<string,Promise<Book>>();
  private requests:number[]=[];
- constructor(private readonly fetcher:typeof fetch=fetch,private readonly now=()=>Date.now(),
-  private readonly ttlMs=2000,private readonly maxPerMinute=100,private readonly maxEntries=100){}
+ private readonly fetcher:typeof fetch;
+ private readonly now:()=>number;
+ private readonly ttlMs:number;
+ private readonly maxPerMinute:number;
+ private readonly maxEntries:number;
+ constructor(fetcher:typeof fetch=fetch,now=()=>Date.now(),ttlMs=2000,maxPerMinute=100,maxEntries=100){
+  this.fetcher=fetcher;this.now=now;this.ttlMs=ttlMs;this.maxPerMinute=maxPerMinute;this.maxEntries=maxEntries;
+ }
  async get(coin:string):Promise<Book>{
   const key=hyperliquidCoinSchema.parse(coin),now=this.now();
   const cached=this.cache.get(key);
