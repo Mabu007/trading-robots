@@ -12,13 +12,27 @@ it('authenticates a Firebase token and streams a model response through the SDK 
  const unsigned=encode({alg:'RS256',kid:'test-key'})+'.'+encode({aud:'test-project',iss:'https://securetoken.google.com/test-project',sub:'test-user',iat:now,exp:now+300});
  const token=unsigned+'.'+sign('RSA-SHA256',Buffer.from(unsigned),privateKey).toString('base64url');
  process.env.FIREBASE_PROJECT_ID='test-project';process.env.VITE_FIREBASE_PROJECT_ID='test-project';
+ let bookRequests=0,toolCalls=0;
  const realFetch=globalThis.fetch;
  const mockFetch=vi.spyOn(globalThis,'fetch').mockImplementation(async(input,init)=>{
   const url=String(input);
   if(url.includes('securetoken@system.gserviceaccount.com'))return Response.json({keys:[jwk]});
+  if(url==='https://api.hyperliquid.xyz/info'){
+   bookRequests++;return Response.json({coin:'BTC',time:Date.now(),levels:[[{px:'99',sz:'1',n:1}],[{px:'101',sz:'2',n:1}]]});
+  }
   if(url==='https://openrouter.ai/api/v1/chat/completions'){
    const sent=JSON.parse(String(init?.body));
-   expect(sent.messages.some((x:{content:string})=>x.content==='Hello')).toBe(true);
+   const isBook=sent.messages.some((x:{content:unknown})=>x.content==='Book');
+   const seenTool=sent.messages.some((x:{role:string})=>x.role==='tool');
+   if(isBook&&!seenTool){
+    toolCalls++;
+    const events=[
+     {id:'test',object:'chat.completion.chunk',created:now,model:'test/model',choices:[{index:0,delta:{role:'assistant',tool_calls:[{index:0,id:'call_1',type:'function',function:{name:'getHyperliquidOrderBook',arguments:'{\"coin\":\"BTC\"}'}}]},finish_reason:null}]},
+     {id:'test',object:'chat.completion.chunk',created:now,model:'test/model',choices:[{index:0,delta:{},finish_reason:'tool_calls'}]}
+    ];
+    return new Response(events.map(x=>'data: '+JSON.stringify(x)+'\n\n').join('')+'data: [DONE]\n\n',{headers:{'Content-Type':'text/event-stream'}});
+   }
+   if(isBook&&seenTool)toolCalls++;
    const events=[
     {id:'test',object:'chat.completion.chunk',created:now,model:'test/model',choices:[{index:0,delta:{role:'assistant',content:'Hello trader'},finish_reason:null}]},
     {id:'test',object:'chat.completion.chunk',created:now,model:'test/model',choices:[{index:0,delta:{},finish_reason:'stop'}],usage:{prompt_tokens:3,completion_tokens:2,total_tokens:5}}
@@ -38,6 +52,8 @@ it('authenticates a Firebase token and streams a model response through the SDK 
   const chunks:string[]=[];
   const text=await postApiStream(url,{messages:[{role:'user',content:'Hello'}]},'AI',(_chunk,full)=>chunks.push(full),undefined,token);
   expect(text).toBe('Hello trader');expect(chunks.at(-1)).toBe('Hello trader');
+  const book=await postApiStream(url,{messages:[{role:'user',content:'Book'}],includeMarketContext:true},'AI',()=>undefined,undefined,token);
+  expect(book).toBe('Hello trader');expect(toolCalls).toBe(2);expect(bookRequests).toBe(1);
  }finally{
   await new Promise<void>(resolve=>server.close(()=>resolve()));load.mockRestore();mockFetch.mockRestore();
   if(oldProject===undefined)delete process.env.FIREBASE_PROJECT_ID;else process.env.FIREBASE_PROJECT_ID=oldProject;
