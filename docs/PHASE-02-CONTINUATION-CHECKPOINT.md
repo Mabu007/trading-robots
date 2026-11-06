@@ -23,3 +23,32 @@ On Node 24 in the isolated sandbox, the latest full npm test run passed 464 test
 - After parity, approvals, real-user verification and exact-head tests are complete, switch the SDK primary path, remove obsolete orchestration and perform one final authorized merge/deployment. Coordinate with the user about any explicit authorization needed for real financial writes; never place real-money test orders.
 
 This checkpoint is a recoverable partial branch, not permission to move to Phase 3 or claim the full directive complete.
+
+
+## Additional implementation in the safe continuation branch (do not mark Phase 2 complete)
+
+This branch has been extended in a separate named Vercel Sandbox without any Vercel project deployment or main-branch merge.
+
+### Implemented in this continuation
+- Owner-scoped SDK strategy/agent discovery with bounded, allowlisted metadata and private-tool capability selection. Unrelated public market research no longer receives private user tool schemas. Authorization remains independently enforced inside each tool.
+- Read-only broker connection metadata for PropDAO, cTrader and VALR. No credentials or financial order tools are exposed. Stored connection state is not represented as live broker readiness.
+- An exact-market, read-only Hyperliquid backtest tool using the existing isolated QuickJS WebAssembly runtime and deterministic R-based simulation. It verifies owned R2 code and Firestore metadata, rejects non-Hyperliquid brokers and venue mismatches, rejects missing candle ranges, and never submits orders. It is **disabled by default** behind server env `AI_SDK_SERVER_BACKTEST_ENABLED=true` and only offered for explicit backtest requests. It is not a general monetary or broker-accurate backtest engine.
+- An authenticated three-stage approval flow for SDK-generated saved strategy edits: stage code + expected hash, approve on a user-clicked review control, and apply with exact single-use approval consumption under the existing VALR/PropDAO bot locks. It verifies strategy ownership, venue and unchanged source at commit time. The legacy manual PATCH path remains untouched in behavior. The new path is **disabled by default** behind server env `AI_SDK_STRATEGY_APPROVAL_ENABLED=true`. No SDK tool can approve or execute orders.
+- Node 24 native TypeScript import compatibility for shared QuickJS strategy sandbox and simulation utilities, plus extensive ownership, data-integrity, expiry, concurrency and UI/runtime regression tests.
+
+### Validation of this continuation before publication
+- Node v24 sandbox `npm ci` succeeded.
+- `npm test` **487 passing tests / 93 files**.
+- `npm run build` passed.
+- `npm run check:runtime` passed.
+- `npm run worker:valr:build`, `npm run worker:valr:live:build`, `npm run worker:propdao:live:build` all passed as Wrangler dry runs.
+- No live-money orders, risk-limit changes or remote broker writes were performed.
+
+### Outstanding Phase 2 blockers and release guard
+- **Do not switch `VITE_AI_SDK_CHAT_ENABLED` to true in production yet.** The production legacy path remains the default. Real signed-in OpenRouter, Firebase, Composio, broker and R2 acceptance testing is still required.
+- The QuickJS tool is currently a bounded Hyperliquid OHLC R-based simulation, not real broker execution parity, monetary accounting, or persisted server-owned backtest results.
+- The new approval flow protects *reviewed strategy code changes on the SDK path* only. Do not claim it has been wired into live broker orders, live strategy deployments or risk changes; those remain behind the existing native approved workflows.
+- Approved code changes require explicit user UI action; never expose the approve/apply endpoints as LLM-callable tools.
+- GitHub Actions remained blocked by account billing in the previous handoff. Recheck before final merge; independent sandbox tests are not CI.
+- Check actual Cloudflare Workers, R2 datasets, auth and broker account configurations through authorized connectors before claiming external verification.
+- Keep automatic Vercel deployment disabled for `codex/phase2-complete`. Do not merge until all Phase 2 acceptance criteria are satisfied, or the user explicitly authorizes releasing a partial feature-flagged build.

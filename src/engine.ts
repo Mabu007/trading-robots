@@ -1,5 +1,5 @@
 import type { Candle,Result,Trade } from './types';
-import {nextOpenRewardGuard} from './entry-fill-guard';
+import {nextOpenRewardGuard} from './entry-fill-guard.ts';
 export type TradingCosts={spread:number;slippage:number;commissionR:number};
 export function simulate(candles:Candle[],decisions:any[],startingR=0,costs:TradingCosts={spread:0,slippage:0,commissionR:0},configuredRR?:number):Result{
  if(!Object.values(costs).every(v=>Number.isFinite(v)&&v>=0))throw Error('Invalid trading costs');

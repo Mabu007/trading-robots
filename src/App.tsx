@@ -787,7 +787,19 @@ SAVED CODE CATALOGUE (user-owned names/metadata; load the exact source before de
   const target=codeEditTarget;
   try{
    parseStrategyConfig(proposal);validateStrategySyntax(proposal);setBusy('sync');
-   await botMutations.current.run(botMutationKey(target.bot.id),()=>userBotRequest('/api/user-bots/'+encodeURIComponent(target.bot.id)+'/current','PATCH',{code:proposal,expectedCode:target.source}));
+   await botMutations.current.run(botMutationKey(target.bot.id),async()=>{
+    if(import.meta.env.VITE_AI_SDK_CHAT_ENABLED==='true'){
+      // A user-clicked review applies an exact, expiring, single-use server approval.
+      // The AI SDK cannot call this approve endpoint as a tool.
+      const base='/api/agent/strategy-reviews';
+      const staged=await userBotRequest<{intentId:string}>(base,'POST',{botId:target.bot.id,expectedCode:target.source,proposedCode:proposal});
+      const ref=base+'/'+encodeURIComponent(target.bot.id)+'/'+encodeURIComponent(staged.intentId);
+      await userBotRequest(ref+'/approve','POST',{});
+      await userBotRequest(ref+'/apply','POST',{});
+    }else{
+      await userBotRequest('/api/user-bots/'+encodeURIComponent(target.bot.id)+'/current','PATCH',{code:proposal,expectedCode:target.source});
+    }
+   });
    setCloudBots(items=>items.map(item=>item.id===target.bot.id?{...item,code:proposal}:item));
    setProposal('');setProposalSummary('');setCodeEditTarget(null);setAiError('');
    setChat(items=>[...items,{role:'assistant',content:'Updated **'+target.bot.name+'** in Code. The previous backtest remains a historical result; run a new test for the updated strategy.'}]);
