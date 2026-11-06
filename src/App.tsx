@@ -35,7 +35,7 @@ import { runBacktest } from './backtest';import { starterCode,parseStrategyConfi
 import type {AgentAuditEvent,PersistentAgent} from './agents';
 import { demoBots, type DemoBot } from './demos';
 import { connectFirebase, firebaseConfigured, readableFirebaseError, type BotVersion, type CloudBot, type CloudClient } from './firebase';
-import { AiOutputLimitError, joinAiContinuation, postApiJson, postApiStream, readApiJson } from './api';
+import { AiOutputLimitError, chatStreamPath, joinAiContinuation, postApiJson, postApiStream, readApiJson } from './api';
 import { DateRangePicker } from './components/ui/DateRangePicker';
 import { installChartTools } from './chart-tools';
 import { MonetaryControls, type SimulationSettings } from './components/MonetaryControls';
@@ -582,7 +582,7 @@ SAVED CODE CATALOGUE (user-owned names/metadata; load the exact source before de
    const controller=new AbortController(),timer=window.setTimeout(()=>controller.abort(),55_000);
    try{
     const token=await cloudClient!.getIdToken();
-    const segment=await postApiStream('/api/ai-sdk/stream',{messages:currentMessages,...(selectedAsset?{asset:selectedAsset}:{}),maxTokens,includeMarketContext:attempt===0&&includeMarketContext,researchMode:attempt===0&&allowWebResearch,...(modelOverride?{model:modelOverride}:{}),...(skillContext?{skillContext}:{})},'OpenRouter',(_chunk,partial)=>onText(joinAiContinuation(collected,partial)),controller.signal,token);
+    const segment=await postApiStream(chatStreamPath(import.meta.env.VITE_AI_SDK_CHAT_ENABLED),{messages:currentMessages,...(selectedAsset?{asset:selectedAsset}:{}),maxTokens,includeMarketContext:attempt===0&&includeMarketContext,researchMode:attempt===0&&allowWebResearch,...(modelOverride?{model:modelOverride}:{}),...(skillContext?{skillContext}:{})},'OpenRouter',(_chunk,partial)=>onText(joinAiContinuation(collected,partial)),controller.signal,token);
     return joinAiContinuation(collected,segment);
    }catch(error){
     if(!(error instanceof AiOutputLimitError)||!error.partialText.trim())throw error;
