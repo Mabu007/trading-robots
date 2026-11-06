@@ -6,7 +6,7 @@ const positive=z.string().refine(v=>v.trim()!=='' && Number.isFinite(Number(v)) 
 const level=z.object({px:positive,sz:positive,n:z.number().int().nonnegative()});
 const bookSchema=z.object({coin:hyperliquidCoinSchema,time:z.number().int().positive(),levels:z.tuple([z.array(level).max(20),z.array(level).max(20)])});
 
-export async function getHyperliquidBook(coin:string,fetcher:typeof fetch=fetch){
+async function fetchHyperliquidBook(coin:string,fetcher:typeof fetch){
  const symbol=hyperliquidCoinSchema.parse(coin);
  const response=await fetcher('https://api.hyperliquid.xyz/info',{
   method:'POST',headers:{'content-type':'application/json'},
@@ -28,4 +28,34 @@ export async function getHyperliquidBook(coin:string,fetcher:typeof fetch=fetch)
   receivedAt:new Date().toISOString(),bestBid,bestAsk,spread:bestBid!==null&&bestAsk!==null?bestAsk-bestBid:null,
   bidSize,askSize,imbalance:total>0?(bidSize-askSize)/total:null,bids,asks,
   limitations:'Visible resting orders only, up to 20 levels per side. Not hidden liquidity, stop orders, broker execution prices, or evidence of buyer/seller aggression.'};
+}
+
+// Per-process protection only. A globally shared limiter requires a centralized
+// service; this must not be represented as one across serverless instances.
+type Book=Awaited<ReturnType<typeof fetchHyperliquidBook>>;
+export class HyperliquidBookCache {
+ private cache=new Map<string,{value:Book;expires:number}>();
+ private pending=new Map<string,Promise<Book>>();
+ private requests:number[]=[];
+ constructor(private readonly fetcher:typeof fetch=fetch,private readonly now=()=>Date.now(),
+  private readonly ttlMs=2000,private readonly maxPerMinute=100,private readonly maxEntries=100){}
+ async get(coin:string):Promise<Book>{
+  const key=hyperliquidCoinSchema.parse(coin),now=this.now();
+  const cached=this.cache.get(key);
+  if(cached&&cached.expires>now)return cached.value;
+  const existing=this.pending.get(key);if(existing)return existing;
+  this.requests=this.requests.filter(t=>t>now-60000);
+  if(this.requests.length>=this.maxPerMinute)throw new Error('Hyperliquid request limit reached');
+  this.requests.push(now);
+  const request=fetchHyperliquidBook(key,this.fetcher).then(value=>{
+   if(this.cache.size>=this.maxEntries)this.cache.delete(this.cache.keys().next().value!);
+   this.cache.set(key,{value,expires:this.now()+this.ttlMs});return value;
+  }).finally(()=>this.pending.delete(key));
+  this.pending.set(key,request);
+  return request;
+ }
+}
+const sharedProcessCache=new HyperliquidBookCache();
+export async function getHyperliquidBook(coin:string,fetcher?:typeof fetch){
+ return fetcher?fetchHyperliquidBook(coin,fetcher):sharedProcessCache.get(coin);
 }
