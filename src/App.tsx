@@ -222,18 +222,38 @@ function App(){
   setBusy('conversation');setChatHydrated(false);setChatOperation(null);setPendingWatchAsset(null);setNewCodeTarget(null);setProposal('');
   try{
    if(chat.length&&chatHydrated)await cloudClient.saveConversation(conversationId,chat);
-   const messages=await cloudClient.loadConversation(id);
-   setConversationId(id);setChat(messages||[]);setConversationLibrary(null);setPrimaryArea('chat');setAgentWorkspace('overview');setChatCollapsed(false);setChatInput('');setSidebarOpen(window.innerWidth>720);
+   const record=await cloudClient.loadConversationRecord(id);
+   setConversationId(id);setConversationModel(record?.model||null);setChat(record?.messages||[]);setConversationLibrary(null);setPrimaryArea('chat');setAgentWorkspace('overview');setChatCollapsed(false);setChatInput('');setSidebarOpen(window.innerWidth>720);
   }catch(error){setCloudMessage(err(error));}finally{setChatHydrated(true);setBusy('');}
  };
- const startNewConversation=()=>{if(busy)return;const id=makeBotId();if(cloudClient){void switchConversation(id);return}setConversationId(id);setChat([]);setChatInput('');setPrimaryArea('chat');setAgentWorkspace('overview');setMobilePanel(null);setSidebarOpen(window.innerWidth>720)};
- useEffect(()=>{if(!authReady||!cloudClient)return;let active=true;setChatHydrated(false);cloudClient.loadConversation('general').then(messages=>{if(active){setConversationId('general');setChat(messages||[]);setChatHydrated(true)}}).catch(error=>{if(active){setCloudMessage(err(error));setChatHydrated(false)}});return()=>{active=false}},[authReady,cloudClient]);
+ const startNewConversation=()=>{if(busy)return;const id=makeBotId();if(cloudClient){void switchConversation(id);return}setConversationId(id);setConversationModel(null);setChat([]);setChatInput('');setPrimaryArea('chat');setAgentWorkspace('overview');setMobilePanel(null);setSidebarOpen(window.innerWidth>720)};
+ useEffect(()=>{if(!authReady||!cloudClient)return;let active=true;setChatHydrated(false);cloudClient.loadConversationRecord('general').then(record=>{if(active){setConversationId('general');setConversationModel(record?.model||null);setChat(record?.messages||[]);setChatHydrated(true)}}).catch(error=>{if(active){setCloudMessage(err(error));setChatHydrated(false)}});return()=>{active=false}},[authReady,cloudClient]);
  useEffect(()=>{watchNotifyEnabled.current=requestBrowserWatchAlerts},[requestBrowserWatchAlerts]);
  useEffect(()=>{watchSeen.current.clear();watchReady.current=false;if(!authReady||!cloudClient){setCodeWatches({});return}
   let active=true;const poll=async()=>{try{const result=await sharingRequest<{watches:CodeWatchStatus[]}>(cloudClient,'/api/code-watches');if(active){const events=(result.watches||[]).flatMap(w=>(w.events||[]).map(e=>({...e,watchName:String((w as any).name||w.id)})));const fresh=watchReady.current?events.filter(e=>!watchSeen.current.has(e.id)):[];for(const event of events)watchSeen.current.add(event.id);watchReady.current=true;setCodeWatches(Object.fromEntries((result.watches||[]).map(w=>[w.id,w])));if(fresh.length){const recent=fresh.slice(-3);setChat(messages=>[...messages,{role:'assistant',content:'**Code watch detection**\n'+recent.map(e=>'- '+e.watchName+' · '+e.kind+' · '+new Date(e.time*1000).toLocaleString()).join('\n')+'\n\nThese are monitor detections, not trades.'}]);if(watchNotifyEnabled.current&&typeof Notification!=='undefined'&&Notification.permission==='granted')for(const event of recent)try{new Notification('Trading Vibes · '+event.kind,{body:event.watchName+' · '+new Date(event.time*1000).toLocaleTimeString()})}catch{}}}}catch{if(active)setCodeWatches(current=>Object.fromEntries(Object.entries(current).map(([id,w])=>[id,{...w,verified:false}])))} };
   void poll();const timer=window.setInterval(()=>void poll(),60000);return()=>{active=false;window.clearInterval(timer)}
  },[authReady,cloudClient]);
  useEffect(()=>{if(!authReady||!cloudClient){setCodeAnalyses([]);return}let active=true;void cloudClient.listCodeAnalyses().then(items=>{if(active)setCodeAnalyses(items)}).catch(error=>{if(active)setCloudMessage(err(error))});return()=>{active=false}},[authReady,cloudClient]);
+ useEffect(()=>{if(!authReady||!cloudClient){setSkills([]);return}let active=true;cloudClient.listSkills().then(items=>{if(active)setSkills(items)}).catch(error=>{if(active)setCloudMessage('Skills could not be loaded: '+err(error))});return()=>{active=false}},[authReady,cloudClient,skillsRevision]);
+ const updateSkill=async(skill:UserSkill)=>{if(!cloudClient)throw Error('Sign in to save your skills.');await cloudClient.saveSkill(skill);setSkills(current=>[skill,...current.filter(item=>item.id!==skill.id)]);setSkillsRevision(v=>v+1)};
+ const deleteUserSkill=async(id:string)=>{if(!cloudClient)throw Error('Sign in to delete a skill.');await cloudClient.deleteSkill(id);setSkills(current=>current.filter(item=>item.id!==id));setSkillsRevision(v=>v+1)};
+ const updateConversationAction=async(action:ConversationAction,value:string)=>{
+  if(!cloudClient||busy)throw Error('This chat cannot be changed while another operation is running.');
+  if(action.type==='rename'){
+   await cloudClient.renameConversation(action.id,value);
+   setRecentChats(items=>items.map(item=>item.id===action.id?{...item,title:value.trim()}:item));
+   return;
+  }
+  setBusy('conversation');
+  try{
+   await cloudClient.deleteConversation(action.id);
+   setRecentChats(items=>items.filter(item=>item.id!==action.id));
+   if(conversationId===action.id){
+    const fresh=makeBotId();
+    setChatHydrated(false);setConversationId(fresh);setConversationModel(null);setChat([]);setChatInput('');setProposal('');setChatOperation(null);setPendingWatchAsset(null);setPrimaryArea('chat');setChatHydrated(true);
+   }
+  }finally{setBusy('')}
+ };
  useEffect(()=>{if(!authReady||!cloudClient){setRecentChats([]);return}let active=true;void cloudClient.listConversations().then(items=>{if(active)setRecentChats(items.slice(0,80))}).catch(()=>{if(active)setRecentChats([])});return()=>{active=false}},[authReady,cloudClient,conversationId,chat.length]);
  useEffect(()=>{if(outputTab!=='versions')return;if(!cloudClient){setVersionError('Sign in to see your saved versions.');return}let active=true;setVersionsLoading(true);setVersionError('');cloudClient.listVersions(draftId).then(items=>{if(active)setVersions(items)}).catch(error=>{if(active)setVersionError(error instanceof Error?error.message:'Could not load robot versions.')}).finally(()=>{if(active)setVersionsLoading(false)});return()=>{active=false}},[outputTab,draftId,cloudClient]);
  const log=(line:string)=>{const next=[...logsRef.current,`${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'})}  ${line}`];logsRef.current=next;setLogs(next)};
