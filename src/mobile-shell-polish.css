@@ -71,3 +71,11 @@
  .studio.tv-chat-first.tv-area-chat .chat-composer .tv-model-picker{max-width:85px}
 }
 @media(prefers-reduced-motion:reduce){.studio.tv-chat-first .tv-sidebar-chat-actions{transition:none}}
+
+/* Keep dark/light mobile headers visually continuous with their workspace. */
+:root[data-theme="dark"] .studio.tv-chat-first .topbar,
+:root[data-theme="light"] .studio.tv-chat-first .topbar{background:var(--tv-shell-bg)!important;border:0!important;box-shadow:none!important}
+.studio.tv-chat-first.tv-area-chat .chat-composer{overflow:visible!important}
+.studio.tv-chat-first.tv-area-chat .chat-model-picker,
+.studio.tv-chat-first.tv-area-chat .tv-model-picker{z-index:120}
+@media(min-width:721px){.studio.tv-chat-first.tv-area-chat .studio-body>.chat-side{overflow:visible}}
