@@ -58,3 +58,9 @@ This branch has been extended in a separate named Vercel Sandbox without any Ver
 - Confirmed real Hyperliquid completed BTC M1 data, 120 candles, evaluated by QuickJS sandbox with a WAIT-only simulation. No live orders.
 - Added signed HTTP fixture for staged review and server-run simulation, plus strict QA-UID-only test gating. Full test suite **493 passed across 95 files**, build/runtime passed. See `docs/PHASE-02-REAL-AUTH-VERIFICATION.md`.
 - Remaining live E2E: actual OpenRouter model tool use, new approval Firestore transaction and R2 integration under a deployed Vercel function, and deployed QuickJS route. Because the branch is not deployed and no authorized test model connection exists, **do not merge, enable global flags or mark Phase 2 complete**.
+
+### Protected QA preview checkpoint 2026-11-06
+Both manual protected previews built READY; no production merge or alias promotion.
+Test-only expiring signed-header free-model gate committed at 98edfabb; normal users are unaffected. Future branch preview QA flags reset to false.
+Preview cannot verify server Firebase Admin approval path because Admin credentials are production-only. The external disposable E2E command was blocked by execution safety before running.
+Local suite 495 tests / 95 files; build/runtime passed. Release remains HOLD. See PHASE-02-REAL-AUTH-VERIFICATION.md.

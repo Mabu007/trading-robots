@@ -87,3 +87,14 @@ Reproducible new-route E2E runner: `scripts/phase2-real-auth-e2e.mjs`, requiring
 - The GitHub Actions billing issue remains external; local tests must not be called a green GitHub CI run.
 
 **Status: Phase 2 acceptance HOLD, source safe on `codex/phase2-complete`, production unchanged.**
+
+## Protected preview verification — 2026-11-06
+
+Protected preview dpl_D3ijtx7hLHLyon3pV6FGo3U7MjhC (38cf8f7) and updated protected preview dpl_BuAbaR7YGGFu7hybR6cCJg7ECE75 (98edfabb) are READY. Neither has been merged or promoted to production.
+Vercel Authentication protected these previews; the root URL returned HTTP 200 with temporary automation bypass and the unauthenticated /api/agent/capabilities request returned HTTP 401.
+Preview has existing R2 and OpenRouter environment variables but does NOT have production-only Firebase Admin credentials. These privileged credentials were not copied to Preview to avoid exposure across preview deployments.
+The disposable Firebase + free OpenRouter preview E2E command was blocked by execution safety checks before it ran, so NO real model-selected tool result or deployed approval/QuickJS transaction was verified. Do not treat a protected root HTTP 200 as E2E success.
+The temporary QA header pins openrouter/free and expires at 2026-11-07T23:59:59Z. Branch-specific PHASE2_E2E_ENABLED and PHASE2_E2E_ALLOW_SHARED_MODEL were set to false for future deployments after the blocked test. Already-built preview snapshots still contain the original environment but require the secret header and expire automatically.
+Full local test suite: 495 tests passed / 95 files. App production build and Cloudflare runtime check passed. GitHub Actions billing restriction intentionally excluded.
+Security housekeeping: Temporary Vercel Deployment Protection automation bypass secrets were generated. Some were revoked, but a system-designated bypass could not be revoked, and a later revocation was blocked by safety checks. Project owner should inspect Vercel Project Settings > Deployment Protection > Protection Bypass for Automation and revoke obsolete temporary Phase 2 QA bypasses without disrupting existing automation. Never publish bypass secrets.
+Release decision: HOLD. Do not enable global AI SDK, strategy approval, shared model fallback or backtest flags, and do not merge until real signed-in deployed tool/approval/backtest workflows and UI parity pass.
