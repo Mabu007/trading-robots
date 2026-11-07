@@ -42,7 +42,8 @@ function verifiedChart(trace:ToolTrace[]){
  return chart;
 }
 function EvidenceChart({evidence,theme}:{evidence:MarketChartEvidence;theme:AppTheme}){
- const host=useRef<HTMLDivElement>(null);
+ const host=useRef<HTMLDivElement>(null),card=useRef<HTMLElement>(null);
+ useEffect(()=>{card.current?.scrollIntoView({block:'nearest',inline:'nearest'})},[]);
  const [unavailable,setUnavailable]=useState(false);
  useEffect(()=>{
   const el=host.current;
@@ -72,7 +73,7 @@ function EvidenceChart({evidence,theme}:{evidence:MarketChartEvidence;theme:AppT
   }catch{setUnavailable(true)}
   return()=>{observer?.disconnect();chart?.remove()};
  },[evidence,theme]);
- return <section className="vibes-market-chart" aria-label={evidence.coin+' '+evidence.timeframe+' price chart'}>
+ return <section ref={card} className="vibes-market-chart" aria-label={evidence.coin+' '+evidence.timeframe+' price chart'}>
   <header><div><strong>{evidence.coin} perpetual</strong><span>Hyperliquid · {evidence.timeframe.toUpperCase()} · completed candles</span></div>
    {evidence.trend==='uptrend'?<span className="vibes-chart-regime"><ArrowUpRight size={15}/> Uptrend</span>:evidence.trend==='downtrend'?<span className="vibes-chart-regime"><ArrowDownRight size={15}/> Downtrend</span>:null}</header>
   {unavailable?<p>Chart drawing is unavailable in this browser.</p>:<div className="vibes-chart-canvas" ref={host}/>}
