@@ -109,7 +109,7 @@ export function connectFirebase(): Promise<CloudClient | null> {
           venue: venueOf(bot.venue),
           prompt: bot.prompt.slice(0, 12_000),
           storage: { provider: 'r2', key: storageKey },
-          lastBacktest: bot.lastBacktest ?? null,
+          ...(bot.lastBacktest===undefined?{}:{lastBacktest:bot.lastBacktest}),
           updatedAt: storeSdk.serverTimestamp(),
           code: storeSdk.deleteField(),
         };
@@ -211,10 +211,10 @@ export function connectFirebase(): Promise<CloudClient | null> {
       },
       async listSkills(){
         const reference=storeSdk.collection(db,'users',await currentUserId(),'skills');
-        const snapshot=await storeSdk.getDocs(storeSdk.query(reference,storeSdk.orderBy('updatedAt','desc'),storeSdk.limit(100)));
+        const snapshot=await storeSdk.getDocs(reference);
         return snapshot.docs.flatMap((doc:any)=>{
           try{const data=doc.data();return [validateSkill({id:doc.id,name:String(data.name||''),description:String(data.description||''),instructions:String(data.instructions||''),triggers:Array.isArray(data.triggers)?data.triggers:[],enabled:data.enabled===true,alwaysOn:data.alwaysOn===true,updatedAt:data.updatedAt?.toMillis?.()})]}catch{return []}
-        });
+        }).sort((a:UserSkill,b:UserSkill)=>(b.updatedAt??0)-(a.updatedAt??0)||a.name.localeCompare(b.name));
       },
       async saveSkill(raw:UserSkill){
         const skill=validateSkill(raw);

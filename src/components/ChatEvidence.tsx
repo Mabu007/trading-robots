@@ -1,3 +1,5 @@
+import {displayTime} from '../display-time';
+import type {AppTheme} from '../theme';
 import {useEffect,useRef,useState} from 'react';
 import {ArrowDownRight,ArrowUpRight,ChartCandlestick,ChevronDown,Link2,Sparkles} from 'lucide-react';
 import {CandlestickSeries,createChart,createSeriesMarkers,type UTCTimestamp} from 'lightweight-charts';
@@ -39,24 +41,21 @@ function verifiedChart(trace:ToolTrace[]){
   !chart.candles.every((c,i)=>c&&[c.time,c.open,c.high,c.low,c.close].every(Number.isFinite)&&(i===0||c.time>chart.candles[i-1].time)))return null;
  return chart;
 }
-function localTime(value?:string){
- if(!value||!Number.isFinite(Date.parse(value)))return '';
- return new Intl.DateTimeFormat(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',timeZoneName:'short'}).format(new Date(value));
-}
-function EvidenceChart({evidence}:{evidence:MarketChartEvidence}){
+function EvidenceChart({evidence,theme}:{evidence:MarketChartEvidence;theme:AppTheme}){
  const host=useRef<HTMLDivElement>(null);
  const [unavailable,setUnavailable]=useState(false);
  useEffect(()=>{
   const el=host.current;
   if(!el)return;
-  const style=getComputedStyle(el);
-  const ink=style.color, grid=style.getPropertyValue('--tv-chart-grid').trim()||'#a0a0a028';
+  const dark=theme==='dark';
+  const ink=dark?'#b2c1bc':'#475a54',grid=dark?'#273832':'#e3ebe7';
   let chart:ReturnType<typeof createChart>|undefined;
   let observer:ResizeObserver|undefined;
   try{
-   chart=createChart(el,{width:el.clientWidth,height:252,layout:{background:{color:'transparent'},textColor:ink,attributionLogo:true},
+   chart=createChart(el,{width:el.clientWidth,height:252,layout:{background:{color:dark?'#15211e':'#fdfefd'},textColor:ink,attributionLogo:true},
+    localization:{timeFormatter:(time:unknown)=>typeof time==='number'?displayTime(time*1000):String(time)},
     grid:{vertLines:{color:grid},horzLines:{color:grid}},rightPriceScale:{borderColor:grid},timeScale:{borderColor:grid,timeVisible:evidence.timeframe!=='d1'}});
-   const series=chart.addSeries(CandlestickSeries,{upColor:'#159672',downColor:'#df5965',borderVisible:false,wickUpColor:'#159672',wickDownColor:'#df5965'});
+   const series=chart.addSeries(CandlestickSeries,{upColor:dark?'#4cca9d':'#137c5e',downColor:dark?'#f07d87':'#bd3f52',borderVisible:false,wickUpColor:dark?'#4cca9d':'#137c5e',wickDownColor:dark?'#f07d87':'#bd3f52'});
    const bars=evidence.candles.map(c=>({...c,time:c.time as UTCTimestamp}));
    series.setData(bars);
    if(bars.length>1){
@@ -72,33 +71,33 @@ function EvidenceChart({evidence}:{evidence:MarketChartEvidence}){
    observer.observe(el);
   }catch{setUnavailable(true)}
   return()=>{observer?.disconnect();chart?.remove()};
- },[evidence]);
+ },[evidence,theme]);
  return <section className="vibes-market-chart" aria-label={evidence.coin+' '+evidence.timeframe+' price chart'}>
   <header><div><strong>{evidence.coin} perpetual</strong><span>Hyperliquid · {evidence.timeframe.toUpperCase()} · completed candles</span></div>
    {evidence.trend==='uptrend'?<span className="vibes-chart-regime"><ArrowUpRight size={15}/> Uptrend</span>:evidence.trend==='downtrend'?<span className="vibes-chart-regime"><ArrowDownRight size={15}/> Downtrend</span>:null}</header>
   {unavailable?<p>Chart drawing is unavailable in this browser.</p>:<div className="vibes-chart-canvas" ref={host}/>}
-  <footer>Last close · {localTime(evidence.asOf)}{evidence.candles.length>1?' · Arrows mark the displayed high and low.':''}</footer>
+  <footer>Last close · {displayTime(evidence.asOf)}{evidence.candles.length>1?' · UTC axis · arrows mark the displayed high and low.':''}</footer>
  </section>;
 }
-export function ChatEvidence({trace,onAsk}:{trace:ToolTrace[];onAsk?:(question:string)=>void}){
+export function ChatEvidence({trace,onAsk,theme}:{trace:ToolTrace[];theme:AppTheme;onAsk?:(question:string)=>void}){
  const [showChart,setShowChart]=useState(false);
  const [showSources,setShowSources]=useState(false);
  const chart=verifiedChart(trace);
  const sources=sourceRows(trace);
  const snapshot=trace.find(item=>item.name==='getPublicMarketEvidence')?.output as {quote?:{coin?:string;asOf:string}}|undefined;
- const time=localTime(snapshot?.quote?.asOf??chart?.asOf);
+ const time=snapshot?.quote?.asOf??chart?.asOf;
  const other=trace.filter(item=>!['getPublicMarketEvidence','getWebResearchSources','requestConnectedAppAction'].includes(item.name));
  if(!chart&&!sources.length&&!other.length)return null;
  return <div className="vibes-evidence">
-  {time&&<div className="vibes-evidence-caption">Hyperliquid {snapshot?.quote?.coin??chart?.coin} · {snapshot?.quote?'midpoint':'last close'} · {time}</div>}
+  {time&&<div className="vibes-evidence-caption">Hyperliquid {snapshot?.quote?.coin??chart?.coin} · {snapshot?.quote?'midpoint':'last close'} · {displayTime(time)}</div>}
   <div className="vibes-evidence-actions">
    {chart&&<button type="button" aria-expanded={showChart} onClick={()=>setShowChart(v=>!v)}><ChartCandlestick size={15}/>{showChart?'Hide chart':'View chart'}</button>}
    {chart&&onAsk&&<button type="button" onClick={()=>onAsk('What’s driving '+chart.coin+' right now? Search recent news and distinguish confirmed drivers from possibilities.')}><Sparkles size={15}/>What’s driving it?</button>}
    {(sources.length>0||other.length>0)&&<button type="button" aria-expanded={showSources} onClick={()=>setShowSources(v=>!v)}><Link2 size={15}/>Sources<ChevronDown size={13}/></button>}
   </div>
-  {showChart&&chart&&<EvidenceChart evidence={chart}/>}
+  {showChart&&chart&&<EvidenceChart evidence={chart} theme={theme}/>}
   {showSources&&<div className="vibes-source-list">
-   {sources.map(source=><a key={source.url} href={source.url} target="_blank" rel="noopener noreferrer"><span><strong>{source.name}</strong>{source.title&&<span>{source.title}</span>}{source.asOf&&<small>{localTime(source.asOf)}</small>}</span><ArrowUpRight size={15}/></a>)}
+   {sources.map(source=><a key={source.url} href={source.url} target="_blank" rel="noopener noreferrer"><span><strong>{source.name}</strong>{source.title&&<span>{source.title}</span>}{source.asOf&&<small>{displayTime(source.asOf)}</small>}</span><ArrowUpRight size={15}/></a>)}
    {other.map(item=><details key={item.id}><summary>{toolTraceLabel(item.name)} · {item.state==='completed'?'Retrieved':'Checking'}</summary>
     {item.output!==undefined&&<pre>{JSON.stringify(item.output,null,2)}</pre>}
     {item.outputTruncated&&<p>Full tool output exceeded the evidence display size.</p>}

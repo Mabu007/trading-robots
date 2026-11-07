@@ -4,7 +4,6 @@ import {z} from 'zod';
 import type {RecordStore} from './firestore-store.ts';
 import {intervalMs,isTimeframe} from './market-data.ts';
 import type {OpenRouterAccounts} from './openrouter-account.ts';
-import {telegramWatchOutput,validateTelegramWatchAccount} from './composio-apps.ts';
 
 export const watchOutputSchema=z.discriminatedUnion('type',[
  z.object({type:z.literal('log')}).strict(),
@@ -31,7 +30,7 @@ export function watchOutputs(app:Express,store:RecordStore,accounts:OpenRouterAc
   if(typeof uid!=='string'||uid.length>128||typeof id!=='string'||!/^analysis-[a-z0-9_-]{8,110}$/.test(id)||!event.success||!event.data.id.startsWith(id+':'+event.data.time+':'))return res.status(400).json({error:'Invalid monitor event.'});
   try{
    const plan=await read(uid,id);
-   if(!plan?.active||plan.uid!==uid||plan.id!==id||plan.startedAt!==outputVersion||plan.output.type==='log')return res.json({status:'skipped'});
+   if(!plan?.active||plan.uid!==uid||plan.id!==id||plan.startedAt!==outputVersion||plan.output.type!=='ai')return res.json({status:'skipped'});
    const now=Date.now(),time=event.data.time*1000;
    if(!isTimeframe(plan.timeframe)||time+intervalMs[plan.timeframe]<=plan.startedAt||time>now||now-time>3_600_000)return res.json({status:'skipped'});
    const key='serverWatchOutputLimits/'+scope(uid,id);
@@ -50,11 +49,6 @@ export function watchOutputs(app:Express,store:RecordStore,accounts:OpenRouterAc
    try{
     const current=await read(uid,id);
     if(!current?.active||current.startedAt!==plan.startedAt)throw Error('Monitor authorization changed.');
-    if(plan.output.type==='telegram'){
-     const sent=await telegramWatchOutput(uid,plan.output.account,plan.output.destination,text);
-     if(!sent.available)throw Error('Telegram did not confirm delivery.');
-     result='Telegram delivery confirmed.';
-    }else{
      const account=await accounts.load(uid);
      if(!account)throw Error('OpenRouter connection unavailable.');
      const response=await fetch('https://openrouter.ai/api/v1/chat/completions',{method:'POST',headers:{Authorization:'Bearer '+account.apiKey,'Content-Type':'application/json'},signal:AbortSignal.timeout(15_000),
@@ -62,7 +56,6 @@ export function watchOutputs(app:Express,store:RecordStore,accounts:OpenRouterAc
      const body=await response.json().catch(()=>null) as {choices?:{message?:{content?:unknown}}[]}|null;
      result=typeof body?.choices?.[0]?.message?.content==='string'?body.choices[0].message.content.trim().slice(0,1200):'';
      if(!response.ok||!result)throw Error('AI did not return a summary.');
-    }
     await store.put(receipt,{uid,watchId:id,eventId:event.data.id,at:now,state:'completed',result});
     return res.json({status:'completed',result});
    }catch{
@@ -73,7 +66,7 @@ export function watchOutputs(app:Express,store:RecordStore,accounts:OpenRouterAc
  });
  return {
   async start(uid:string,id:string,asset:string,timeframe:string,output:WatchOutput){
-   if(output.type==='telegram')await validateTelegramWatchAccount(uid,output.account);
+   if(output.type==='telegram')throw Error('Telegram delivery is paused. Choose a recorded detection or an AI summary.');
    if(output.type==='ai'&&!await accounts.load(uid))throw Error('Connect your OpenRouter account before enabling AI monitor summaries.');
    const startedAt=Date.now();
    await store.put(outputPath(uid,id),{uid,id,asset,timeframe,startedAt,active:true,output});

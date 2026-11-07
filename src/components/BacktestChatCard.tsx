@@ -1,3 +1,4 @@
+import {displayTime} from '../display-time';
 import {Activity, ChevronDown, Sparkles} from 'lucide-react';
 
 export type BacktestCardData={
@@ -10,7 +11,7 @@ const fmt=(value:unknown,unit='')=>typeof value==='number'&&Number.isFinite(valu
 export function BacktestChatCard({data,onInspect,onDeploy}:{data:BacktestCardData;onInspect?:(tradeId:number)=>void;onDeploy?:()=>void}){
  const m=data.metrics;
  return <section className="tv-backtest-chat-card" aria-label={'Backtest results for '+data.name}>
-  <header><span><Activity size={17}/> Backtest completed</span><small>{data.completedAt?new Date(data.completedAt).toLocaleString():'Saved result'}</small></header>
+  <header><span><Activity size={17}/> Backtest completed</span><small>{data.completedAt?displayTime(data.completedAt):'Saved result'}</small></header>
   <div className="tv-backtest-chat-caption"><strong>{data.name}</strong><span>{data.asset} · {data.from} to {data.to} · {data.venue}</span></div>
   <div className="tv-backtest-chat-metrics">
    <div><small>Net result</small><strong className={typeof m.netReturn==='number'&&m.netReturn<0?'loss':'gain'}>{fmt(m.netReturn,'R')}</strong></div>

@@ -1,3 +1,4 @@
+import {displayTime} from '../display-time';
 import {useMemo} from 'react';
 import {defineRegistry,Renderer,StateProvider,VisibilityProvider,ActionProvider} from '@json-render/react';
 import {Activity,AlertTriangle,BookOpen,ChartCandlestick,Clock3,ExternalLink,FileCheck,Newspaper,ShieldCheck} from 'lucide-react';
@@ -15,7 +16,7 @@ const layout:Record<Kind,TradingComponentName>={
 const num=(v:unknown,decimals=4)=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('en-US',{maximumFractionDigits:decimals}):typeof v==='string'&&v.trim()&&Number.isFinite(Number(v))?Number(v).toLocaleString('en-US',{maximumFractionDigits:decimals}):'—';
 const str=(v:unknown)=>typeof v==='string'&&v.trim()?v.trim():'—';
 const first=(r:Evidence,...keys:string[])=>keys.map(k=>r[k]).find(v=>v!==null&&v!==undefined&&v!=='');
-const date=(v:unknown)=>{if(typeof v!=='number'&&typeof v!=='string')return '—';const ms=typeof v==='number'?v:/^\d+$/.test(v)?Number(v):Date.parse(v);return Number.isFinite(ms)&&!Number.isNaN(new Date(ms).getTime())?new Date(ms).toLocaleString('en-GB',{timeZone:'UTC',dateStyle:'medium',timeStyle:'short'})+' UTC':'—';};
+const date=(v:unknown)=>typeof v==='number'||typeof v==='string'&&/^\d+$/.test(v)?displayTime(Number(v)<1e11?Number(v)*1000:Number(v)):typeof v==='string'?displayTime(v):'—';
 function Section({title,source,children}:{title:string;source?:string;children:React.ReactNode}){return <section className="tv-viz" aria-label={title}><header className="tv-viz-head"><strong>{title}</strong>{source&&<small>{source}</small>}</header>{children}</section>}
 function Missing({message}:{message:string}){return <p className="tv-viz-missing"><AlertTriangle size={15}/>{message}</p>}
 function Metrics({items}:{items:{label:string;value:string;hint?:string}[]}){return <div className="tv-viz-metrics">{items.map(item=><div key={item.label}><small>{item.label}</small><strong>{item.value}</strong>{item.hint&&<span>{item.hint}</span>}</div>)}</div>}
@@ -26,7 +27,7 @@ function Trade({record}:{record:Evidence}){
  const change=canCheck?(side==='SELL'?Number(entry)-Number(exit):Number(exit)-Number(entry))*Number(q):null;
  return <Section title="Verified trade inspection" source={str(record.source)}><div className="tv-viz-caption">{str(record.venue).toUpperCase()} · {str(record.asset)} · {str(record.tradeKind)}</div>
  <Metrics items={[{label:'Reported PnL',value:num(pnl),hint:'Currency/gross-net definition unverified'},{label:'Side',value:side},{label:'Quantity',value:num(q,7)},{label:'Reported fee',value:num(fee)}]}/>
- <div className="tv-viz-fields"><span>Entry<strong>{num(entry,7)}</strong></span><span>Exit<strong>{num(exit,7)}</strong></span><span>Exit reason<strong>{str(first(r,'reason','closeReason','exitReason'))}</strong></span><span>Closed / UTC<strong>{date(first(r,'closedAt','closeTime','closeTimestamp'))}</strong></span></div>
+ <div className="tv-viz-fields"><span>Entry<strong>{num(entry,7)}</strong></span><span>Exit<strong>{num(exit,7)}</strong></span><span>Exit reason<strong>{str(first(r,'reason','closeReason','exitReason'))}</strong></span><span>Closed<strong>{date(first(r,'closedAt','closeTime','closeTimestamp'))}</strong></span></div>
  {canCheck&&<p className="tv-viz-foot">Price × quantity calculation: {num(change,7)} before fees. Provider PnL may use contract multipliers, currency conversions, funding or fee conventions not supplied here.</p>}
  <details><summary>Provider evidence</summary><p>Record ID: {str(first(r,'id','recordId','orderId','tradeId'))}</p><p>Opened: {date(first(r,'openedAt','openTime','entryTime'))}. Closed: {date(first(r,'closedAt','closeTime','exitTime'))}.</p><p>{str(record.limitations)}</p></details></Section>;
 }

@@ -17,6 +17,7 @@
   ],
   "git": {
     "deploymentEnabled": {
+      "codex/public-launch-polish": false,
       "codex/vibes-chat-release": false,
       "codex/phase2-complete": false,
       "codex/propdao-research-connections": false,
