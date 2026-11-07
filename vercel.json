@@ -18,6 +18,7 @@
   "git": {
     "deploymentEnabled": {
       "codex/phase2-complete": false,
+      "codex/propdao-research-connections": false,
       "codex/phase2-unified-runtime-20261107": false,
       "codex/phase2-strategy-validation-20261107": false,
       "codex/phase2-auth-rollout-validation-20261106": false

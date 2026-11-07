@@ -1,7 +1,8 @@
+import {watchOutputSchema,type WatchOutput} from './watch-outputs.ts';
 import type {Express,Request,Response} from 'express';
 import type {RecordStore} from './firestore-store.ts';
 
-type Deps={uid:(req:Request,res:Response)=>Promise<string|null>;store:RecordStore;request?:typeof fetch;env?:NodeJS.ProcessEnv};
+type Deps={uid:(req:Request,res:Response)=>Promise<string|null>;store:RecordStore;outputs?:{start:(uid:string,id:string,asset:string,timeframe:string,output:WatchOutput)=>Promise<number>;stop:(uid:string,id:string)=>Promise<void>};request?:typeof fetch;env?:NodeJS.ProcessEnv};
 const watchId=(v:string)=>/^analysis-[a-z0-9_-]{8,110}$/.test(v);
 const coins:Record<string,string>={GOLDUSDC:'xyz:GOLD',BTCUSDC:'BTC',BTCUSDT:'BTC',ETHUSDC:'ETH',ETHUSDT:'ETH',SOLUSDC:'SOL',XRPUSDC:'XRP'};
 export function codeWatchRoutes(app:Express,deps:Deps){
@@ -14,7 +15,7 @@ export function codeWatchRoutes(app:Express,deps:Deps){
   if(!response.ok)throw Error('Code monitor did not confirm '+action+' (HTTP '+response.status+').');
   const json=await response.json().catch(()=>null) as any;
   if(!json||typeof json.running!=='boolean'||!Array.isArray(json.events))throw Error('Code monitor returned an invalid status.');
-  return {running:json.running,verified:true,lastCandle:json.lastCandle??null,lastCheck:json.lastCheck??null,nextAlarm:json.nextAlarm??null,error:typeof json.error==='string'?json.error.slice(0,200):null,events:json.events.slice(-50)};
+  return {running:json.running,verified:true,outputReady:json.outputReady===true,lastCandle:json.lastCandle??null,lastCheck:json.lastCheck??null,nextAlarm:json.nextAlarm??null,error:typeof json.error==='string'?json.error.slice(0,200):null,events:json.events.slice(-50)};
  };
  const authenticate=async(req:Request,res:Response)=>{res.setHeader('Cache-Control','private,no-store');return deps.uid(req,res)};
  app.get('/api/code-watches',async(req,res)=>{
@@ -41,6 +42,7 @@ export function codeWatchRoutes(app:Express,deps:Deps){
    const path='users/'+uid+'/codeWatches/'+id;
    if(action==='stop'){
     const saved=await deps.store.get(path);if(!saved)return res.status(404).json({error:'No saved Code watcher was found.'});
+    await deps.outputs?.stop(uid,id);
     const state=await call(uid,id,'stop');
     await deps.store.put(path,{...saved,running:false,lastVerifiedAt:Date.now()});
     return res.json({id,...state});
@@ -51,10 +53,20 @@ export function codeWatchRoutes(app:Express,deps:Deps){
    const records=await deps.store.query('users/'+uid+'/codeWatches');
    if(!records.some(r=>r.id===id)&&records.length>=10)return res.status(409).json({error:'Maximum of ten Code monitors per account.'});
    const watch={uid,id,kind:asset.kind,asset:asset.asset,timeframe:asset.timeframe,coin:coins[String(asset.asset).toUpperCase()],lookback:Math.max(3,Math.min(25,Number(asset.lookback)||5))};
-   const state=await call(uid,id,'start',watch);
-   if(!state.running)throw Error('Code monitor did not confirm a running alarm.');
+   const output=watchOutputSchema.safeParse(req.body?.output??{type:'log'});
+   if(!output.success)return res.status(400).json({error:'Choose a valid monitor output and destination.'});
+   if(output.data.type!=='log'&&(req.body?.outputConfirm!=='AUTHORIZE MONITOR OUTPUT'||!deps.outputs||env.CODE_WATCH_OUTPUTS_ENABLED!=='true'))return res.status(503).json({error:'Recurring AI and connected-app monitor outputs are unavailable or unconfirmed.'});
+   if(!config())throw Error('Code monitoring runtime is not enabled. No watch has been started.');
+   const outputVersion=await deps.outputs?.start(uid,id,watch.asset,watch.timeframe,output.data);
+   const state=await call(uid,id,'start',{...watch,emitOutput:output.data.type!=='log',outputVersion}).catch(async error=>{await deps.outputs?.stop(uid,id).catch(()=>{});throw error;});
+   if(!state.running||output.data.type!=='log'&&!state.outputReady){
+    await deps.outputs?.stop(uid,id).catch(()=>undefined);
+    await call(uid,id,'stop').catch(()=>undefined);
+    throw Error('Code monitor did not confirm the requested runtime and output.');
+   }
    try{await deps.store.put(path,{id,name:asset.name,asset:asset.asset,kind:asset.kind,createdAt:Date.now(),lastVerifiedAt:Date.now()})}
    catch{ // Authorization succeeded but storing the pointer failed; revoke the monitor.
+    await deps.outputs?.stop(uid,id).catch(()=>undefined);
     await call(uid,id,'stop').catch(()=>undefined);
     throw Error('Code watcher registration failed. Stop requested; verify status before trying again.');
    }

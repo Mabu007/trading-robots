@@ -3,6 +3,8 @@ import { countObservedGaps, intervalMs, isTimeframe, isValidCandle, type MarketC
 // Public read-only APIs. Account access and order submission are deliberately
 // separate from market discovery and are not enabled by these adapters.
 export class VenueMarketData {
+  private historyCache=new Map<string,{until:number;value:Awaited<ReturnType<VenueMarketData['loadHyperliquidCandles']>>}>();
+  private inFlight=new Map<string,ReturnType<VenueMarketData['loadHyperliquidCandles']>>();
   private metadataCache=new Map<string,{until:number;value:any}>();
   private request: typeof fetch;
   private clock: () => number;
@@ -55,19 +57,39 @@ export class VenueMarketData {
     const start = typeof from === 'string' ? Date.parse(from) : NaN, requestedEnd = typeof to === 'string' ? Date.parse(to) : NaN;
     const period = intervalMs[timeframe], end = Math.min(requestedEnd, Math.floor(this.clock()/period)*period);
     if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end || start % period || end % period || (end-start)/period > 5000) throw new Error('Choose an aligned range of at most 5,000 completed candles.');
+    const key=JSON.stringify([asset,timeframe,start,end]);
+    const cached=this.historyCache.get(key);
+    if(cached&&cached.until>this.clock())return cached.value;
+    const pending=this.inFlight.get(key);
+    if(pending)return pending;
+    const job=this.loadHyperliquidCandles(asset,timeframe,start,end);
+    this.inFlight.set(key,job);
+    try{
+     const value=await job;
+     if(value.candles.length){
+      this.historyCache.delete(key);
+      this.historyCache.set(key,{until:this.clock()+(value.missingCandles?8_000:60_000),value});
+      while(this.historyCache.size>24)this.historyCache.delete(this.historyCache.keys().next().value!);
+     }
+     return value;
+    }finally{this.inFlight.delete(key)}
+  }
+  private async loadHyperliquidCandles(asset:string,timeframe:Parameters<typeof countObservedGaps>[1],start:number,end:number){
+    const period=intervalMs[timeframe];
     const interval: Record<string,string> = {m1:'1m',m5:'5m',m15:'15m',m30:'30m',h1:'1h',h4:'4h',d1:'1d'};
     const rows = await this.hyper({type:'candleSnapshot', req:{coin:asset,interval:interval[timeframe],startTime:start,endTime:end-1}});
-    if (!Array.isArray(rows)) throw new Error('Hyperliquid returned invalid candles.');
+    if (!Array.isArray(rows)||rows.length>5000) throw new Error('Hyperliquid returned invalid candles.');
     const unique = new Map<number,MarketCandle>();
     for (const row of rows) {
-      const candle = {time:Number(row.t)/1000,open:Number(row.o),high:Number(row.h),low:Number(row.l),close:Number(row.c),volume:Number(row.v)};
-      if (row.s !== asset || row.i !== interval[timeframe] || !isValidCandle(candle) || Number(row.t)%period) throw new Error('Hyperliquid returned invalid or mismatched candles.');
+      const number=(value:unknown)=>typeof value==='number'||typeof value==='string'&&value.trim()?Number(value):NaN;
+      const candle = {time:number(row?.t)/1000,open:number(row?.o),high:number(row?.h),low:number(row?.l),close:number(row?.c),volume:number(row?.v)};
+      if (row?.s !== asset || row.i !== interval[timeframe] || !isValidCandle(candle) || Number(row.t)%period) throw new Error('Hyperliquid returned invalid or mismatched candles.');
       if (row.t < start || row.t >= end) continue;
       const previous=unique.get(candle.time);
       if (previous && JSON.stringify(previous)!==JSON.stringify(candle)) throw new Error('Hyperliquid returned conflicting candles.');
       unique.set(candle.time,candle);
     }
     const candles=[...unique.values()].sort((a,b)=>a.time-b.time);
-    return {source:'Hyperliquid',asset,timeframe,candles,expectedCandles:(end-start)/period,missingCandles:(end-start)/period-candles.length,observedGaps:countObservedGaps(candles,timeframe),endExclusive:true};
+    return {source:'Hyperliquid',asset,timeframe,candles,rangeStart:new Date(start).toISOString(),rangeEndExclusive:new Date(end).toISOString(),fetchedAt:new Date(this.clock()).toISOString(),expectedCandles:(end-start)/period,missingCandles:(end-start)/period-candles.length,observedGaps:countObservedGaps(candles,timeframe),endExclusive:true};
   }
 }
