@@ -17,7 +17,7 @@ it('delivers only a new authorized detection once and stops further outputs afte
  };
  const originFetch=fetch;
  const model=vi.fn(async()=>Response.json({choices:[{message:{content:'A Gold detection was recorded.'}}]}));
- vi.stubGlobal('fetch',(url:RequestInfo|URL,options?:RequestInit)=>String(url).startsWith('https://openrouter.ai/')?model():originFetch(url,options));
+ vi.stubGlobal('fetch',(url:Parameters<typeof fetch>[0],options?:RequestInit)=>String(url).startsWith('https://openrouter.ai/')?model():originFetch(url,options));
  const app=express().use(express.json());
  const outputs=watchOutputs(app,store,{load:async()=>({apiKey:'test-only',model:'fixture'})} as unknown as OpenRouterAccounts);
  const server=app.listen(0);
