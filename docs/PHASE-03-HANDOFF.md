@@ -1,3 +1,9 @@
+# Phase 3 market-data continuation (2026-11-07)
+
+See PHASE-03-MARKET-DATA-HANDOFF.md for the new implementation, tests, and outstanding external gates. The Phase 2 exception below remains binding; feature flags stay off.
+
+---
+
 # Phase 3 handoff — Phase 2 acceptance exception
 
 Date: 2026-11-06. Repository: Mabu007/trading-robots. Release source: PR #67, branch `codex/phase2-auth-rollout-validation-20261106`.

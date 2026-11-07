@@ -126,6 +126,22 @@ export async function writeR2Object(
   }
 }
 
+/** Atomic create-once; R2 documents If-None-Match:* as a committed-state CAS.
+ * Existing objects are never modified; callers must still check conflicting history. */
+export async function writeR2ObjectIfAbsent(key: string, body: string): Promise<boolean> {
+  const { config, client } = getConnection();
+  try {
+    await client.send(new PutObjectCommand({
+      Bucket: config.bucket, Key: key, Body: body,
+      ContentType: 'application/json; charset=utf-8', IfNoneMatch: '*',
+    }));
+    return true;
+  } catch (error: any) {
+    if (error?.name === 'PreconditionFailed' || error?.$metadata?.httpStatusCode === 412) return false;
+    throw error;
+  }
+}
+
 export async function deleteR2Object(key: string): Promise<void> {
   const { config, client } = getConnection();
   await client.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key }));

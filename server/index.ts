@@ -4,6 +4,9 @@ import {streamText,tool,stepCountIs} from 'ai';
 import {createOpenAICompatible} from '@ai-sdk/openai-compatible';
 import {z} from 'zod';
 import {getHyperliquidBook,hyperliquidCoinSchema} from './hyperliquid-book.ts';
+import {hyperliquidFetch} from './market-hub-client.ts';
+import {marketV3Routes} from './market-v3-routes.ts';
+import {R2MarketHistory} from './r2-market-history.ts';
 import {openRouterOAuthRoutes} from './openrouter-oauth.ts';
 import {ctraderRoutes,CTraderService} from './ctrader.ts';
 import {selectOpenRouterApiKey} from './openrouter-credentials.ts';
@@ -47,9 +50,9 @@ import { readOwnedBotAsset } from './firebase-owned-bot.ts';
 
 const app = express();
 const valrMarketData = new ValrMarketData();
-const venueMarketData = new VenueMarketData();
+const venueMarketData = new VenueMarketData(hyperliquidFetch());
 const dwellirHistory = new DwellirHistory();
-app.use(['/api/marketplace','/api/economy','/api/valr','/api/venues','/api/openrouter','/api/chat','/api/code-watches','/api/apps','/api/ai-sdk','/api/news','/api/agent'],requestLimit);
+app.use(['/api/marketplace','/api/economy','/api/valr','/api/venues','/api/openrouter','/api/chat','/api/code-watches','/api/apps','/api/ai-sdk','/api/news','/api/agent','/api/market/v3'],requestLimit);
 app.use(express.json({ limit: '10mb' }));
 
 
@@ -152,6 +155,8 @@ async function firebaseUidOrReply(req: express.Request, res: express.Response): 
     return null;
   }
 }
+
+marketV3Routes(app,firebaseUidOrReply,undefined,new R2MarketHistory(undefined,venueMarketData));
 
 const propdaoAccounts=new PropDAOAccounts({read:readR2Object,write:writeR2Object,remove:deleteR2Object});
 
@@ -835,7 +840,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
       getHyperliquidOrderBook:tool({
         description:'Read a public Hyperliquid L2 snapshot for an exact Hyperliquid identifier. This is visible resting liquidity, not broker fills, hidden orders or trade aggression.',
         inputSchema:z.object({coin:hyperliquidCoinSchema}),
-        execute:async({coin})=>{try{return {available:true,...await getHyperliquidBook(coin)}}catch{return {available:false,provider:'Hyperliquid',coin}}}
+        execute:async({coin})=>{try{return {available:true,...await getHyperliquidBook(coin,hyperliquidFetch())}}catch{return {available:false,provider:'Hyperliquid',coin}}}
       })
     }:undefined;
     const clientInstructions=aiMessages.filter((message:any)=>message.role==='system').map((message:any)=>message.content).join('\n\n');
