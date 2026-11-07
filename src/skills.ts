@@ -23,10 +23,12 @@ export function chooseSkills(message:string,skills:UserSkill[],max=3):UserSkill[
 export function skillPrompt(message:string,skills:UserSkill[]):string{
  const chosen=chooseSkills(message,skills);
  if(!chosen.length)return '';
- let used=0;
- return chosen.map(s=>{
-   const instructions=s.instructions.slice(0,Math.max(0,5500-used));
-   used+=instructions.length;
-   return '\n### '+s.name.replace(/[<>{}]/g,'')+'\n'+instructions;
- }).join('\n').slice(0,7000);
+ const maxInstructions=5500;
+ let remaining=maxInstructions;
+ return chosen.map((skill,index)=>{
+   const share=Math.floor(remaining/(chosen.length-index));
+   const instructions=skill.instructions.slice(0,share);
+   remaining-=instructions.length;
+   return '\n### '+skill.name.replace(/[<>{}]/g,'')+'\n'+instructions;
+ }).join('\n');
 }
