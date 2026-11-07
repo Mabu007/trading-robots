@@ -1,5 +1,5 @@
 import {describe,it,expect,vi} from 'vitest';
-import {researchRequested,topicForResearch,normaliseHeadlines,parseNewsRss,candleRegime,researchBrief,biquoteSymbol,biquoteSnapshot,biquoteCandles} from './ai-research.ts';
+import {researchRequested,topicForResearch,normaliseHeadlines,parseNewsRss,candleRegime,researchBrief} from './ai-research.ts';
 
 const now=Date.parse('2026-11-04T13:00:00Z');
 describe('read-only AI web research',()=>{
@@ -45,30 +45,21 @@ describe('read-only AI web research',()=>{
   expect(result).toMatchObject({hasNews:true,hasCandles:true});
   expect(result.context).toContain('https://example.org/gold');
   expect(result.context).toContain('Hyperliquid xyz:GOLD');
-  expect(result.context).toContain('NOT spot XAUUSD');
+  expect(result.context).toContain('does not establish a spot or broker fill');
   expect(market.hyperliquidCandles).toHaveBeenCalledWith(expect.objectContaining({asset:'xyz:GOLD',timeframe:'h1'}));
  });
- it('uses a timestamped BiQuote reference for general markets and does not confuse broker quotes',async()=>{
-  expect(biquoteSymbol('How is gold looking today?')).toBe('XAUUSD');
-  expect(biquoteSymbol('PropDAO GOLDUSDC price')).toBeNull();
-  expect(researchRequested('What is the EURUSD price?')).toBe(true);
-  const request=vi.fn(async()=>Response.json({symbol:'XAUUSD',bid:2500,ask:2502,timestamp:'2026-11-04T12:59:40Z',marketState:'open',stale:false}));
-  const result=await biquoteSnapshot('XAUUSD',request as typeof fetch,now);
-  expect(result).toContain('bid 2500, ask 2502');
-  expect(result).toContain('2026-11-04T12:59:40.000Z');
-  expect(result).toContain('not a broker fill');
-  const stale=await biquoteSnapshot('XAUUSD',request as typeof fetch,now+10*60000);
-  expect(stale).toContain('stale; last available quote');
-  expect(await biquoteSnapshot('../secret',request as typeof fetch,now)).toBeNull();
- });
- it('uses only fresh completed BiQuote candles for a reference trend',async()=>{
-  const end=Math.floor(now/3600000)*3600000;
-  const bars=Array.from({length:80},(_,i)=>{const n=100+i*.25;return {openTime:new Date(end-(80-i)*3600000).toISOString(),open:n,high:n+.4,low:n-.2,close:n+.1,isOpen:false}});
-  bars.push({...bars.at(-1)!,openTime:new Date(end).toISOString(),close:999999,isOpen:true});
-  const request=vi.fn(async()=>Response.json({symbol:'XAUUSD',interval:'1h',bars}));
-  const text=await biquoteCandles('XAUUSD',request as typeof fetch,now);
-  expect(text).toContain('uptrend');expect(text).not.toContain('999999');expect(text).toContain('not a broker price');
-  expect(await biquoteCandles('XAUUSD',request as typeof fetch,now+12*3600000)).toBeNull();
+ it('uses a fresh public Hyperliquid book and completed H4 candles for a quick check',async()=>{
+  const period=4*3600000,end=Math.floor(now/period)*period;
+  const candles=Array.from({length:96},(_,i)=>({time:(end-(96-i)*period)/1000,open:100+i,close:101+i,high:102+i,low:99+i}));
+  const request=vi.fn();
+  const book=vi.fn(async()=>({bestBid:195,bestAsk:197,asOf:new Date(now-5000).toISOString()}));
+  const result=await researchBrief({query:'How is BTC doing on the 4H chart?'},{request,market:{hyperliquidCandles:async()=>({candles})},book:book as any,now:()=>now});
+  expect(request).not.toHaveBeenCalled();
+  expect(result).toMatchObject({hasQuote:true,hasCandles:true,snapshotOnly:true,quote:{mid:196},chart:{coin:'BTC',timeframe:'h4',trend:'uptrend'}});
+  expect(result.chart?.candles).toHaveLength(72);
+  expect(result.sources[0].url).toBe('https://app.hyperliquid.xyz/trade/BTC');
+  const stale=await researchBrief({query:'How is BTC doing?'},{book:book as any,now:()=>now+120000});
+  expect(stale.hasQuote).toBe(false);
  });
  it('does not claim a live regime if public market data is unavailable',async()=>{
   const request=vi.fn(async()=>{throw Error('network offline')});

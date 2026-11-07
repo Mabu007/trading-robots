@@ -7,7 +7,7 @@ export type BacktestCardData={
  candleCount:number;source?:string;
 };
 const fmt=(value:unknown,unit='')=>typeof value==='number'&&Number.isFinite(value)?value.toLocaleString('en-US',{maximumFractionDigits:2})+unit:'—';
-export function BacktestChatCard({data,onInspect}:{data:BacktestCardData;onInspect?:(tradeId:number)=>void}){
+export function BacktestChatCard({data,onInspect,onDeploy}:{data:BacktestCardData;onInspect?:(tradeId:number)=>void;onDeploy?:()=>void}){
  const m=data.metrics;
  return <section className="tv-backtest-chat-card" aria-label={'Backtest results for '+data.name}>
   <header><span><Activity size={17}/> Backtest completed</span><small>{data.completedAt?new Date(data.completedAt).toLocaleString():'Saved result'}</small></header>
@@ -21,5 +21,6 @@ export function BacktestChatCard({data,onInspect}:{data:BacktestCardData;onInspe
   </div>
   <p className="tv-backtest-chat-note">Historical simulation, not a verified live fill. {data.candleCount.toLocaleString()} execution candles. {data.source||'Market history'}.</p>
   <details className="tv-backtest-chat-trades"><summary>Inspect backtest trades <ChevronDown size={15}/></summary><div className="tv-backtest-chat-table"><table><thead><tr><th>#</th><th>Side</th><th>Entry</th><th>Exit</th><th>Result</th><th>Inspect</th></tr></thead><tbody>{data.trades.map(t=><tr key={t.id}><td>{t.id}</td><td>{t.side}</td><td>{fmt(t.entry)}</td><td>{fmt(t.exit)}</td><td className={t.pnl<0?'loss':'gain'}>{fmt(t.pnl,'R')}</td><td>{onInspect?<button type="button" onClick={()=>onInspect(t.id)} aria-label={'Ask AI to inspect trade '+t.id}><Sparkles size={14}/></button>:'—'}</td></tr>)}</tbody></table></div>{!data.trades.length&&<p>No trades were opened.</p>}</details>
+  {onDeploy&&<div className="vibes-evidence-actions"><button type="button" onClick={onDeploy}>Prepare deployment</button></div>}
  </section>;
 }
