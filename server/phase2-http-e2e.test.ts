@@ -2,6 +2,7 @@ import {describe,it,expect,vi} from 'vitest';
 import {generateKeyPairSync,sign} from 'node:crypto';
 import {FirestoreStore} from './firestore-store.ts';
 import * as r2 from './r2.ts';
+import {OpenRouterAccounts} from './openrouter-account.ts';
 
 describe('Phase 2 signed HTTP approval / backtest safety path',()=>{
  it('requires a valid signed identity, proves exact approval single-use and computes from isolated provider fixture',async()=>{
@@ -31,11 +32,22 @@ describe('Phase 2 signed HTTP approval / backtest safety path',()=>{
   vi.spyOn(r2,'writeR2Object').mockImplementation(async(k,v)=>{objects.set(k,v)});
   vi.spyOn(r2,'listR2Objects').mockImplementation(async(prefix)=>[...objects.keys()].filter(x=>x.startsWith(prefix)));
   vi.spyOn(r2,'deleteR2Object').mockImplementation(async key=>{objects.delete(key)});
+  vi.spyOn(OpenRouterAccounts.prototype,'load').mockResolvedValue({apiKey:'fixture-key',model:'fixture/model'});
   const rawFetch=globalThis.fetch;
   let providerRequests=0;
   vi.spyOn(globalThis,'fetch').mockImplementation(async(input,init)=>{
     const url=String(input);
     if(url.includes('securetoken@system.gserviceaccount.com'))return Response.json({keys:[jwk]});
+    if(url==='https://openrouter.ai/api/v1/chat/completions'){
+      const request=JSON.parse(String(init?.body));
+      expect(JSON.stringify(request.messages)).toContain('user-scoped R2 saved strategy');
+      const common={id:'fixture',object:'chat.completion.chunk',created:now,model:'fixture/model'};
+      const chunks=[
+        {...common,choices:[{index:0,delta:{role:'assistant',content:'Verified strategy'},finish_reason:null}]},
+        {...common,choices:[{index:0,delta:{},finish_reason:'stop'}]}
+      ];
+      return new Response(chunks.map(chunk=>'data: '+JSON.stringify(chunk)+'\n\n').join('')+'data: [DONE]\n\n',{headers:{'Content-Type':'text/event-stream'}});
+    }
     if(url==='https://api.hyperliquid.xyz/info'){
       const query=JSON.parse(String(init?.body||'{}'));if(query.type!=='candleSnapshot')throw Error('Unexpected provider query');
       providerRequests++;
@@ -56,6 +68,11 @@ describe('Phase 2 signed HTTP approval / backtest safety path',()=>{
     const capabilities=await rawFetch(base+'/api/agent/capabilities',{headers:{Authorization:'Bearer '+token}});
     expect(capabilities.status).toBe(200);
     expect(await capabilities.json()).toMatchObject({strategyApprovals:true,verifiedHyperliquidBacktest:true,financialAgentExecution:false});
+    const denied=await post('/api/agent/strategy-reviews',{botId:'qa-bot',expectedCode:original,proposedCode:next});
+    const denyBody=await denied.json() as any;
+    const denyRef='/api/agent/strategy-reviews/qa-bot/'+denyBody.intentId;
+    expect((await post(denyRef+'/deny',{})).status).toBe(200);
+    expect((await post(denyRef+'/apply',{})).status).toBe(409);
     const staged=await post('/api/agent/strategy-reviews',{botId:'qa-bot',expectedCode:original,proposedCode:next});
     expect(staged.status).toBe(201);
     const body=await staged.json() as any;
@@ -65,6 +82,17 @@ describe('Phase 2 signed HTTP approval / backtest safety path',()=>{
     expect((await post(ref+'/apply',{})).status).toBe(200);
     expect((await post(ref+'/apply',{})).status).toBe(409);
     expect(JSON.parse(objects.get('user-bots/cWEtdXNlcg/qa-bot/current.json')!).code).toBe(next);
+    const stream=await post('/api/ai-sdk/stream',{conversationId:'qa-chat',strategyId:'qa-bot',messages:[{role:'user',content:'Explain my saved strategy'}]});
+    expect(stream.headers.get('X-Trading-Vibes-Runtime')).toBe('ai-sdk');
+    const events=(await stream.text()).split('\n').filter(line=>line.startsWith('data: {')).map(line=>JSON.parse(line.slice(6)).tvTool).filter(Boolean);
+    expect(events.find(event=>event.type==='tool-result')?.output).toMatchObject({available:true,botId:'qa-bot',code:next});
+    const receiptId=events.find(event=>event.type==='receipt')?.receiptId;
+    expect(receiptId).toBeTruthy();
+    const receipts=await post('/api/agent/chat-tool-receipts',{conversationId:'qa-chat',ids:[receiptId]});
+    expect(await receipts.json()).toMatchObject({receipts:{[receiptId]:[{name:'getSavedStrategy',state:'completed'}]}});
+    const otherChat=await post('/api/agent/chat-tool-receipts',{conversationId:'other-chat',ids:[receiptId]});
+    expect(await otherChat.json()).toEqual({receipts:{}});
+    expect((await post('/api/agent/chat-tool-receipts',{conversationId:'qa-chat',ids:[receiptId]},false)).status).toBe(401);
     const replay=await post('/api/agent/backtest/verify',{botId:'qa-bot',lookbackCandles:120});
     expect(replay.status).toBe(200);
     const result=await replay.json() as any;

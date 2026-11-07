@@ -23,7 +23,7 @@ function canonical(value:unknown):string{
 export function approvalFingerprint(input:unknown){const action=approvalActionSchema.parse(input);return createHash('sha256').update(canonical(action)).digest('hex')}
 function path(uid:string,intentId:string){
  if(!uid||uid.length>128||!id.safeParse(intentId).success)throw Error('Invalid approval');
- return 'users/'+Buffer.from(uid).toString('base64url')+'/actionApprovals/'+intentId;
+ return 'serverActionApprovals/'+createHash('sha256').update(uid+'\0'+intentId).digest('hex');
 }
 /** Storage and transitions only. A broker adapter must independently recheck
  * ownership, risk and current state at execution, and use intent ID as its

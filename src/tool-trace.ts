@@ -20,6 +20,6 @@ export function updateToolTrace(existing:ToolTrace[],event:unknown):ToolTrace[]{
 }
 
 export function toolTraceLabel(name:string):string{
- const labels:Record<string,string>={getSavedStrategy:'Saved strategy',getSavedBacktest:'Saved backtest',getSavedBacktestTrade:'Backtest trade',getHyperliquidOrderBook:'Hyperliquid order book',getAgentRuntimeStatus:'Agent status',getMonitorStatus:'Monitor status',getFinancialHeadlines:'Financial headlines',getNewsCoverage:'News coverage'};
+ const labels:Record<string,string>={getPublicMarketEvidence:'Public market evidence',runVerifiedBacktest:'Historical simulation',getBrokerConnections:'Broker connections',listSavedStrategies:'Saved strategy catalogue',listUserAgents:'Saved agents',getSavedStrategy:'Saved strategy',getSavedBacktest:'Saved backtest',getSavedBacktestTrade:'Backtest trade',getHyperliquidOrderBook:'Hyperliquid order book',getAgentRuntimeStatus:'Agent status',getMonitorStatus:'Monitor status',getFinancialHeadlines:'Financial headlines',getNewsCoverage:'News coverage'};
  return labels[name]||'Information source';
 }

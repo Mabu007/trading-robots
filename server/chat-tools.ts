@@ -70,9 +70,12 @@ export function chatToolRoutes(app:Express,accounts:OpenRouterAccounts,authentic
    if(model&&!(await accounts.models()).some(m=>m.id===model))return res.status(400).json({error:'This model is not in the current OpenRouter catalogue.'});
    const provider=createOpenAICompatible({name:'openrouter',baseURL:'https://openrouter.ai/api/v1',apiKey:account.apiKey,fetch:request});
    const tools=Object.fromEntries(toolDefinitions.map(def=>[def.function.name,tool({description:def.function.description,inputSchema:jsonSchema(def.function.parameters as any)})]));
+   const abort=new AbortController();
+   res.once('close',()=>abort.abort());
+   if(res.destroyed)return;
    const result=await generateText({model:provider.chatModel(model||account.model),temperature:0,maxOutputTokens:1800,maxRetries:0,
     instructions:'Select a tool only when the user explicitly requests that action. General education and explanation need no tool, except use find_code for questions about named saved source. Never claim an action happened or infer approval. Changes to skills, personality, code or brokers require a review; never execute them. Skill names: '+JSON.stringify(skillNames)+'. Existing personality: '+JSON.stringify(profile),
-    prompt:message,tools,toolChoice:'auto',abortSignal:AbortSignal.timeout(30000)});
+    prompt:message,tools,toolChoice:'auto',abortSignal:AbortSignal.any([abort.signal,AbortSignal.timeout(30000)])});
    const calls=result.toolCalls.map(call=>({type:'function',function:{name:call.toolName,arguments:JSON.stringify(call.input)}}));
    const plan=parsePlannedAction({tool_calls:calls});
    return res.json({tool:plan.tool,...(Object.keys(plan.args).length?{args:plan.args}:{}),requiresConfirmation:['deploy','stop','edit','create','manage_skill','edit_personality','rename_code','delete_code','manage_broker'].includes(plan.tool||'')});

@@ -138,7 +138,7 @@ export async function postApiStream(
   return fullText;
 }
 
-/** SDK chat is opt-in until production parity and real-user checks are verified. */
+/** Keep an explicit build-time rollback switch for the original transport. */
 export function chatStreamPath(flag: unknown): string {
-  return flag === 'true' ? '/api/ai-sdk/stream' : '/api/ai';
+  return flag === 'false' ? '/api/ai' : '/api/ai-sdk/stream';
 }
