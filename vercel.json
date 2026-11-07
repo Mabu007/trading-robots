@@ -17,6 +17,7 @@
   ],
   "git": {
     "deploymentEnabled": {
+      "codex/chat-scroll-clearance": false,
       "codex/invite-landing": false,
       "codex/launch-theme-correction": false,
       "codex/public-launch-polish": false,
