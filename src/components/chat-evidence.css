@@ -1,0 +1,113 @@
+.vibes-evidence {
+  --vibes-evidence-line: color-mix(in srgb, currentColor 12%, transparent);
+  --vibes-evidence-fill: color-mix(in srgb, currentColor 3%, transparent);
+  margin-top: 14px;
+  min-width: 0;
+}
+.vibes-evidence-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.vibes-evidence-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 10px;
+  min-height: 34px;
+  border: 1px solid var(--vibes-evidence-line);
+  border-radius: 999px;
+  background: var(--vibes-evidence-fill);
+  cursor: pointer;
+}
+.vibes-evidence-actions button:hover,
+.vibes-evidence-actions button[aria-expanded="true"],
+.vibes-source-list a:hover {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+.vibes-market-chart,
+.vibes-source-list {
+  min-width: 0;
+  margin-top: 10px;
+  border: 1px solid var(--vibes-evidence-line);
+  border-radius: 16px;
+  background: var(--vibes-evidence-fill);
+  overflow: hidden;
+}
+.vibes-market-chart header,
+.vibes-market-chart footer,
+.vibes-source-list a,
+.vibes-source-list details {
+  padding: 10px 13px;
+}
+.vibes-market-chart header,
+.vibes-source-list a {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.vibes-market-chart header div,
+.vibes-source-list a > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.vibes-market-chart header span,
+.vibes-market-chart footer,
+.vibes-source-list small {
+  font-size: 12px;
+  opacity: .76;
+}
+.vibes-chart-regime {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.vibes-chart-canvas {
+  --tv-chart-grid: color-mix(in srgb, currentColor 9%, transparent);
+  width: 100%;
+  min-height: 252px;
+}
+.vibes-source-list a {
+  color: inherit;
+  font-size: 13px;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.vibes-source-list > * + * {
+  border-top: 1px solid var(--vibes-evidence-line);
+}
+.vibes-source-list summary {
+  font-size: 13px;
+  cursor: pointer;
+}
+.vibes-source-list pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 20rem;
+  overflow: auto;
+}
+.message.assistant .tv-streamdown {
+  font-size: .96rem;
+  line-height: 1.66;
+  letter-spacing: -.008em;
+  overflow-wrap: anywhere;
+}
+.message.assistant .tv-streamdown p {
+  margin-block: 0 .7em;
+}
+.message.assistant .tv-streamdown > :last-child {
+  margin-bottom: 0;
+}
+
+.vibes-evidence-caption {
+  font-size: 12px;
+  opacity: .74;
+  margin-bottom: 8px;
+}

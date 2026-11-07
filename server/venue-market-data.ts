@@ -1,4 +1,6 @@
-import { countObservedGaps, intervalMs, isTimeframe, isValidCandle, type MarketCandle } from './market-data.ts';
+import { countObservedGaps, intervalMs, isTimeframe, isValidCandle, type MarketCandle, type MarketTimeframe } from './market-data.ts';
+
+type CandleArchive = {read:(key:string)=>Promise<string|null>;write:(key:string,value:string)=>Promise<void>};
 
 // Public read-only APIs. Account access and order submission are deliberately
 // separate from market discovery and are not enabled by these adapters.
@@ -8,7 +10,8 @@ export class VenueMarketData {
   private metadataCache=new Map<string,{until:number;value:any}>();
   private request: typeof fetch;
   private clock: () => number;
-  constructor(request: typeof fetch = fetch, clock: () => number = Date.now) { this.request=request; this.clock=clock; }
+  private readonly archive?: CandleArchive;
+  constructor(request: typeof fetch = fetch, clock: () => number = Date.now, archive?: CandleArchive) { this.request=request; this.clock=clock; this.archive=archive; }
   private async json(url: string, init?: RequestInit): Promise<any> {
     const cacheable=!init?.body||!String(init.body).includes('candleSnapshot');
     const cacheKey=url+String(init?.body??'');
@@ -62,7 +65,7 @@ export class VenueMarketData {
     if(cached&&cached.until>this.clock())return cached.value;
     const pending=this.inFlight.get(key);
     if(pending)return pending;
-    const job=this.loadHyperliquidCandles(asset,timeframe,start,end);
+    const job=this.readHyperliquidCandles(asset,timeframe,start,end);
     this.inFlight.set(key,job);
     try{
      const value=await job;
@@ -74,7 +77,24 @@ export class VenueMarketData {
      return value;
     }finally{this.inFlight.delete(key)}
   }
-  private async loadHyperliquidCandles(asset:string,timeframe:Parameters<typeof countObservedGaps>[1],start:number,end:number){
+  private async readHyperliquidCandles(asset:string,timeframe:MarketTimeframe,start:number,end:number){
+    const period=intervalMs[timeframe];
+    const archive=end<=this.clock()-86400000?this.archive:undefined;
+    const key=`historical/hyperliquid/snapshots-v1/${encodeURIComponent(asset)}/${timeframe}/${start}-${end}.json`;
+    const saved=await archive?.read(key).catch(()=>null);
+    if(saved){
+      try{
+        const candles:unknown=JSON.parse(saved);
+        if(Array.isArray(candles)&&candles.length===(end-start)/period&&candles.every((c,i)=>c&&isValidCandle(c)&&c.time*1000===start+i*period))
+          return this.historyResult(asset,timeframe,start,end,candles,'R2 archive');
+      }catch{ /* Retry the public source when cached data is invalid. */ }
+    }
+    const result=await this.loadHyperliquidCandles(asset,timeframe,start,end);
+    if(archive&&result.missingCandles===0)
+      await archive.write(key,JSON.stringify(result.candles)).catch(()=>undefined);
+    return result;
+  }
+  private async loadHyperliquidCandles(asset:string,timeframe:MarketTimeframe,start:number,end:number){
     const period=intervalMs[timeframe];
     const interval: Record<string,string> = {m1:'1m',m5:'5m',m15:'15m',m30:'30m',h1:'1h',h4:'4h',d1:'1d'};
     const rows = await this.hyper({type:'candleSnapshot', req:{coin:asset,interval:interval[timeframe],startTime:start,endTime:end-1}});
@@ -90,6 +110,10 @@ export class VenueMarketData {
       unique.set(candle.time,candle);
     }
     const candles=[...unique.values()].sort((a,b)=>a.time-b.time);
-    return {source:'Hyperliquid',asset,timeframe,candles,rangeStart:new Date(start).toISOString(),rangeEndExclusive:new Date(end).toISOString(),fetchedAt:new Date(this.clock()).toISOString(),expectedCandles:(end-start)/period,missingCandles:(end-start)/period-candles.length,observedGaps:countObservedGaps(candles,timeframe),endExclusive:true};
+    return this.historyResult(asset,timeframe,start,end,candles,'public candleSnapshot');
+  }
+  private historyResult(asset:string,timeframe:MarketTimeframe,start:number,end:number,candles:MarketCandle[],cache:string){
+    const period=intervalMs[timeframe];
+    return {source:'Hyperliquid',cache,asset,timeframe,candles,rangeStart:new Date(start).toISOString(),rangeEndExclusive:new Date(end).toISOString(),fetchedAt:new Date(this.clock()).toISOString(),expectedCandles:(end-start)/period,missingCandles:(end-start)/period-candles.length,observedGaps:countObservedGaps(candles,timeframe),endExclusive:true};
   }
 }

@@ -23,4 +23,15 @@ describe('provider market data', () => {
     expect(result.candles).toHaveLength(1);expect(result.missingCandles).toBe(1);
     const sent=JSON.parse(request.mock.calls[0][1].body);expect(sent.req.endTime).toBe(179999);
   });
+  it('reads finalized complete ranges from the persistent archive after provider retention expires',async()=>{
+    const input={asset:'BTC',timeframe:'m1',from:new Date(60000).toISOString(),to:new Date(120000).toISOString()};
+    const request=vi.fn(async()=>Response.json([{s:'BTC',i:'1m',t:60000,o:'10',h:'12',l:'9',c:'11',v:'2'}]));
+    const objects=new Map<string,string>();
+    const archive={read:async(key:string)=>objects.get(key)??null,write:async(key:string,value:string)=>{objects.set(key,value)}};
+    const first=await new VenueMarketData(request,()=>90000000,archive).hyperliquidCandles(input);
+    expect(first).toMatchObject({cache:'public candleSnapshot',missingCandles:0});
+    const replay=await new VenueMarketData(request,()=>900000000,archive).hyperliquidCandles(input);
+    expect(replay).toMatchObject({cache:'R2 archive',candles:first.candles});
+    expect(request).toHaveBeenCalledTimes(1);
+  });
 });
