@@ -19,4 +19,7 @@ describe('market v3 HTTP identity boundary',()=>{
    expect((await exact.json() as CanonicalInstrument).id).toBe('hyperliquid:perpetual:BTC');
    const write=await fetch(url+'/api/market/v3/history',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({instrumentId:'hyperliquid:perpetual:BTC',timeframe:'m1',from:'2026-11-01T00:00:00Z',to:'2026-11-01T01:00:00Z',fetchMissing:true})});
    expect(write.status).toBe(401);
-  }finally{http¶»§q«^
+  }finally{http.close();}
+ });
+});
+

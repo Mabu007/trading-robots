@@ -15,4 +15,7 @@ export default {async fetch(request:Request,env:Env):Promise<Response>{
  const streamAllowed=path==='/v1/ws'&&await verifyStreamProtocol(request.headers.get('sec-websocket-protocol')||'',env.MARKET_DATA_INTERNAL_SECRET);
  if(!authorized&&!streamAllowed)return Response.json({error:'Internal or signed stream authorization required'},{status:401});
  if(!['/v1/info','/v1/ws'].includes(path))return new Response('Not found',{status:404});
- const stub=env.MARKET_HUB.get(env.MARKET_HUB.idFromName(¶»§q«^
+ const stub=env.MARKET_HUB.get(env.MARKET_HUB.idFromName('hyperliquid-mainnet'));
+ return stub.fetch(request);
+}};
+

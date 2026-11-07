@@ -18,4 +18,23 @@ function api(body:any){
 const fetcher=vi.fn(async(_url:any,init:any)=>Response.json(api(JSON.parse(init.body)))) as unknown as typeof fetch;
 describe('public Hyperliquid source-aware discovery',()=>{
  it('discovers core BTC/ETH, exact HIP-3 namespace and spot with null unknown specs',async()=>{
-  const serv¶»§q«^
+  const service=new HyperliquidPublicService(fetcher,()=>1700000001000,false);
+  const result=await service.discover();
+  expect(result.errors).toEqual([]);
+  expect(result.instruments.map(x=>x.id)).toContain('hyperliquid:hip3-perpetual:xyz:GOLD');
+  expect(result.instruments.map(x=>x.id)).toContain('hyperliquid:perpetual:BTC');
+  expect(result.instruments.map(x=>x.id)).toContain('hyperliquid:perpetual:ETH');
+  expect(result.instruments.map(x=>x.id)).toContain('hyperliquid:spot:PURR/USDC');
+  expect(result.instruments.find(x=>x.symbol==='BTC')?.contractSize).toBeNull();
+ });
+ it('returns provider-time book, source-unknown context timestamp, and trades',async()=>{
+  const service=new HyperliquidPublicService(fetcher,()=>1700000001000,false);
+  const gold=instrumentFromHyperPerp({name:'xyz:GOLD',szDecimals:3},'xyz');
+  const ctx=await service.context(gold);expect(ctx.funding).toBe(.0001);expect(ctx.openInterest).toBe(100);
+  expect(ctx.observedAt).toBeNull();expect(ctx.sourceTimestampAvailable).toBe(false);
+  const b=await service.book(gold);expect(b.bestBid).toBe(10);expect(b.askSize).toBe(1);
+  expect(b.asOf).toBe('2023-11-14T22:13:20.000Z');
+  expect((await service.trades(gold)).trades[0].tid).toBe(12);
+ });
+});
+
