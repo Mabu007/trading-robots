@@ -1,0 +1,7 @@
+# Phase 3 / 13 â€” Unified instruments, Hyperliquid and shared market data
+Date: 2026-11-07. Backlog: issue #62. Start main fda07c16b48c782bd04c747d66bd6fca2f5953e2; Vercel dpl_9arrDijHAxM2uAMGWbFdgBzcCZA7 READY. Phase 2 gated feature flags remain off under the owner's accepted external-E2E exception.
+
+## Implemented
+Canonical venue/kind/native-symbol identities in server/instrument-registry.ts strictly distinguish Hyperliquid BTC, ETH and xyz:GOLD, spot, PropDAO GOLDUSDC and broker XAUUSD. Unknown contract size, multiplier, precision and trading hours remain null, not fabricated. server/source-capabilities.ts selects from Hyperliquid, PropDAO, cTrader, VALR, R2 and connections by compatibility, freshness, completeness, health, permissions/entitlements, cost, rate headroom and provenance; proxies/related markets require deliberate research/display opt-in and are forbidden for backtests and execution.
+
+server/hyperliquid-public.ts discovers core, HIP-3 DEX and spot markets with Hyperliquid official public endpoints, supports context, allMids, book and recent trades, and labels absent event timestamps. workers/market-data-hub.ts, workers/market-data-worker.ts, workers/market-data-stream-auth.ts and workers/wrangler.market-data.jsonc build a network-global Durable Object: bounded cross-instance request coalescing/cache, weighted request pacing, Retry-After/backoff, shared public upstream WebSocket subscriptions, heartbeat, reconnection, and 60-second signed public-only client ac¶»§q«^
