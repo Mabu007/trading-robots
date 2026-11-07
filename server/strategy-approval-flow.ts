@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {ApprovalIntents,approvalActionSchema,approvalFingerprint,type ApprovalAction} from './approval-intents.ts';
-import {parseStrategyConfig} from '../src/strategy.ts';
+import {parseStrategyConfig,validateStrategySyntax} from '../src/strategy.ts';
 import {venues} from '../shared/venues.ts';
 
 const safeId=/^[A-Za-z0-9_-]{1,100}$/;
@@ -48,10 +48,7 @@ export class ReviewedStrategyUpdates {
  private validate(code:unknown){
   if(typeof code!=='string'||!code.trim()||code.length>180000||!/export\s+function\s+onCandle\s*\(/.test(code))throw Error('Invalid strategy code');
   parseStrategyConfig(code);
-  // Parse as a function body after removing the supported export declarations.
-  // The constructor compiles the source without evaluating it.
-  try { new Function(code.replace(/\bexport\s+(?=const\s+config\b|function\s+onCandle\b)/g,'')); }
-  catch { throw Error('Strategy code has invalid JavaScript syntax.'); }
+  validateStrategySyntax(code);
   return code;
  }
  private async current(uid:string,botId:string){
