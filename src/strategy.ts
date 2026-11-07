@@ -39,6 +39,13 @@ export function parseStrategyConfig(code:string) {
   for(const field of ['backtestSpread','backtestSlippage','backtestCommissionR'])if(config[field]!==undefined&&(!Number.isFinite(config[field])||config[field]<0))throw Error(`${field} must be a non-negative number.`);
   return {...config,timeframes:tfs};
 }
+export function validateStrategySyntax(source:string){
+  // Match the same two declarations used by the isolated strategy runtime.
+  const script=source.replace(/export\s+const\s+config\s*=/,'const config =')
+    .replace(/export\s+function\s+onCandle\s*\(/,'function onCandle(');
+  try{new Function(script)}
+  catch(error){throw new Error('Strategy code has a syntax error: '+(error instanceof Error?error.message:'invalid JavaScript'))}
+}
 export function validateCandles(input:Candle[]) {
   const sorted=[...input].sort((a,b)=>a.time-b.time), out:Candle[]=[];let previous=-Infinity;
   for(const c of sorted){if(!Number.isFinite(c.time)||![c.open,c.high,c.low,c.close,c.volume].every(Number.isFinite)||c.high<c.low||c.high<Math.max(c.open,c.close)||c.low>Math.min(c.open,c.close))continue;if(c.time<=previous)continue;previous=c.time;out.push(c);}

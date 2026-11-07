@@ -34,7 +34,7 @@ import { Activity, BookOpen, ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUp, Ar
 import {historicalData} from './history-cache';
 import {compressBacktest,decompressBacktest,isCompressedBacktest} from './backtest-storage';
 import {savePendingBacktest,loadPendingBacktest,clearPendingBacktest,pendingRunIsNewer} from './backtest-persistence';
-import { runBacktest } from './backtest';import { starterCode,parseStrategyConfig } from './strategy';import type { Candle,Result,Trade } from './types';
+import { runBacktest } from './backtest';import { starterCode,parseStrategyConfig,validateStrategySyntax } from './strategy';import type { Candle,Result,Trade } from './types';
 import type {AgentAuditEvent,PersistentAgent} from './agents';
 import { demoBots, type DemoBot } from './demos';
 import { connectFirebase, firebaseConfigured, readableFirebaseError, type BotVersion, type CloudBot, type CloudClient } from './firebase';
@@ -498,11 +498,21 @@ function App(){
   }
   if(command==='create'){
    const venueMatch=message.match(/\b(propdao|valr|hyperliquid|ctrader)\b/i);
-   const marketMatch=message.match(/\b([A-Z]{2,12}(?:USDC|USDT|ZAR|USD))\b/i);
-   if(!venueMatch||!marketMatch){setChatInput('');setChat([...next,{role:'assistant',content:'Specify a market and venue, for example: Create a GOLDUSDC trading strategy on PropDAO named Gold Sweeper.'}]);return;}
-   const requestedVenue=venueOf(venueMatch[1].toLowerCase()),requestedAsset=marketMatch[1].toUpperCase();
+   const requestedVenue=venueMatch?venueOf(venueMatch[1].toLowerCase()):null;
+   const marketMatch=requestedVenue==='hyperliquid'
+    ?message.match(/\b([A-Za-z0-9_:.@-]{1,64})\s+(?:trading\s+)?strategy\b/i)
+    :message.match(/\b([A-Z]{2,12}(?:USDC|USDT|ZAR|USD))\b/i);
+   if(!requestedVenue||!marketMatch){setChatInput('');setChat([...next,{role:'assistant',content:'Specify a market and venue, for example: Create a GOLDUSDC strategy on PropDAO named Gold Sweeper.'}]);return;}
+   const marketName=marketMatch[1];
    if(requestedVenue==='ctrader'){setChat([...next,{role:'assistant',content:'cTrader strategy creation needs a verified broker market catalogue first. Choose a connected supported venue.'}]);return;}
-   try{const response=await fetch(requestedVenue==='valr'?'/api/valr/markets':'/api/venues/'+requestedVenue+'/markets',{signal:controller.signal});const data=await readApiJson<{markets:{symbol:string}[]}>(response,'Venue markets');checkpoint();if(!data.markets?.some(m=>m.symbol===requestedAsset))throw Error('This market was not listed by the venue.');}catch(error){checkpoint();setChat([...next,{role:'assistant',content:'Cannot verify '+requestedAsset+' on '+venueLabel[requestedVenue]+': '+err(error)}]);return;}
+   let requestedAsset:string;
+   try{
+    const response=await fetch(requestedVenue==='valr'?'/api/valr/markets':'/api/venues/'+requestedVenue+'/markets',{signal:controller.signal});
+    const data=await readApiJson<{markets:{symbol:string}[]}>(response,'Venue markets');checkpoint();
+    const market=data.markets?.find(m=>m.symbol.toLowerCase()===marketName.toLowerCase());
+    if(!market)throw Error('This market was not listed by the venue.');
+    requestedAsset=market.symbol;
+   }catch(error){checkpoint();setChat([...next,{role:'assistant',content:'Cannot verify '+marketName+' on '+venueLabel[requestedVenue]+': '+err(error)}]);return;}
    const title=(message.match(/(?:named|called)\s+["“]?([^"“”,.]{3,48})/i)?.[1]||requestedAsset+' AI strategy').trim().slice(0,64);
    creatingCode={id:makeBotId(),name:title,asset:requestedAsset,venue:requestedVenue,prompt:message};setNewCodeTarget(creatingCode);
   }
@@ -595,7 +605,7 @@ INTENT RULES:
 - If the requested action is genuinely ambiguous, ask one short clarifying question instead of guessing or writing a script.
 - Never invent prices, candles, trades, results, or strategy behavior. Distinguish evidence in the supplied data from inference. Never claim profitability.
 
-STRATEGY CONTRACT: export const config = { timeframes: [...], executionTimeframe, riskPercent (0..10), riskReward }; export function onCandle(ctx) returns BUY/SELL/WAIT. Use only the listed price timeframes. ctx.timeframes contains up to the 1000 most recent completed candles and ctx.candle is the current execution candle. Backtest entries fill at the next candle open. Use verified data from the selected venue, and never treat a general reference quote as a broker fill. Code must operate on runtime candles and never hard-code historical/live prices.
+STRATEGY CONTRACT: export const config = { timeframes: [...], executionTimeframe, riskPercent (greater than 0 and up to 10), riskReward }; export function onCandle(ctx) returns BUY/SELL/WAIT. Use lowercase timeframe identifiers such as "m1", never "M1". Use only the listed price timeframes. ctx.timeframes contains up to the 1000 most recent completed candles and ctx.candle is the current execution candle. Backtest entries fill at the next candle open. Use verified data from the selected venue, and never treat a general reference quote as a broker fill. Code must operate on runtime candles and never hard-code historical/live prices.
 
 TRADE AUDITS: when an attached trade context is present, inspect its exact strategy source, trade metadata, backtest metrics, and OHLC candles. State what those supplied bars prove and what they cannot prove. Do not invent omitted bars or assume flat candles.
 
@@ -1087,5 +1097,5 @@ function ChatContextModal({context,onClose}:{context:ChatContext|null;onClose:()
 }
 function hasLastDraft(){try{return Boolean(localStorage.getItem('tradefoundry:last-draft'))}catch{return false}}
 function conciseAssistantText(text:string,maxLength=2400){let prose=text.replace(/```[\s\S]*?(?:```|$)/g,'');const rawCodeStart=prose.search(/^\s*(?:export\s+(?:const|function|class)|(?:async\s+)?function\s+[A-Za-z_$]|(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=|import\s+.*\s+from\s+['"])/m);if(rawCodeStart>=0)prose=prose.slice(0,rawCodeStart);const codeLine=/^\s*(?:export\s+|async\s+)?(?:const|let|var|function|return|if\s*\(|else\b|for\s*\(|while\s*\(|switch\s*\(|case\b|break;|continue;|\/\/|\/\*|\*\/|[{}]\s*[,;]?$)|=>|\b(?:stopLoss|takeProfit|timeframes|executionTimeframe)\s*:/;const clean=prose.split('\n').filter(line=>!codeLine.test(line)).join('\n').replace(/^\s*[{}[\],;]+\s*$/gm,'').replace(/\n{3,}/g,'\n\n').trim();if(clean.length<=maxLength)return clean;const head=clean.slice(0,maxLength-1);const boundary=Math.max(head.lastIndexOf('. '),head.lastIndexOf('! '),head.lastIndexOf('? '),head.lastIndexOf('\n\n'));return `${head.slice(0,boundary>maxLength*0.55?boundary+1:head.lastIndexOf(' ')).trimEnd()}…`}
-function validateStrategySyntax(source:string){try{new Function(source.replace(/^\s*export\s+/gm,''))}catch(error){throw new Error(`Strategy code has a syntax error: ${error instanceof Error?error.message:'invalid JavaScript'}`)}}function err(e:unknown){return e instanceof Error?e.message:'Unknown error'}function extractCode(text:string){return extractCodeIfPresent(text)||text.slice(text.search(/export\s+const\s+config\b/)>=0?text.search(/export\s+const\s+config\b/):0).trim()}function extractCodeIfPresent(text:string){const match=text.match(/```(?:javascript|js)?\s*([\s\S]*?)```/i);if(match)return match[1].trim();const start=text.search(/export\s+const\s+config\b/);return start>=0?text.slice(start).trim():''}
+function err(e:unknown){return e instanceof Error?e.message:'Unknown error'}function extractCode(text:string){return extractCodeIfPresent(text)||text.slice(text.search(/export\s+const\s+config\b/)>=0?text.search(/export\s+const\s+config\b/):0).trim()}function extractCodeIfPresent(text:string){const match=text.match(/```(?:javascript|js)?\s*([\s\S]*?)```/i);if(match)return match[1].trim();const start=text.search(/export\s+const\s+config\b/);return start>=0?text.slice(start).trim():''}
 export default App;
