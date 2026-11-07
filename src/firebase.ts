@@ -43,7 +43,6 @@ export type CloudClient = {
   renameVersionPointer: (botId: string, version: BotVersion) => Promise<void>;
   deleteVersionPointer: (botId: string, versionId: string) => Promise<void>;
   getProfile: () => { uid: string; email: string | null; displayName: string; isAnonymous: boolean; emailVerified: boolean } | null;
-  createAccount: (email: string, password: string, displayName: string) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   sendVerificationEmail: () => Promise<void>;
   refreshIdentity: () => Promise<void>;
@@ -266,14 +265,6 @@ export function connectFirebase(): Promise<CloudClient | null> {
         const user = auth.currentUser;
         if (!user) return null;
         return { uid: user.uid, email: user.email, displayName: user.displayName || '', isAnonymous: user.isAnonymous, emailVerified:user.emailVerified };
-      },
-      async createAccount(email: string, password: string, displayName: string) {
-        const user = auth.currentUser;
-        const credential = authSdk.EmailAuthProvider.credential(email, password);
-        const result = user?.isAnonymous
-          ? await authSdk.linkWithCredential(user, credential)
-          : await authSdk.createUserWithEmailAndPassword(auth, email, password);
-        if (displayName.trim()) await authSdk.updateProfile(result.user, { displayName: displayName.trim().slice(0, 60) });
       },
       async signIn(email: string, password: string) {
         await authSdk.signInWithEmailAndPassword(auth, email, password);
