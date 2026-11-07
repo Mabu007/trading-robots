@@ -46,8 +46,7 @@
 :root[data-theme="light"] .tv-chat-first .tv-primary-nav button { color: #59685f; }
 :root[data-theme="light"] .tv-chat-first .tv-primary-nav button[aria-current="page"] { color: #145c42; background: #e6f3ec; border-color: #b9dfca; }
 :root[data-theme="light"] .tv-chat-first .tv-primary-nav button:focus-visible { outline-color: #16875f; }
-:root[data-theme="light"] .tv-chat-first .chat-side,
-:root[data-theme="light"] .tv-chat-first.tv-area-chat .chat-side,
+:root[data-theme="light"] .tv-chat-first:not(.tv-area-chat) .chat-side,
 :root[data-theme="light"] .tv-chat-first .main-column,
 :root[data-theme="light"] .tv-chat-first .studio-body,
 :root[data-theme="light"] .tv-chat-first .tv-destination-shell,
@@ -61,9 +60,9 @@
 :root[data-theme="light"] .tv-chat-first .chat-empty-icon,
 :root[data-theme="light"] .tv-chat-first .message-avatar,
 :root[data-theme="light"] .tv-chat-first .ai-orb { color: #176545; background: #e4f2e9; }
-:root[data-theme="light"] .tv-chat-first .message.user .message-content { background: #e8f3ec; border-color: #cfdfd4; color: #23382b; }
-:root[data-theme="light"] .tv-chat-first .message.assistant .message-content,
-:root[data-theme="light"] .tv-chat-first .message.assistant:last-child .message-content { background: #fff; border-color: #dfe5e1; color: #29372f; }
+:root[data-theme="light"] .tv-chat-first:not(.tv-area-chat) .message.user .message-content { background: #e8f3ec; border-color: #cfdfd4; color: #23382b; }
+:root[data-theme="light"] .tv-chat-first:not(.tv-area-chat) .message.assistant .message-content,
+:root[data-theme="light"] .tv-chat-first:not(.tv-area-chat) .message.assistant:last-child .message-content { background: #fff; border-color: #dfe5e1; color: #29372f; }
 :root[data-theme="light"] .tv-chat-first .chat-composer { background: #fff; border-color: #cbd8d0; box-shadow: 0 10px 28px #18291f0c; }
 :root[data-theme="light"] .tv-chat-first .chat-composer textarea { color: #1f2d25; }
 :root[data-theme="light"] .tv-chat-first .chat-composer textarea::placeholder { color: #7c8981; }

@@ -132,6 +132,31 @@
   background: var(--tv-shell-panel);
   overflow: hidden;
 }
+/* Keep table actions usable when Streamdown utility styles are unavailable. */
+.tv-chat-first.tv-area-chat .tv-streamdown [data-streamdown="table-wrapper"] > div:has(> button) {
+  display: flex;
+  justify-content: flex-end;
+  gap: 3px;
+  padding: 4px 6px;
+}
+.tv-chat-first.tv-area-chat .tv-streamdown [data-streamdown="table-wrapper"] > div:has(> table) {
+  overflow-x: auto;
+}
+.tv-chat-first.tv-area-chat .tv-streamdown [data-streamdown="table-wrapper"] > div > button {
+  display: inline-grid;
+  place-items: center;
+  min-width: 28px;
+  min-height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--tv-shell-muted);
+  cursor: pointer;
+}
+.tv-chat-first.tv-area-chat .tv-streamdown [data-streamdown="table-wrapper"] > div > button:hover {
+  background: var(--tv-shell-hover);
+  color: var(--tv-shell-ink);
+}
 .tv-chat-first.tv-area-chat .tv-streamdown [data-streamdown="table-wrapper"] table {
   display: table;
   min-width: 100%;
