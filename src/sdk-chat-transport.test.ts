@@ -32,4 +32,15 @@ describe('SDK chat compatibility transport',()=>{
   await Promise.resolve();await new Promise(r=>setTimeout(r,0));await chat.stop();await pending;
   expect(signal?.aborted).toBe(true);expect((received as Error)?.name).toBe('AbortError');
  });
+ it('does not publish late text or report success after cancellation',async()=>{
+  let finish!:(value:string)=>void;let emit!:(chunk:string,full:string)=>void;let received:unknown;
+  const request=vi.fn((_url,_payload,_service,onText)=>{emit=onText;return new Promise<string>(resolve=>{finish=resolve})});
+  const userAbort=new AbortController();const onText=vi.fn();
+  const chat=new Chat({transport:sdkChatTransport(request as any)});
+  const bridge:SdkBridgeRequest={payload:{},token:'x',signal:userAbort.signal,onText,complete:e=>{received=e}};
+  const pending=chat.sendMessage({text:'hi'},{body:{bridge}});
+  await new Promise(r=>setTimeout(r,0));userAbort.abort();emit('late','late');finish('late');await pending;
+  expect(onText).not.toHaveBeenCalled();expect((received as Error)?.name).toBe('AbortError');
+ });
+
 });
