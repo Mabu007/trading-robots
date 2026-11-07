@@ -5,7 +5,7 @@ import {sharingRequest} from './BotSharing';
 import './connected-apps.css';
 
 type CatalogApp={slug:string;name?:string;provider:string;category:string};
-type CatalogPage={apps:CatalogApp[];configured:boolean;nextCursor:string|null};
+type CatalogPage={apps:CatalogApp[];configured:boolean;nextCursor:string|null;warning?:string};
 type ConnectedApp={slug:string;name:string;connected:boolean;connectedAccountId:string|null};
 const labels:Record<string,string>={telegram:'Telegram',github:'GitHub',googledrive:'Google Drive',googlesheets:'Google Sheets',gmail:'Gmail',notion:'Notion',discord:'Discord'};
 const descriptions:Record<string,string>={telegram:'Market alerts and bot notifications',github:'Store strategy code in your account',googledrive:'Your authorized documents',googlesheets:'Export trading reports',gmail:'Approved email actions',notion:'Strategy notes and lessons',discord:'Community notifications'};
@@ -20,7 +20,7 @@ export function ConnectedApps({client,active}:{client:CloudClient|null;active:bo
   void (async()=>{
     const catalog=await sharingRequest<CatalogPage>(client,'/api/apps/catalog');
     if(cancelled)return;
-    setApps(catalog.apps);setCursor(catalog.nextCursor);setConfigured(catalog.configured);
+    setApps(catalog.apps);setCursor(catalog.nextCursor);setConfigured(catalog.configured);if(catalog.warning)setError(catalog.warning);
     if(catalog.configured){
       const data=await sharingRequest<{apps:ConnectedApp[]}>(client,'/api/apps/connections');
       if(!cancelled){
@@ -36,10 +36,11 @@ export function ConnectedApps({client,active}:{client:CloudClient|null;active:bo
   if(!client||!configured||busy)return;
   setBusy('catalogue');setError('');
   try{
-   const path=lookup?'?slug='+encodeURIComponent(search.trim().toLowerCase().replace(/\s+/g,'')):'?cursor='+encodeURIComponent(cursor||'');
+   const path=lookup?'?search='+encodeURIComponent(search.trim()):'?cursor='+encodeURIComponent(cursor||'');
    const page=await sharingRequest<CatalogPage>(client,'/api/apps/catalog'+path);
    setApps(previous=>[...new Map([...previous,...page.apps].map(app=>[app.slug,app])).values()]);
    if(!lookup)setCursor(page.nextCursor);
+   if(lookup&&!page.apps.length)setError('No matching app was found in the provider catalogue.');
   }catch(e){setError(e instanceof Error?e.message:'App catalogue unavailable');}
   finally{setBusy('')}
  };
