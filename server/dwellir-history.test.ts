@@ -22,7 +22,7 @@ describe('Dwellir historical market data',()=>{
   expect(request).not.toHaveBeenCalled();
  });
  it('uses public Hyperliquid for an uncached GOLDUSDC minute week, saves actual bars to R2, and never calls Dwellir',async()=>{
-  const storage=memory(),ms=goldStart+60000;
+  const storage=memory(),ms=goldStart+86400000;
   const fetcher=vi.fn(async(url:string,init:RequestInit)=>{
    expect(url).toBe('https://api.hyperliquid.xyz/info');
    expect(JSON.parse(String(init.body)).req).toMatchObject({coin:'xyz:GOLD',interval:'1m'});
@@ -66,7 +66,7 @@ describe('Dwellir historical market data',()=>{
  it('caches GOLDUSDC M1 partial archive weeks without repeated public requests',async()=>{
   const storage=memory();
   const partialEnd=goldEnd;
-  const bar1={...bar(t),s:'xyz:GOLD',i:'1m',t:goldStart+60000,T:goldStart+119999};
+  const bar1={...bar(t),s:'xyz:GOLD',i:'1m',t:goldStart+86400000,T:goldStart+86459999};
   const request=vi.fn(async()=>Response.json([bar1])) as unknown as typeof fetch;
   const input={asset:'xyz:GOLD',timeframe:'m1',from:new Date(goldStart+60000).toISOString(),to:new Date(partialEnd).toISOString()};
   const result=await history(storage,request).candles(input);
