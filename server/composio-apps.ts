@@ -20,6 +20,23 @@ function client(){
  if(!apiKey)return null;
  return sdk??=new Composio({apiKey,provider:new VercelProvider()});
 }
+class CatalogueHttpError extends Error{
+ readonly status:number;
+ constructor(status:number){super('Composio catalogue HTTP '+status);this.status=status;}
+}
+async function composioGet(resource:'toolkits'|'connected_accounts',params:URLSearchParams,signal?:AbortSignal):Promise<unknown>{
+ const apiKey=process.env.COMPOSIO_API_KEY?.trim();
+ if(!apiKey)throw Error('Composio is not configured.');
+ const url=new URL('/api/v3/'+resource,'https://backend.composio.dev');
+ url.search=params.toString();
+ const response=await fetch(url,{headers:{'x-api-key':apiKey,Accept:'application/json'},signal:opts(signal).signal,redirect:'error'});
+ if(!response.ok)throw new CatalogueHttpError(response.status);
+ return response.json();
+}
+const diagnostic=(error:unknown)=>{
+ const status=error instanceof CatalogueHttpError?error.status:undefined;
+ return status===401||status===403?'Composio rejected the project connection. Check the project API key and permissions.':status===429?'Composio is rate limiting requests. Try again shortly.':'The Composio provider could not return this data.';
+};
 type Client=NonNullable<ReturnType<typeof client>>;
 const toolSlug=z.string().regex(/^[A-Z][A-Z0-9_]{2,119}$/);
 const accountId=z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/);
@@ -39,9 +56,17 @@ function preview(value:unknown){
  return {content:clean.slice(0,9_000),truncated:clean.length>9_000};
 }
 async function activeAccounts(c:Client,uid:string,toolkit?:string,signal?:AbortSignal){
- const result=await c.connectedAccounts.list({userIds:[composioIdentity(uid)],statuses:['ACTIVE'],limit:100,...(toolkit?{toolkitSlugs:[toolkit]}:{})},opts(signal));
- return result.items.filter(a=>a.status==='ACTIVE'&&!a.isDisabled&&!a.authConfig.isDisabled&&isConnectedAppToolkit(a.toolkit.slug)&&accountId.safeParse(a.id).success)
-  .map(a=>({id:a.id,toolkit:a.toolkit.slug,label:a.alias||a.id,connected:true}));
+ try{
+  const result=await c.connectedAccounts.list({userIds:[composioIdentity(uid)],statuses:['ACTIVE'],limit:100,...(toolkit?{toolkitSlugs:[toolkit]}:{})},opts(signal));
+  return result.items.filter(a=>a.status==='ACTIVE'&&!a.isDisabled&&!a.authConfig.isDisabled&&isConnectedAppToolkit(a.toolkit.slug)&&accountId.safeParse(a.id).success)
+   .map(a=>({id:a.id,toolkit:a.toolkit.slug,label:a.alias||a.id,connected:true}));
+ }catch{
+  const query=new URLSearchParams({user_ids:composioIdentity(uid),statuses:'ACTIVE',limit:'100'});
+  if(toolkit)query.set('toolkit_slugs',toolkit);
+  const page=z.object({items:z.array(z.object({id:z.string(),user_id:z.string().optional(),status:z.string(),is_disabled:z.boolean().optional(),alias:z.string().nullish(),auth_config:z.object({is_disabled:z.boolean().optional()}),toolkit:z.object({slug:z.string()})}))}).parse(await composioGet('connected_accounts',query,signal));
+  return page.items.filter(a=>(a.user_id===undefined||a.user_id===composioIdentity(uid))&&a.status==='ACTIVE'&&!a.is_disabled&&!a.auth_config.is_disabled&&isConnectedAppToolkit(a.toolkit.slug)&&accountId.safeParse(a.id).success)
+   .map(a=>({id:a.id,toolkit:a.toolkit.slug,label:a.alias||a.id,connected:true}));
+ }
 }
 
 type Pending={id:string;ownerUid:string;toolkit:string;slug:string;account:string;args:string;version:string;schemaHash:string;expiresAt:number};
@@ -123,16 +148,21 @@ export function registerComposioApps(app:Express,uidOrReply:(req:Request,res:Res
   const c=client();
   const map=(slug:string,name?:string)=>({slug,name,provider:'composio',category:'connected-app'});
   if(!c)return res.json({apps:connectedAppToolkits.map(slug=>map(slug)),configured:false,nextCursor:null});
-  const query=typeof req.query.slug==='string'?req.query.slug.trim().toLowerCase():'';
+  const search=typeof req.query.search==='string'?req.query.search.trim():'';
   const cursor=typeof req.query.cursor==='string'?req.query.cursor:'';
-  if(query&&!isConnectedAppToolkit(query)||cursor.length>512)return res.status(400).json({error:'Choose a supported app slug or catalogue page.'});
+  if(search.length>80||cursor.length>512)return res.status(400).json({error:'Choose an app name or catalogue page.'});
   try{
-   if(query){const item=await c.toolkits.get(query,opts());return res.json({apps:[map(item.slug,item.name)],configured:true,nextCursor:null});}
-   const parameters:{limit:number;sortBy:'usage';cursor?:string}={limit:80,sortBy:'usage',...(cursor?{cursor}:{})};
-   const page=z.object({items:z.array(z.object({slug:z.string(),name:z.string()})),nextCursor:z.string().nullish()}).parse(await c.toolkits.get(parameters,opts()));
-   const apps=page.items.filter(item=>isConnectedAppToolkit(item.slug)).map(item=>map(item.slug,item.name));
-   return res.json({apps:cursor?apps:[...new Map([...connectedAppToolkits.map(slug=>map(slug)),...apps].map(a=>[a.slug,a])).values()],configured:true,nextCursor:page.nextCursor??null});
-  }catch{return res.status(query?404:502).json({error:query?'This app was not found in the Composio catalogue.':'The Composio catalogue is unavailable.'});}
+   const params=new URLSearchParams({limit:search?'30':'80',sort_by:'usage'});
+   if(search)params.set('search',search);
+   if(cursor)params.set('cursor',cursor);
+   const page=z.object({items:z.array(z.object({slug:z.string(),name:z.string(),no_auth:z.boolean().optional(),is_local_toolkit:z.boolean().optional()})),next_cursor:z.string().nullish()}).parse(await composioGet('toolkits',params));
+   const apps=page.items.filter(item=>isConnectedAppToolkit(item.slug)&&!item.no_auth&&!item.is_local_toolkit).map(item=>map(item.slug,item.name));
+   return res.json({apps:cursor||search?apps:[...new Map([...connectedAppToolkits.map(slug=>map(slug)),...apps].map(a=>[a.slug,a])).values()],configured:true,nextCursor:page.next_cursor??null});
+  }catch(error){
+   console.warn('Composio catalogue unavailable',{status:error instanceof CatalogueHttpError?error.status:null,name:error instanceof Error?error.name:'unknown'});
+   if(search||cursor)return res.status(503).json({error:diagnostic(error)});
+   return res.json({apps:connectedAppToolkits.map(slug=>map(slug)),configured:true,nextCursor:null,warning:diagnostic(error)});
+  }
  });
  app.get('/api/apps/connections',async(req,res)=>{
   const uid=await uidOrReply(req,res);if(!uid)return;
@@ -140,7 +170,7 @@ export function registerComposioApps(app:Express,uidOrReply:(req:Request,res:Res
   try{
    const accounts=await activeAccounts(c,uid);
    return res.json({apps:accounts.map(a=>({slug:a.toolkit,name:a.label,connected:true,connectedAccountId:a.id}))});
-  }catch(e){console.error('Composio connection lookup failed',e instanceof Error?e.name:'unknown');return res.status(502).json({error:'Could not check connected apps.'});}
+  }catch(e){console.error('Composio connection lookup failed',e instanceof Error?e.name:'unknown');return res.status(502).json({error:diagnostic(e)});}
  });
  app.post('/api/apps/connect',async(req,res)=>{
   const uid=await uidOrReply(req,res);if(!uid)return;
