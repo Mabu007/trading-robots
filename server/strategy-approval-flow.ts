@@ -47,7 +47,12 @@ export class ReviewedStrategyUpdates {
  }
  private validate(code:unknown){
   if(typeof code!=='string'||!code.trim()||code.length>180000||!/export\s+function\s+onCandle\s*\(/.test(code))throw Error('Invalid strategy code');
-  parseStrategyConfig(code);return code;
+  parseStrategyConfig(code);
+  // Parse as a function body after removing the supported export declarations.
+  // The constructor compiles the source without evaluating it.
+  try { new Function(code.replace(/\bexport\s+(?=const\s+config\b|function\s+onCandle\b)/g,'')); }
+  catch { throw Error('Strategy code has invalid JavaScript syntax.'); }
+  return code;
  }
  private async current(uid:string,botId:string){
   const raw=await this.deps.read('user-bots/'+Buffer.from(uid).toString('base64url')+'/'+botId+'/current.json');
@@ -87,6 +92,8 @@ export class ReviewedStrategyUpdates {
  }
  async approve(uid:string,botId:string,intentId:string){
   const v=await this.load(uid,botId,intentId);
+  const current=await this.current(uid,botId);
+  if(current.code!==v.expected||current.venue!==v.action.venue)throw Error('Strategy source or venue changed before approval.');
   await this.deps.approvals.approve(uid,intentId,v.action);
   return {approved:true,intentId,botId,expiresAt:v.record.expiresAt};
  }
@@ -98,7 +105,10 @@ export class ReviewedStrategyUpdates {
  async apply(uid:string,botId:string,intentId:string){
   const {action,expected,proposed}=await this.load(uid,botId,intentId);
   const location=await this.deps.commit(uid,botId,proposed,expected,async()=>{
-   await this.deps.approvals.consume(uid,intentId,action);
+   const current=await this.owned(uid,botId);
+   const currentAction=strategyApplyAction(current,botId,expected,proposed);
+   if(approvalFingerprint(currentAction)!==approvalFingerprint(action))throw Error('Strategy instrument or venue changed before execution.');
+   await this.deps.approvals.consume(uid,intentId,currentAction);
   },action.venue);
   return {applied:true,botId,intentId,storageKey:location,codeHash:hash(proposed),note:'Approved source update only; no backtest or live broker execution was performed.'};
  }

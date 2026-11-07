@@ -25,9 +25,9 @@ export function sdkChatTransport(request:typeof postApiStream=postApiStream):Cha
      try{
       emit({type:'start'});emit({type:'text-start',id:'response'});
       const result=await request('/api/ai-sdk/stream',bridge.payload,'OpenRouter',(chunk,full)=>{
-       if(!cancelled){bridge.onText(full);emit({type:'text-delta',id:'response',delta:chunk});}
+       if(!cancelled&&!signal.aborted){bridge.onText(full);emit({type:'text-delta',id:'response',delta:chunk});}
       },signal,bridge.token,event=>{
-       if(!event||typeof event!=='object')return;
+       if(signal.aborted||!event||typeof event!=='object')return;
        const part=event as Record<string,unknown>;
        bridge.onTool?.(event);
        if(part.type==='tool-call'&&typeof part.toolCallId==='string'&&typeof part.toolName==='string'){
@@ -36,6 +36,7 @@ export function sdkChatTransport(request:typeof postApiStream=postApiStream):Cha
         emit({type:'tool-output-available',toolCallId:part.toolCallId,output:part.output});
        }
       });
+      signal.throwIfAborted();
       emit({type:'text-end',id:'response'});emit({type:'finish',finishReason:'stop'});
       bridge.complete(null,result);ended=true;if(!cancelled)controller.close();
      }catch(error){

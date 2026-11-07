@@ -39,8 +39,10 @@ export function createAgentBacktestTool(uid:string,deps:Dependencies){
  return tool({
   description:'Run a bounded read-only backtest of an owned Hyperliquid strategy using genuine, completed Hyperliquid OHLC candles and isolated QuickJS. Does not place orders, save a live trade, or claim broker execution parity. Other broker venues require a matching data source.',
   inputSchema:agentBacktestInputSchema,
-  execute:async({botId,lookbackCandles})=>{
+  execute:async({botId,lookbackCandles},options)=>{
+   const abortSignal=options?.abortSignal;
    try{
+    abortSignal?.throwIfAborted();
     if(!uid||uid.length>128||uid.includes('/'))throw Error('Invalid account');
     const bot=await deps.getOwnedBot(uid,botId);
     if(!bot||bot.id!==botId||bot.userId&&bot.userId!==uid||bot.ownerUid&&bot.ownerUid!==uid||!assetId(bot.asset)){
@@ -59,6 +61,7 @@ export function createAgentBacktestTool(uid:string,deps:Dependencies){
     const datasets:Record<string,any[]>={},gaps:Record<string,number>={};
     const lineage:{timeframe:string;first:string;last:string;count:number;missing:number}[]=[];
     for(const timeframe of config.timeframes){
+      abortSignal?.throwIfAborted();
       const duration=intervalMs[timeframe as keyof typeof intervalMs];
       const end=Math.floor(clock/duration)*duration,from=end-lookbackCandles*duration;
       const market=await deps.market.hyperliquidCandles({asset:bot.asset,timeframe,from:new Date(from).toISOString(),to:new Date(end).toISOString()});
@@ -69,7 +72,9 @@ export function createAgentBacktestTool(uid:string,deps:Dependencies){
       gaps[timeframe]=0;
       lineage.push({timeframe,first:new Date(rows[0].time*1000).toISOString(),last:new Date(rows.at(-1)!.time*1000).toISOString(),count:rows.length,missing:0});
     }
-    const decisions=evaluateStrategyInSandbox(await modulePromise(),code,datasets,config);
+    const quickjs=await modulePromise();
+    abortSignal?.throwIfAborted();
+    const decisions=evaluateStrategyInSandbox(quickjs,code,datasets,config);
     const execution=datasets[config.executionTimeframe];
     if(!execution||decisions.length!==execution.length)throw Error('Strategy produced incomplete decisions');
     const result=simulate(execution,decisions,0,{

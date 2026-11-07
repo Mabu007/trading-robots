@@ -54,6 +54,18 @@ describe('owner-bound staged strategy approval flow',()=>{
   m.objects.set(m.codeKey,JSON.stringify({userId:'alice',botId:'bot-1',code:original+'// changed',venue:'propdao'}));
   await expect(m.service.apply('alice','bot-1',stage.intentId)).rejects.toThrow(/Stale/);
  });
+ it('rechecks the instrument inside the commit lock',async()=>{
+  const m=memory(),stage=await m.service.stage('alice','bot-1',original,revised);
+  await m.service.approve('alice','bot-1',stage.intentId);
+  const deps=(m.service as any).deps;
+  const originalCommit=deps.commit;
+  deps.commit=async(...args:any[])=>{
+   deps.getOwnedBot=async()=>({id:'bot-1',userId:'alice',asset:'BTCUSDC',venue:'propdao'});
+   return originalCommit(...args);
+  };
+  await expect(m.service.apply('alice','bot-1',stage.intentId)).rejects.toThrow(/instrument or venue changed/);
+  expect(JSON.parse(m.objects.get(m.codeKey)!).code).toBe(original);
+ });
  it('refuses tampering with staged code or action fingerprint',async()=>{
   const m=memory(),stage=await m.service.stage('alice','bot-1',original,revised);
   const stageKey='user-bots/YWxpY2U/bot-1/approvals/'+stage.intentId+'.json';

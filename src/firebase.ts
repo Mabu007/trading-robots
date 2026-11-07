@@ -171,7 +171,11 @@ export function connectFirebase(): Promise<CloudClient | null> {
       async saveConversation(id:string,chat:any[]){
         const uid=await currentUserId(),key=uid+':'+id;
         if(deletedConversationIds.has(key))return;
-        let messages=chat.slice(-60);
+        let messages=chat.slice(-60).map(item=>{
+          if(!item.toolReceiptId)return item;
+          const {toolTrace:_,...message}=item;
+          return message;
+        });
         while(messages.length>1&&JSON.stringify(messages).length>650000)messages=messages.slice(1);
         if(JSON.stringify(messages).length>650000)throw Error('Conversation is too large to save.');
         const payload=JSON.parse(JSON.stringify(messages));
