@@ -16,7 +16,8 @@
     "test:valr-live": "node scripts/test-valr-live.mjs",
     "test:valr-live-runtime": "node scripts/test-valr-live-runtime.mjs",
     "worker:valr:live:build": "wrangler deploy --dry-run --config workers/wrangler.valr-live.jsonc",
-    "worker:propdao:live:build": "wrangler deploy --dry-run --config workers/wrangler.propdao-live.jsonc"
+    "worker:propdao:live:build": "wrangler deploy --dry-run --config workers/wrangler.propdao-live.jsonc",
+    "test:production-smoke": "node scripts/production-baseline-smoke.mjs"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.85",
