@@ -81,7 +81,7 @@ export function PropDAODeployDialog({client,botId,onClose,onLog}:{client:CloudCl
     setError('The Worker did not confirm a running deployment. Check the exact account and refresh runtime status; do not submit another deployment blindly.');
    }
   }catch(e){
-   const reason=message(e);setStatus(old=>({...old,deployed:true,uncertain:true,error:reason}));setError('Deployment outcome needs verification: '+reason+'. Check runtime and account status before requesting a new review.');
+   const reason=message(e);setStatus((old:any)=>({...old,deployed:true,uncertain:true,error:reason}));setError('Deployment outcome needs verification: '+reason+'. Check runtime and account status before requesting a new review.');
   }finally{setBusy(false)}
  };
  const reconcile=async()=>{
