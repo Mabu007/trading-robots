@@ -16,17 +16,20 @@ export type CloudBot = {
 
 export type BotVersion = { id: string; name: string; storageKey: string; createdAt: string };
 
+import {verifiedPreferences,saneTask,type TradingPreferences,type ConversationTask} from './conversation-workflow';
 export type CloudClient = {
   listConversations: () => Promise<{id:string;title:string;model?:string|null}[]>;
   loadConversation: (id:string) => Promise<any[]|null>;
-  loadConversationRecord: (id:string) => Promise<{messages:any[];model:string|null;title:string}|null>;
-  saveConversation: (id:string, messages:any[],semanticTitle?:string) => Promise<void>;
+  loadConversationRecord: (id:string) => Promise<{messages:any[];model:string|null;title:string;task:ConversationTask|null}|null>;
+  saveConversation: (id:string, messages:any[],semanticTitle?:string,task?:ConversationTask|null) => Promise<void>;
   renameConversation: (id:string,title:string) => Promise<void>;
   deleteConversation: (id:string) => Promise<void>;
   selectConversationModel: (id:string,model:string|null) => Promise<void>;
   listSkills: () => Promise<UserSkill[]>;
   saveSkill: (skill:UserSkill) => Promise<void>;
   deleteSkill: (id:string) => Promise<void>;
+  loadTradingPreferences: () => Promise<TradingPreferences>;
+  saveTradingPreferences: (prefs:TradingPreferences) => Promise<void>;
   loadPersonality: () => Promise<string>;
   savePersonality: (instructions:string) => Promise<void>;
   listBots: () => Promise<CloudBot[]>;
@@ -167,12 +170,12 @@ export function connectFirebase(): Promise<CloudClient | null> {
         const snapshot=await storeSdk.getDoc(storeSdk.doc(db,'users',uid,'conversations',id));
         if(!snapshot.exists())return null;
         const data=snapshot.data()||{},messages=data.messages;
-        return {messages:Array.isArray(messages)?messages.filter((m:any)=>m&&['user','assistant'].includes(m.role)&&typeof m.content==='string'):[],model:typeof data.model==='string'?data.model:null,title:String(data.title||'New chat')};
+        return {messages:Array.isArray(messages)?messages.filter((m:any)=>m&&['user','assistant'].includes(m.role)&&typeof m.content==='string'):[],model:typeof data.model==='string'?data.model:null,title:String(data.title||'New chat'),task:saneTask(data.task)};
       },
       async loadConversation(id:string){
         return (await this.loadConversationRecord(id))?.messages??null;
       },
-      async saveConversation(id:string,chat:any[],semanticTitle?:string){
+      async saveConversation(id:string,chat:any[],semanticTitle?:string,assistantTask?:ConversationTask|null){
         const uid=await currentUserId(),key=uid+':'+id;
         if(deletedConversationIds.has(key))return;
         let messages=chat.slice(-60).map(item=>{
@@ -193,6 +196,7 @@ export function connectFirebase(): Promise<CloudClient | null> {
           const manuallyNamed=prior?.exists()&&prior.data()?.titleEdited===true;
           await storeSdk.setDoc(ref,{
             messages:payload,updatedAt:storeSdk.serverTimestamp(),
+            ...(assistantTask!==undefined?{task:saneTask(assistantTask)}:{}),
             ...(!manuallyNamed&&semanticTitle?{title:semanticTitle.slice(0,80)}:{})
           },{merge:true});
         });
@@ -235,6 +239,15 @@ export function connectFirebase(): Promise<CloudClient | null> {
       async deleteSkill(id:string){
         if(!/^skill-[a-zA-Z0-9_-]{8,90}$/.test(id))throw Error('Invalid skill ID.');
         await storeSdk.deleteDoc(storeSdk.doc(db,'users',await currentUserId(),'skills',id));
+      },
+      async loadTradingPreferences(){
+        const snapshot=await storeSdk.getDoc(storeSdk.doc(db,'users',await currentUserId(),'preferences','trading'));
+        return verifiedPreferences(snapshot.exists()?snapshot.data():null);
+      },
+      async saveTradingPreferences(input:TradingPreferences){
+        const prefs=verifiedPreferences(input);
+        await storeSdk.setDoc(storeSdk.doc(db,'users',await currentUserId(),'preferences','trading'),
+          {...prefs,updatedAt:storeSdk.serverTimestamp()},{merge:true});
       },
       async loadPersonality(){
         const snapshot=await storeSdk.getDoc(storeSdk.doc(db,'users',await currentUserId(),'preferences','personality'));
