@@ -22,6 +22,8 @@ export class PropDAOLiveService{
  async review(uid:string,botId:string,req:Request){
   const accountId=req.body?.accountId,riskUsd=Number(req.body?.riskUsd),leverage=Number(req.body?.leverage??1);
   if(!safeId(accountId)||!Number.isFinite(riskUsd)||riskUsd<=0||riskUsd>5)throw Error('Choose an owned account and risk from $0.01 to $5.');
+  const currentGrant=await this.grant(uid,botId);
+  if(currentGrant&&!currentGrant.revokedAt&&Date.now()<currentGrant.expiresAt)throw Error('A deployment authorization already exists. Stop new entries and verify the account before reviewing a replacement.');
   const bot=await this.deps.bot(uid,botId,req);
   if(!bot||bot.venue!=='propdao')throw Error('Save a PropDAO strategy before reviewing live deployment.');
   const config=parseStrategyConfig(bot.code);
@@ -172,7 +174,7 @@ export class PropDAOLiveService{
   if(!safeId(input?.accountId)||!Number.isFinite(Number(input?.riskUsd))||Number(input.riskUsd)<=0||Number(input.riskUsd)>5)throw Error('Choose an account and a trade risk of $0.01 to $5.');
   if(!(await this.health()).configured)throw Error('PropDAO Durable Object runtime is not ready. No orders were submitted.');
   const existing=await this.grant(uid,botId);
-  if(existing){const old=await this.status(uid,botId);if(old.running||old.uncertain)throw Error('Stop and reconcile the current deployment before replacing it.')}
+  if(existing){if(!existing.revokedAt&&Date.now()<existing.expiresAt)throw Error('Existing deployment authorization must be stopped and reconciled before replacement.');const old=await this.status(uid,botId);if(old.running||old.uncertain||old.paused||old.pendingIntent||old.statusUnavailable)throw Error('Stop and reconcile the current deployment before replacing it.')}
   const bot=await this.deps.bot(uid,botId,req);if(!bot||bot.venue!=='propdao')throw Error('Save a PropDAO strategy before deploying');
   const config=parseStrategyConfig(bot.code);
   const marketList=await this.deps.accounts.getPublicMarkets();
@@ -275,7 +277,7 @@ export class PropDAOLiveService{
  }
  async stop(uid:string,botId:string,req?:Request){
   const g=await this.grant(uid,botId);
-  if(!g)return {running:false,deployed:false,stopped:true,alreadyStopped:true,authorizationRevoked:true,runtimeStopped:true,exposure:'unverified'};
+  if(!g)return {running:false,deployed:false,stopped:false,alreadyStopped:true,authorizationRevoked:true,runtimeStopped:false,uncertain:true,exposure:'unverified',error:'No active server grant. Worker and broker exposure have not been independently verified.'};
   // Revoke order permission first, even if Cloudflare cannot be contacted.
   await this.deps.write(this.key(uid,botId),JSON.stringify({...g,revokedAt:g.revokedAt||Date.now()}));
   let bot:null|{asset:string;code:string;venue?:string;name?:string}=null;try{bot=await this.deps.bot(uid,botId,req as Request)}catch{}
