@@ -1,11 +1,12 @@
 import {displayTime} from '../display-time';
 import {useEffect,useMemo,useState} from 'react';
 import {createPortal} from 'react-dom';
-import {Activity,ArrowRight,Bot,Clock3,Code2,Pencil,Plus,Search,Sparkles,Trash2,X} from 'lucide-react';
+import {Activity,ArrowRight,Bot,Clock3,Code2,Eye,Pencil,Plus,RefreshCw,Search,Sparkles,Trash2,X} from 'lucide-react';
 import {Dialog} from './Dialog';
 import type {CloudBot, CloudClient} from '../firebase';
 import {StrategyWorkbench, type WorkbenchView} from './StrategyWorkbench';
 import {PropDAODeployDialog} from './Marketplace';
+import {DeployedRobotInspector} from './DeployedRobotInspector';
 import type {StrategyRun} from '../strategy-workbench';
 import type {Trade} from '../types';
 import type {AppTheme} from '../theme';
@@ -25,7 +26,7 @@ type Props={
  onRenameBot:(bot:CloudBot,name:string)=>Promise<void>; onDeleteBot:(bot:CloudBot)=>Promise<void>;
  onRenameAnalysis:(analysis:CodeAnalysis,name:string)=>Promise<void>; onDeleteAnalysis:(analysis:CodeAnalysis)=>Promise<void>;
  onRunAnalysis:(asset:CodeAnalysis)=>void; onWatch:(asset:CodeAnalysis)=>void; onStopWatch:(asset:CodeAnalysis)=>void;
- onDeploy:(bot:CloudBot,riskPercent:number,codeHash?:string)=>void; deploymentError?:string; onRefreshDeployments:()=>void;
+ onDeploy:(bot:CloudBot,riskPercent:number,codeHash?:string)=>void; deploymentError?:string; onRefreshDeployments:()=>Promise<void>|void;
  onManageDeployment:(agent:PersistentAgent,action:'status'|'stop')=>Promise<any>;
 };
 export function codeState(bot:CloudBot,agents:PersistentAgent[],states:Record<string,Runtime>):'Running'|'Paused'|'Stopped'|'Checking'|'Saved'{
@@ -38,11 +39,20 @@ export function codeState(bot:CloudBot,agents:PersistentAgent[],states:Record<st
  return live.state==='stopped'||live.state==='not-deployed'?'Stopped':'Checking';
 }
 export function CodeLibrary({client,bots,current,analyses,watches,agents,runtimeStates,onAsk,onSaved,onRenameBot,onDeleteBot,onRenameAnalysis,onDeleteAnalysis,onRunAnalysis,onWatch,onStopWatch,onDeploy,deploymentError,onRefreshDeployments,onManageDeployment,onAuditTrade,onConnectBroker,theme}:Props){
- const deployments=agents.filter(agent=>agent.mode==='live'&&agent.deployment?.grantId);
+ const deployments=agents.filter(agent=>agent.mode==='live'&&agent.deployment?.grantId).sort((a,b)=>(b.deployment?.authorizedAt||0)-(a.deployment?.authorizedAt||0));
  const [query,setQuery]=useState('');
  const [selectedAnalysis,setSelectedAnalysis]=useState<CodeAnalysis|null>(null);
  const [workbench,setWorkbench]=useState<{bot:CloudBot|null;view:WorkbenchView}|null>(null);
  const [localDeploy,setLocalDeploy]=useState<{bot:CloudBot;riskPercent:number;codeHash?:string}|null>(null);
+ const [selectedDeployment,setSelectedDeployment]=useState<PersistentAgent|null>(null);
+ const [refreshing,setRefreshing]=useState(false);
+ const refreshDeployments=async()=>{
+  if(refreshing)return;
+  setRefreshing(true);
+  try{await Promise.resolve(onRefreshDeployments());setOperationNotice('Refresh requested. Check each robot for broker-confirmed details; unavailable provider reads remain unverified.')}
+  catch(cause){setOperationNotice('Could not refresh robot status: '+(cause instanceof Error?cause.message:'Unknown error'))}
+  finally{setRefreshing(false)}
+ };
  const openWorkbench=(bot:CloudBot|null,view:WorkbenchView)=>setWorkbench({bot,view});
  const [stopAgent,setStopAgent]=useState<PersistentAgent|null>(null),[stopBusy,setStopBusy]=useState(false),[operationNotice,setOperationNotice]=useState('');
  const manage=async(agent:PersistentAgent,action:'status'|'stop')=>{
@@ -54,7 +64,7 @@ export function CodeLibrary({client,bots,current,analyses,watches,agents,runtime
     setStopAgent(null);
     setOperationNotice(outcome?.authorizationRevoked?(outcome.runtimeStopped?'New-order authorization revoked and runtime stop confirmed. Existing positions and orders still require broker verification.':'New-order authorization revoked. Worker stop is UNVERIFIED; check broker exposure and reconcile before replacing the strategy.'):'Stop outcome could not be verified. Check the broker and refresh status.');
    }else setOperationNotice(outcome?.uncertain||outcome?.statusUnavailable?'Runtime status unknown. Do not assume there are no active positions.':outcome?.running?'Runtime reported running. Account: '+String(outcome?.accountId||'unavailable'):outcome?.authorizationRevoked?'New-order authorization revoked; Worker status requires verification.':'Runtime status checked. Account: '+String(outcome?.accountId||'unavailable'));
-   onRefreshDeployments();
+   void refreshDeployments();
   }catch(e){setOperationNotice('Operation could not be verified: '+(e instanceof Error?e.message:'Unknown error'))}
   finally{setStopBusy(false)}
  };
@@ -75,8 +85,8 @@ export function CodeLibrary({client,bots,current,analyses,watches,agents,runtime
   <header className="tv-code-head"><div><span className="tv-code-eyebrow"><Code2 size={15}/> ROBOTS LIBRARY</span><h1 id="tv-code-title">Your robots.</h1><p>Write or generate a robot, backtest it, and review deployment here.</p></div><button type="button" className="tv-code-new" disabled={!client} onClick={()=>openWorkbench(null,'write')}><Plus size={16}/> Write a robot</button></header>
   <div className="tv-code-tools"><label className="tv-code-search"><Search size={16}/><input value={query} onChange={e=>setQuery(e.target.value)} aria-label="Search saved code" placeholder="Search code, market or venue…"/></label><span>{items.length+analysisItems.length} {items.length+analysisItems.length===1?'item':'items'}</span></div>
   <section className="tv-code-deployments" aria-labelledby="tv-deployments-title">
-   <header><div><h3 id="tv-deployments-title">Deployed robots</h3><p>Check the live runtime or review a stop request.</p></div>
-    <button type="button" onClick={onRefreshDeployments}>Refresh status</button></header>
+   <header><div><h3 id="tv-deployments-title">Deployed robots</h3><p>Every authorized robot, its runtime verification and broker exposure. Inspect a robot for its full operational record.</p></div>
+    <button type="button" onClick={()=>void refreshDeployments()} disabled={refreshing}><RefreshCw size={14}/>{refreshing?'Refreshing…':'Refresh status'}</button></header>
    {deploymentError&&<p role="alert">{deploymentError}</p>}
     {operationNotice&&<p role="status">{operationNotice}</p>}
    {deployments.map(agent=>{
@@ -90,12 +100,16 @@ export function CodeLibrary({client,bots,current,analyses,watches,agents,runtime
       {runtime?.error&&<small>{runtime.error}</small>}
      </div>
      <div className="tv-code-item-actions">
-      <button type="button" onClick={()=>void manage(agent,'status')}>Check status</button>
+       <button type="button" className="tv-code-inspect-button" onClick={()=>setSelectedDeployment(agent)}><Eye size={15}/> Inspect & manage</button>
+      <button type="button" onClick={()=>void manage(agent,'status')}>Quick check</button>
       {(state==='running'||state==='paused'||state==='unverified')&&<button type="button" onClick={()=>{if(agent.venue==='propdao')setStopAgent(agent);else void manage(agent,'stop')}}>{agent.venue==='propdao'?'Stop new entries':'Review stop'}</button>}
      </div>
     </article>;
    })}
-   {!deployments.length&&!deploymentError&&<p>No deployed strategies yet.</p>}
+    {!deployments.length&&!deploymentError&&<div className="tv-code-empty-deploy">
+  <Bot size={21}/><strong>No deployed robots yet</strong>
+  <span>Finish a saved backtest and deploy an exact reviewed revision. Only broker-confirmed deployments appear here.</span>
+ </div>}
   </section>
   <div className="tv-code-list">{items.map(bot=>{const state=codeState(bot,agents,runtimeStates);const agent=agents.find(a=>a.botId===bot.id&&a.mode==='live');return <article className="tv-code-item" key={bot.id}><span className="tv-code-item-icon"><Code2 size={18}/></span><div className="tv-code-item-content"><div className="tv-code-item-title"><strong>{bot.name||'Untitled code'}</strong><span className={'tv-code-state '+state.toLowerCase()}><i/>{state}</span></div><p>{bot.asset||'Unknown market'} · {venueLabel[bot.venue||'valr']} · Deterministic strategy.js</p><small>{bot.lastBacktest?'Last backtest · '+bot.lastBacktest.from+' to '+bot.lastBacktest.to:'No saved backtest yet'}{agent?.deployment?' · Deployed version '+agent.strategy.version:''}</small></div><div className="tv-code-item-actions"><button type="button" disabled={!client} onClick={()=>openWorkbench(bot,'write')}><Code2 size={15}/> Open</button><button type="button" disabled={!client} onClick={()=>openWorkbench(bot,'backtest')}><Activity size={15}/> Run backtest</button>{bot.lastBacktest&&<button type="button" disabled={!client} onClick={()=>openWorkbench(bot,'result')}>View last result</button>}<button type="button" className="tv-code-icon-action" title="Discuss with AI" aria-label={'Discuss '+bot.name+' with AI'} onClick={()=>onAsk('Explain the saved strategy named "'+bot.name+'".',bot)}><Sparkles size={15}/></button><button type="button" className="tv-code-icon-action" title="Rename" aria-label={'Rename '+bot.name} onClick={()=>chooseAction('rename','bot',bot)}><Pencil size={15}/></button><button type="button" className="tv-code-icon-action" title="Delete" aria-label={'Delete '+bot.name} onClick={()=>chooseAction('delete','bot',bot)}><Trash2 size={15}/></button></div></article>})}{analysisItems.map(asset=><article className="tv-code-item" key={asset.id}><span className="tv-code-item-icon"><Activity size={18}/></span><div className="tv-code-item-content"><div className="tv-code-item-title"><strong>{asset.name}</strong><span className={"tv-code-state "+(watches[asset.id]?.verified&&watches[asset.id]?.running?"running":"")}><i/>{watches[asset.id]?.verified&&watches[asset.id]?.running?"Running":watches[asset.id]&&!watches[asset.id].verified?"Status unknown":"Callable"}</span></div><p>{asset.asset} · {venueLabel[asset.venue]} · {asset.timeframe.toUpperCase()} · {asset.kind==='liquidity_sweeps'?'Liquidity sweeps':'Volatility profile'}</p><small>Read-only deterministic analysis tool. Runs on verified historical candles.</small></div><div className="tv-code-item-actions"><button type="button" onClick={()=>setSelectedAnalysis(asset)}><Code2 size={15}/> View</button><button type="button" onClick={()=>onRunAnalysis(asset)}><Activity size={15}/> Run</button><button type="button" aria-label={'Discuss '+asset.name+' with AI'} onClick={()=>onAsk('Explain the saved Code analysis named "'+asset.name+'" and how its detection works.')}><Sparkles size={15}/></button><button type="button" className="tv-code-icon-action" aria-label={'Rename '+asset.name} onClick={()=>chooseAction('rename','analysis',asset)}><Pencil size={15}/></button><button type="button" className="tv-code-icon-action" aria-label={'Delete '+asset.name} onClick={()=>chooseAction('delete','analysis',asset)}><Trash2 size={15}/></button></div></article>)}{!(items.length||analysisItems.length)&&<div className="tv-code-empty"><Bot size={23}/><strong>No matching code</strong><p>Write a new strategy or search your saved strategies by name.</p><button disabled={!client} onClick={()=>openWorkbench(null,'write')}>Write a robot <ArrowRight size={14}/></button></div>}</div>
   {selectedAnalysis&&<div className="tv-code-modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)setSelectedAnalysis(null)}}><section className="tv-code-modal" role="dialog" aria-modal="true" aria-labelledby="tv-analysis-modal-title"><header><div><span className="tv-code-eyebrow"><Activity size={15}/> REUSABLE ANALYSIS · READ ONLY</span><h2 id="tv-analysis-modal-title">{selectedAnalysis.name}</h2><p>{selectedAnalysis.asset} · {selectedAnalysis.timeframe.toUpperCase()} · {venueLabel[selectedAnalysis.venue]}</p></div><button type="button" aria-label="Close code details" onClick={()=>setSelectedAnalysis(null)}><X size={18}/></button></header><div className="tv-code-modal-body"><div className="tv-code-info"><span>Tool type<strong>{selectedAnalysis.kind.replaceAll('_',' ')}</strong></span><span>Mode<strong>On-demand analysis</strong></span><span>Continuous monitor<strong className={watches[selectedAnalysis.id]?.verified&&watches[selectedAnalysis.id]?.running?'running':''}>{watches[selectedAnalysis.id]?.verified&&watches[selectedAnalysis.id]?.running?'Running':watches[selectedAnalysis.id]&&!watches[selectedAnalysis.id]?.verified?'Status unverified':'Not deployed'}</strong></span></div>{watches[selectedAnalysis.id]?.events?.length?<div className="tv-code-runtime"><strong>Recent monitor detections</strong>{watches[selectedAnalysis.id].events!.slice(-8).reverse().map(event=><span key={event.id}>{displayTime(event.time*1000)} · {event.kind} · {event.price}{event.output?' · '+event.output:''}</span>)}{watches[selectedAnalysis.id].nextAlarm&&<span>Next check: {displayTime(watches[selectedAnalysis.id].nextAlarm)}</span>}</div>:null}<pre tabIndex={0} className="tv-code-source"><code>{selectedAnalysis.source}</code></pre><p>Source is an auditable representation of a trusted scanner. Trading Vibes executes its validated implementation; arbitrary JavaScript is not evaluated.</p></div><footer><button type="button" onClick={()=>{setSelectedAnalysis(null);onAsk('Explain the saved Code analysis "'+selectedAnalysis.name+'".')}}><Sparkles size={15}/> Discuss</button><button type="button" onClick={()=>{const asset=selectedAnalysis;setSelectedAnalysis(null);watches[asset.id]?.verified&&watches[asset.id]?.running?onStopWatch(asset):onWatch(asset)}}><Clock3 size={15}/>{watches[selectedAnalysis.id]?.verified&&watches[selectedAnalysis.id]?.running?"Stop watch":"Review watch"}</button><button type="button" className="tv-code-new" onClick={()=>{const asset=selectedAnalysis;setSelectedAnalysis(null);onRunAnalysis(asset)}}><Activity size={15}/> Run analysis</button></footer></section></div>}
@@ -108,12 +122,16 @@ export function CodeLibrary({client,bots,current,analyses,watches,agents,runtime
     if(bot.venue==='propdao'){setLocalDeploy({bot,riskPercent,codeHash});return}
     onDeploy(bot,riskPercent,codeHash);
    }}/>}
-  {localDeploy&&client&&typeof document!=='undefined'&&createPortal(
+   {selectedDeployment&&client&&typeof document!=='undefined'&&createPortal(
+    <DeployedRobotInspector key={selectedDeployment.id} client={client}
+     agent={selectedDeployment} onClose={()=>setSelectedDeployment(null)}
+     onRefreshAgents={onRefreshDeployments} onStop={onManageDeployment}/>,document.body)}
+   {localDeploy&&client&&typeof document!=='undefined'&&createPortal(
    <PropDAODeployDialog key={localDeploy.bot.id+':'+(localDeploy.codeHash||'saved')} client={client}
     botId={localDeploy.bot.id} expectedCodeHash={localDeploy.codeHash}
-    onClose={()=>{setLocalDeploy(null);onRefreshDeployments()}}
+    onClose={()=>{setLocalDeploy(null);void onRefreshDeployments()}}
     onConnect={()=>{setLocalDeploy(null);onConnectBroker?.()}}
-    onLog={()=>onRefreshDeployments()}/>,document.body)}
+    onLog={line=>{setOperationNotice(line);void onRefreshDeployments()}}/>,document.body)}
   {stopAgent&&<Dialog title="Stop new PropDAO entries" busy={stopBusy} onClose={()=>setStopAgent(null)}>
     <p><strong>{stopAgent.name}</strong> · {stopAgent.asset} · {venueLabel[stopAgent.venue]}</p>
     <p>This revokes new-order permission before asking Cloudflare to stop. It does not cancel pending orders or close existing positions. An unavailable Worker does not prevent revocation; independently verify your broker account.</p>

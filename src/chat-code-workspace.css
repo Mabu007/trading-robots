@@ -230,3 +230,8 @@
 .tv-backtest-chat-table .tv-backtest-inspect-row:hover td{background:rgba(46,141,97,.11)}
 .tv-backtest-chat-table .tv-backtest-inspect-row:focus-visible{outline:2px solid #37a977;outline-offset:-2px}
 .tv-backtest-chat-table .tv-backtest-inspect-row button{min-width:36px;min-height:36px;border-radius:8px}
+
+.tv-backtest-chat-table .tv-backtest-trade-datetime{white-space:normal;min-width:195px;max-width:235px;font-size:10px;line-height:1.5;font-variant-numeric:tabular-nums;color:var(--tv-shell-muted)}
+.tv-backtest-chat-table th{white-space:nowrap}
+
+.tv-backtest-chat-table table{min-width:850px}

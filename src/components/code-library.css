@@ -49,3 +49,30 @@
   .tv-code-item-actions { flex-wrap: wrap; padding-left: 0; }
   .tv-strategy-workbench .field-row { flex-wrap: wrap; }
 }
+
+/* Operational robot cards: visible status, direct inspection, no hidden click targets. */
+.tv-code-deployments{border:1px solid var(--tv-shell-line);border-radius:17px;background:var(--tv-shell-panel);padding:20px;margin:16px 0 24px}
+.tv-code-deployments>header{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:17px}
+.tv-code-deployments>header h3{font-size:17px;letter-spacing:-.035em;margin:0 0 5px;color:var(--tv-shell-ink)}
+.tv-code-deployments>header p{font-size:11px;line-height:1.55;color:var(--tv-shell-muted);margin:0;max-width:520px}
+.tv-code-deployments>header button{display:inline-flex;align-items:center;gap:7px;min-height:36px;border-radius:10px;white-space:nowrap;transition:border-color .15s}
+.tv-code-deployments>header button:hover{border-color:var(--tv-shell-accent)}
+.tv-code-deployments>header button:disabled{opacity:.55;cursor:not-allowed}
+.tv-code-deployments>.tv-code-item{border:1px solid var(--tv-shell-line);border-radius:13px;background:var(--tv-shell-panel-muted);margin-bottom:10px;padding:15px;gap:13px}
+.tv-code-deployments .tv-code-item-content{min-width:0}
+.tv-code-deployments .tv-code-item-content p{color:var(--tv-shell-muted);font-size:11px}
+.tv-code-deployments .tv-code-item-title strong{font-weight:750}
+.tv-code-deployments .tv-code-item-actions{display:flex;align-items:center;flex-wrap:wrap;gap:7px}
+.tv-code-deployments .tv-code-inspect-button{display:inline-flex;align-items:center;gap:7px;background:var(--tv-shell-ink);color:var(--tv-shell-panel);border:1px solid transparent;font-weight:730}
+.tv-code-deployments .tv-code-inspect-button:hover{filter:brightness(1.16)}
+.tv-code-empty-deploy{display:flex;flex-direction:column;align-items:center;gap:7px;text-align:center;padding:24px 15px;border:1px dashed var(--tv-shell-line);border-radius:13px;color:var(--tv-shell-muted)}
+.tv-code-empty-deploy svg{color:var(--tv-shell-accent)}
+.tv-code-empty-deploy strong{color:var(--tv-shell-ink);font-size:13px}
+.tv-code-empty-deploy span{font-size:11px;line-height:1.55;max-width:420px}
+@media(max-width:660px){
+ .tv-code-deployments{padding:13px;border-radius:13px}
+ .tv-code-deployments>header{flex-wrap:wrap}
+ .tv-code-deployments>header button{margin-left:auto}
+ .tv-code-deployments .tv-code-item-actions{width:100%;justify-content:flex-start}
+ .tv-code-deployments .tv-code-inspect-button{flex:1}
+}
