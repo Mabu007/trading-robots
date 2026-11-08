@@ -9,6 +9,7 @@ import {gunzipSync} from 'node:zlib';
 export type StrategyBacktestEvidence={
  codeHash:string;receiptHash:string;asset:string;venue:string;from:string;to:string;
  source:string;savedAt:string;timeframe:string;provenance:'client-produced-research';
+ observedCandles:number;calendarIntervals:number;
 };
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 const date=(value:unknown)=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -84,8 +85,12 @@ export function inspectBacktestEvidence(raw:string,uid:string,botId:string,expec
   // Risk percent is tested and displayed separately from the live riskUsd setting.
   if(!Number.isFinite(state.riskPercent))throw Error('Saved backtest risk metadata is invalid.');
  }
+ const intervalSeconds:Record<string,number>={m1:60,m5:300,m15:900,m30:1800,h1:3600,h4:14400,d1:86400};
+ const dateSpanSeconds=(Date.parse(state.to+'T00:00:00Z')-Date.parse(state.from+'T00:00:00Z'))/1000+86400;
+ const calendarIntervals=Math.round(dateSpanSeconds/intervalSeconds[state.result.timeframe]);
  return {codeHash:hash(state.strategyCode),receiptHash:hash(raw),asset:state.asset,venue:state.venue,
   from:state.from,to:state.to,source:typeof state.result.source==='string'?state.result.source:'Historical data',
   savedAt:typeof file.savedAt==='string'?file.savedAt:'',
-  timeframe:state.result.timeframe,provenance:'client-produced-research'};
+  timeframe:state.result.timeframe,provenance:'client-produced-research',
+  observedCandles:state.result.candles.length,calendarIntervals};
 }
