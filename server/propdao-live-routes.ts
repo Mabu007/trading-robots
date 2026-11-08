@@ -1,6 +1,7 @@
 import {createHash,timingSafeEqual,randomBytes} from 'node:crypto';
 import type {Express,Request,Response} from 'express';
 import {parseStrategyConfig} from '../src/strategy.ts';
+import {inspectBacktestEvidence} from './strategy-backtest-evidence.ts';
 import {PropDAOAccounts,PropDAONoSubmissionError} from './propdao-account.ts';
 import type {AgentRegistry} from './agent-registry.ts';
 import type {AgentBot} from './agent-registry.ts';
@@ -18,6 +19,7 @@ export class PropDAOLiveService{
  private key(uid:string,botId:string){return `propdao-live/v1/${process.env.VERCEL_ENV||'development'}/${Buffer.from(uid).toString('base64url')}/${botId}.json`}
 
  private reviewKey(uid:string,botId:string,id:string){return `propdao-live-reviews/v1/${process.env.VERCEL_ENV||'development'}/${Buffer.from(uid).toString('base64url')}/${botId}/${id}.json`}
+ private backtestKey(uid:string,botId:string){return `user-bots/${Buffer.from(uid).toString('base64url')}/${botId}/backtest.json`}
  /** A read-only, expiring review of the exact source, account, market and risk. */
  async review(uid:string,botId:string,req:Request){
   const accountId=req.body?.accountId,riskUsd=Number(req.body?.riskUsd),leverage=Number(req.body?.leverage??1);
@@ -32,10 +34,13 @@ export class PropDAOLiveService{
   if(!market||!Number.isFinite(leverage)||leverage<1||leverage>Number(market.maxLeverage))throw Error('Instrument or leverage is not currently supported on PropDAO.');
   const account=await this.deps.accounts.accountRisk(uid,accountId);
   if(!['active','funded'].includes(account.account.status)||account.risk.breached||!Number.isFinite(account.risk.roomUsd)||account.risk.roomUsd<=riskUsd*3)throw Error('Account risk room does not permit this deployment.');
+  const rawBacktest=await this.deps.read(this.backtestKey(uid,botId));
+  if(!rawBacktest)throw Error('A saved backtest of this exact strategy is required before deployment. Run a backtest and save it first.');
+  const evidence=inspectBacktestEvidence(rawBacktest,uid,botId,{code:bot.code,asset:bot.asset,venue:'propdao',executionTimeframe:config.executionTimeframe});
   const id=randomBytes(24).toString('hex'),createdAt=Date.now();
-  const data={version:1,id,uid,botId,accountId,riskUsd,leverage,symbol:bot.asset,codeHash:hash(bot.code),strategyRiskPercent:config.riskPercent,executionTimeframe:config.executionTimeframe,createdAt,expiresAt:createdAt+120000,consumedAt:null as number|null};
+  const data={version:1,id,uid,botId,accountId,riskUsd,leverage,symbol:bot.asset,codeHash:hash(bot.code),evidenceHash:evidence.receiptHash,backtest:{from:evidence.from,to:evidence.to,source:evidence.source,savedAt:evidence.savedAt,provenance:evidence.provenance},strategyRiskPercent:config.riskPercent,executionTimeframe:config.executionTimeframe,createdAt,expiresAt:createdAt+120000,consumedAt:null as number|null};
   await this.deps.write(this.reviewKey(uid,botId,id),JSON.stringify(data));
-  return {...data,reviewId:id,environment:process.env.VERCEL_ENV||'development',evidence:'Existing browser backtests are research evidence, not independently certified live results.'};
+  return {...data,reviewId:id,environment:process.env.VERCEL_ENV||'development',evidence:'Source matches the saved browser backtest. The simulation and fills are client-produced research, not independently certified by a trusted runner.'};
  }
  private async consumeReview(uid:string,botId:string,input:any,bot:{asset:string;code:string},leverage:number){
   if(this.deps.unsafeLegacyDeployForTests)return;
@@ -45,6 +50,8 @@ export class PropDAOLiveService{
   const r=JSON.parse(raw);
   if(r.version!==1||r.uid!==uid||r.botId!==botId||r.id!==input.reviewId||r.consumedAt!==null||!Number.isFinite(r.expiresAt)||Date.now()>=r.expiresAt)throw Error('Deployment review expired or already used.');
   if(r.accountId!==input.accountId||r.symbol!==bot.asset||r.codeHash!==hash(bot.code)||r.codeHash!==input.expectedCodeHash||r.riskUsd!==Number(input.riskUsd)||r.leverage!==leverage)throw Error('Strategy revision, account or risk changed since review. Request a fresh review.');
+  const latest=await this.deps.read(this.backtestKey(uid,botId));
+  if(!latest||hash(latest)!==r.evidenceHash)throw Error('Saved backtest changed since authorization review. Request a new review.');
   await this.deps.write(reviewKey,JSON.stringify({...r,consumedAt:Date.now()}));
  }
  private async grant(uid:string,botId:string):Promise<PropGrant|null>{const raw=await this.deps.read(this.key(uid,botId));if(!raw)return null;const g=JSON.parse(raw) as PropGrant;if(g.uid!==uid||g.botId!==botId)throw Error('Live authorization ownership mismatch');return g}
