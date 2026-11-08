@@ -28,6 +28,8 @@ export class PropDAOLiveService{
   if(currentGrant&&!currentGrant.revokedAt&&Date.now()<currentGrant.expiresAt)throw Error('A deployment authorization already exists. Stop new entries and verify the account before reviewing a replacement.');
   const bot=await this.deps.bot(uid,botId,req);
   if(!bot||bot.venue!=='propdao')throw Error('Save a PropDAO strategy before reviewing live deployment.');
+  const codeHash=hash(bot.code);
+  if(req.body?.expectedCodeHash!==undefined&&req.body.expectedCodeHash!==codeHash)throw Error('The saved strategy changed. Open it again and review the current backtest.');
   const config=parseStrategyConfig(bot.code);
   if(config.timeframes.some((tf:string)=>!['m1','m5','m15','m30','h1','h4'].includes(tf)))throw Error('Unsupported live strategy timeframe.');
   const marketList=await this.deps.accounts.getPublicMarkets(),market=marketList.data.find((m:any)=>m.symbol===bot.asset);
@@ -38,7 +40,7 @@ export class PropDAOLiveService{
   if(!rawBacktest)throw Error('A saved backtest of this exact strategy is required before deployment. Run a backtest and save it first.');
   const evidence=inspectBacktestEvidence(rawBacktest,uid,botId,{code:bot.code,asset:bot.asset,venue:'propdao',executionTimeframe:config.executionTimeframe});
   const id=randomBytes(24).toString('hex'),createdAt=Date.now();
-  const data={version:1,id,uid,botId,accountId,riskUsd,leverage,symbol:bot.asset,codeHash:hash(bot.code),evidenceHash:evidence.receiptHash,backtest:{from:evidence.from,to:evidence.to,source:evidence.source,savedAt:evidence.savedAt,provenance:evidence.provenance},strategyRiskPercent:config.riskPercent,executionTimeframe:config.executionTimeframe,createdAt,expiresAt:createdAt+120000,consumedAt:null as number|null};
+  const data={version:1,id,uid,botId,accountId,riskUsd,leverage,symbol:bot.asset,codeHash,evidenceHash:evidence.receiptHash,backtest:{from:evidence.from,to:evidence.to,source:evidence.source,savedAt:evidence.savedAt,provenance:evidence.provenance},strategyRiskPercent:config.riskPercent,executionTimeframe:config.executionTimeframe,createdAt,expiresAt:createdAt+120000,consumedAt:null as number|null};
   await this.deps.write(this.reviewKey(uid,botId,id),JSON.stringify(data));
   return {...data,reviewId:id,environment:process.env.VERCEL_ENV||'development',evidence:'Source matches the saved browser backtest. The simulation and fills are client-produced research, not independently certified by a trusted runner.'};
  }
@@ -61,13 +63,13 @@ export class PropDAOLiveService{
   if(!this.deps.agents)return;
   try{await this.deps.agents.liveTransition(uid,this.agentBot(uid,botId,bot),input)}catch(error){if(!bestEffort)throw error;}
  }
- private async runtime(g:PropGrant,action:'deploy'|'stop'|'status'|'pause'|'resume'|'reconcile',body?:unknown){
+ private async runtime(g:PropGrant,action:'deploy'|'stop'|'status'|'pause'|'resume'|'reconcile',body?:unknown,timeoutMs=20000){
   const base=process.env.PROPDAO_LIVE_RUNTIME_URL,secret=process.env.PROPDAO_LIVE_INTERNAL_SECRET;
   if(!base||!secret||secret.length<32)throw Error('PropDAO Durable Object runtime is not configured');
   const runtimeId=g.runtimeScope==='bot'?hash(g.uid+':'+g.accountId+':'+g.botId):g.runtimeScope==='lock'?hash('propdao-execution:'+g.uid+':'+g.accountId):hash(g.uid+':'+g.accountId);
   const url=new URL(`/live/${runtimeId}/${action}`,base);
   if(url.protocol!=='https:'&&!(url.protocol==='http:'&&url.hostname==='127.0.0.1'))throw Error('Live runtime requires HTTPS');
-  const response=await this.request(url,{method:action==='status'?'GET':'POST',headers:{Authorization:`Bearer ${secret}`,'X-TV-UID':g.uid,'Content-Type':'application/json'},...(action==='status'?{}:{body:JSON.stringify(body??{})}),signal:AbortSignal.timeout(20000)});
+  const response=await this.request(url,{method:action==='status'?'GET':'POST',headers:{Authorization:`Bearer ${secret}`,'X-TV-UID':g.uid,'Content-Type':'application/json'},...(action==='status'?{}:{body:JSON.stringify(body??{})}),signal:AbortSignal.timeout(timeoutMs)});
   let result:any;try{result=await response.json()}catch{throw Error('Durable Object returned invalid JSON')}
   if(!response.ok)throw Error(typeof result.error==='string'?result.error:'Durable Object unavailable');
   return result;
@@ -212,9 +214,14 @@ export class PropDAOLiveService{
   try{await this.recordAgent(uid,botId,bot,{state:'deployment_pending',action:'deployment_authorized',grantId:grant.id,expiresAt:grant.expiresAt,codeHash:grant.codeHash,limits:{riskUsd:grant.riskUsd,leverage:grant.leverage},authorized:true})}
   catch(error){if(existing)await this.deps.write(this.key(uid,botId),JSON.stringify(existing));else if(this.deps.remove)await this.deps.remove(this.key(uid,botId));else await this.deps.write(this.key(uid,botId),JSON.stringify({...grant,revokedAt:Date.now()}));throw error}
   try{
-   const result=await this.runtime(grant,'deploy',grant),state=result?.running===true?'running':result?.paused===true?'paused':'unknown';
+   const result=await this.runtime(grant,'deploy',grant);
+   // Deployment acknowledgement omits the grant identity. A status read must
+   // establish which grant is running before the UI reports confirmation.
+   const observed=await this.runtime(grant,'status',undefined,5000).catch(()=>null);
+   const matched=observed?.grant?.id===grant.id;
+   const state=matched&&observed.running===true?'running':matched&&observed.paused===true?'paused':'unknown';
    await this.recordAgent(uid,botId,bot,{state,action:state==='unknown'?'deployment_response_unverified':'deployment_confirmed',grantId:grant.id,expiresAt:grant.expiresAt,codeHash:grant.codeHash,limits:{riskUsd:grant.riskUsd,leverage:grant.leverage},authorized:true,error:state==='unknown'?'Deployment was accepted but its running state could not be verified.':undefined},true);
-   return result;
+   return {...result,running:state==='running',paused:state==='paused',grant:matched?observed.grant:null,uncertain:state==='unknown'};
   }
   catch(e){
    // Roll back only definite Worker rejections. A lost response is ambiguous

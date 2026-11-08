@@ -237,9 +237,24 @@ app.put('/api/user-bots/:botId/current', async (req, res) => {
   if (!validBotId(botId)) return res.status(400).json({ error: 'Robot ID is invalid.' });
   if (typeof code !== 'string' || !code.trim() || code.length > 180_000) return res.status(400).json({ error: 'Robot code must be between 1 and 180,000 characters.' });
   if (!getR2Config()) return res.status(503).json({ error: 'Robot storage is not configured on the server.' });
+  const venue = venueOf(req.body?.venue);
+  const expectedCode = req.body?.expectedCode;
+  if (expectedCode !== undefined) {
+    if (typeof expectedCode !== 'string' || expectedCode.length > 180_000 || venue === 'ctrader') {
+      return res.status(400).json({error:'This strategy cannot be edited from the Library.'});
+    }
+    try {
+      const storageKey = await commitReviewedCode(uid, botId, code, expectedCode, undefined, venue);
+      return res.json({storageKey});
+    } catch (error) {
+      return res.status(409).json({error:error instanceof Error ? error.message : 'Could not verify the saved strategy.'});
+    }
+  }
   const storageKey = `${userBotRoot(uid, botId)}/current.json`;
   try {
-    await writeR2Object(storageKey, JSON.stringify({ schemaVersion: 1, userId: uid, botId, code, venue:venueOf(req.body?.venue), updatedAt: new Date().toISOString() }));
+    const write = () => writeR2Object(storageKey, JSON.stringify({schemaVersion:1,userId:uid,botId,code,venue,updatedAt:new Date().toISOString()}));
+    if(venue==='propdao') await propBotExclusive(uid,botId,write);
+    else await write();
     return res.json({ storageKey });
   } catch (error) {
     console.error('User robot save failed', { botId, message: error instanceof Error ? error.message : String(error) });
@@ -1028,8 +1043,10 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
         : error instanceof Error && error.message.toLowerCase().includes('fetch failed')
           ? 'Could not connect to OpenRouter. Check server internet access, DNS, or firewall and retry.'
           : error instanceof Error ? error.message : 'AI request failed.';
-    console.error('OpenRouter request failed', { model, networkCode: networkCode ?? null, name: error instanceof Error ? error.name : typeof error });
-    if (!res.destroyed) res.write(`event: error\ndata: ${JSON.stringify({ error: message })}\n\n`);
+    const rateLimited=causes.some(cause=>cause.statusCode===429||cause.status===429);
+    const reason=rateLimited?'OpenRouter rate-limited the selected model. Retry later or choose another model in Apps.':message;
+    console.error('OpenRouter request failed', {model, rateLimited, networkCode:networkCode??null, name:error instanceof Error?error.name:typeof error});
+    if (!res.destroyed) res.write(`event: error\ndata: ${JSON.stringify({ error: reason })}\n\n`);
     return res.end();
   } finally {
     clearInterval(heartbeat);

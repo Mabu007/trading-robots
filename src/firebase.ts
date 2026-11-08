@@ -35,6 +35,7 @@ export type CloudClient = {
   deleteCodeAnalysis: (id:string) => Promise<void>;
   getIdToken: (forceRefresh?: boolean) => Promise<string>;
   saveBot: (bot: CloudBot, storageKey: string) => Promise<void>;
+  saveBacktestSummary: (botId: string, lastBacktest: NonNullable<CloudBot['lastBacktest']>) => Promise<void>;
   deleteBot: (botId: string) => Promise<void>;
   loadChats: (botId: string) => Promise<any[]>;
   saveChats: (botId: string, chat: any[]) => Promise<void>;
@@ -113,6 +114,10 @@ export function connectFirebase(): Promise<CloudClient | null> {
           code: storeSdk.deleteField(),
         };
         await storeSdk.setDoc(reference, payload, { merge: true });
+      },
+      async saveBacktestSummary(botId, lastBacktest) {
+        const reference = storeSdk.doc(db, 'users', await currentUserId(), 'bots', botId);
+        await storeSdk.updateDoc(reference, {lastBacktest, updatedAt: storeSdk.serverTimestamp()});
       },
       async listCodeAnalyses(){
         const uid=await currentUserId();

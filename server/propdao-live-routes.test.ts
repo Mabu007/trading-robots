@@ -20,7 +20,7 @@ const setup=(strictReviews=false)=>{
   executeOrder:vi.fn(async()=>({intentId:'test',protected:true})),
   recentTrades:vi.fn(async()=>[]),
  };
- const fetcher=vi.fn(async(url:string)=>String(url).endsWith('/health')?Response.json({ready:true}):Response.json({grant:null,running:false,paused:false,pendingIntent:null,events:['authorized']}));
+ const fetcher=vi.fn(async(url:string,_init?:RequestInit)=>String(url).endsWith('/health')?Response.json({ready:true}):Response.json({grant:null,running:false,paused:false,pendingIntent:null,events:['authorized']}));
  const svc=new PropDAOLiveService({...storage,unsafeLegacyDeployForTests:!strictReviews,uid:async()=> 'alice',bot:async()=>({asset:'BTCUSDC',venue:'propdao',code:starterCode}),accounts:accounts as unknown as PropDAOAccounts,request:fetcher as unknown as typeof fetch});
  return {svc,fetcher,accounts,saved,storage};
 };
@@ -272,6 +272,30 @@ describe('revision- and account-bound PropDAO deployment review',()=>{
   await expect(svc.review('alice','bot-1',{body:requestBody} as any)).rejects.toThrow(/already exists/);
   await svc.stop('alice','bot-1');
   await expect(svc.deploy('alice','bot-1',{body} as any)).rejects.toThrow(/already used/);
+ });
+ it('rejects preparing a deployment for a source different from the open workspace',async()=>{
+  const {svc,storage}=setupReady();
+  await expect(svc.review('alice','bot-1',{body:{...requestBody,expectedCodeHash:'a'.repeat(64)}} as any)).rejects.toThrow(/saved strategy changed/);
+  expect(storage.write).not.toHaveBeenCalled();
+ });
+ it.each([true,false])('checks the exact running grant after the Worker acknowledgement (match: %s)',async(matched)=>{
+  const {svc,fetcher,accounts}=setupReady();
+  let activeGrant:string|null=null;
+  fetcher.mockImplementation(async(url:string,init?:RequestInit)=>{
+   const path=String(url);
+   if(path.endsWith('/health'))return Response.json({ready:true});
+   if(path.endsWith('/deploy')){
+    activeGrant=JSON.parse(String(init?.body)).id;
+    return Response.json({running:true,events:['scheduled']});
+   }
+   return Response.json({running:Boolean(activeGrant),grant:activeGrant?{id:matched?activeGrant:'different-grant'}:null});
+  });
+  const reviewed=await svc.review('alice','bot-1',{body:requestBody} as any);
+  const body={...requestBody,reviewId:reviewed.reviewId,expectedCodeHash:reviewed.codeHash,confirm:auth};
+  const result=await svc.deploy('alice','bot-1',{body} as any);
+  expect(result).toMatchObject({running:matched,uncertain:!matched,grant:matched?{id:activeGrant}:null});
+  await expect(svc.deploy('alice','bot-1',{body} as any)).rejects.toThrow(/Existing deployment authorization/);
+  expect(accounts.executeOrder).not.toHaveBeenCalled();
  });
  it('rejects modified risk, stale source hashes, and expired reviews',async()=>{
   const {svc}=setupReady();
