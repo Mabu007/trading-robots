@@ -216,7 +216,7 @@ const agentRuntimeStatus=async(uid:string,agent:AgentRecord)=>{
  if(agent.venue==='propdao'){
   const status=await propdaoLiveService.status(uid,agent.botId);
   const state=status.uncertain||status.statusUnavailable?'unknown':status.running?'running':status.paused?'paused':status.deployed?'stopped':agent.state;
-  return {agentId:agent.id,state,verified:Boolean(status.deployed&&!status.uncertain&&!status.statusUnavailable),lastSignal:status.lastSignal||status.lastEvaluation?.action||null,nextCheck:status.nextAlarm||null,openPositions:Array.isArray(status.positions)?status.positions.length:null,error:status.error?String(status.error).slice(0,300):null,checkedAt:Date.now()};
+  return {agentId:agent.id,state,verified:Boolean(status.deployed&&!status.uncertain&&!status.statusUnavailable),lastSignal:status.lastSignal||status.lastEvaluation?.action||null,nextCheck:status.nextAlarm||null,openPositions:status.brokerExposureVerified===true&&Array.isArray(status.positions)?status.positions.length:null,brokerExposure:status.brokerExposureVerified===true?status.brokerExposure:'unknown',brokerExposureVerified:status.brokerExposureVerified===true,error:status.accountError?String(status.accountError).slice(0,300):status.error?String(status.error).slice(0,300):null,checkedAt:Date.now()};
  }
  if(agent.venue==='valr'){
   const status=await liveService.status(uid,agent.botId),botState=status.state?.bots?.[agent.botId];
