@@ -225,3 +225,8 @@
 @media (max-width: 720px) {
   .tv-chat-first.tv-area-chat .tv-streamdown :is(th,td) { padding: 8px 9px; }
 }
+
+.tv-backtest-chat-table .tv-backtest-inspect-row{cursor:pointer}
+.tv-backtest-chat-table .tv-backtest-inspect-row:hover td{background:rgba(46,141,97,.11)}
+.tv-backtest-chat-table .tv-backtest-inspect-row:focus-visible{outline:2px solid #37a977;outline-offset:-2px}
+.tv-backtest-chat-table .tv-backtest-inspect-row button{min-width:36px;min-height:36px;border-radius:8px}

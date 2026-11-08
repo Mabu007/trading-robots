@@ -4,6 +4,9 @@ import {AiOutputLimitError, chatStreamPath, postApiStream} from '../api';
 import {compressBacktest, decompressBacktest, isCompressedBacktest} from '../backtest-storage';
 import type {CloudBot, CloudClient} from '../firebase';
 import {savedBacktestCard} from '../saved-backtest-card';
+import {BacktestTradeInspector} from './BacktestTradeInspector';
+import type {Trade} from '../types';
+import type {AppTheme} from '../theme';
 import {starterCode} from '../strategy';
 import {backtestRange, simulateWorkbench, strategyMarkets, validateWorkbenchSource, workbenchDeployable, type StrategyRun} from '../strategy-workbench';
 import {BacktestChatCard} from './BacktestChatCard';
@@ -17,13 +20,15 @@ type Props = {
   initialView: WorkbenchView;
   onSaved: (bot: CloudBot) => void;
   onDeploy: (bot: CloudBot, riskPercent: number, codeHash?: string) => void;
+  onAuditTrade?: (run: StrategyRun, trade: Trade, bot: CloudBot | null) => void;
+  theme?: AppTheme;
   onClose: () => void;
 };
 const writableVenues = ['propdao', 'hyperliquid', 'valr'] as const;
 const errorText = (error: unknown) => error instanceof Error ? error.message : 'Something went wrong. Try again.';
 const yesterdayUtc = () => new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
 
-export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, onClose}: Props) {
+export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, onAuditTrade, theme='light', onClose}: Props) {
   const [id] = useState(() => bot?.id || crypto.randomUUID());
   const [savedBot, setSavedBot] = useState(bot?.storageKey ? bot : null);
   const [view, setView] = useState(initialView);
@@ -41,6 +46,7 @@ export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, 
   const [sourceReady, setSourceReady] = useState(!bot?.storageKey);
   const [run, setRun] = useState<StrategyRun | null>(null);
   const [runSaved, setRunSaved] = useState(false);
+  const [inspectedTradeId,setInspectedTradeId] = useState<number|null>(null);
   const [loadingRun, setLoadingRun] = useState(Boolean(bot?.storageKey));
   const [busy, setBusy] = useState('');
   const [progress, setProgress] = useState('');
@@ -188,6 +194,7 @@ export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, 
     backtestRange(from, to, config.timeframes);
     const target = await save(signal);
     runStarted.current = true;
+    setInspectedTradeId(null);
     const completed = await simulateWorkbench({venue, asset: target.asset, strategyCode: code, from, to}, signal, setProgress);
     setRun(completed);
     setRunSaved(false);
@@ -248,7 +255,10 @@ export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, 
     </>}
     {view === 'result' && <section ref={resultsSection} aria-label="Robot backtest result">
       {card ? <>
-        <BacktestChatCard data={card} />
+        <BacktestChatCard data={card} onInspect={tradeId=>setInspectedTradeId(tradeId)} />
+        {run && inspectedTradeId!==null && run.result.trades.some(trade=>trade.id===inspectedTradeId) &&
+         <BacktestTradeInspector run={run} tradeId={inspectedTradeId} theme={theme}
+          onClose={()=>setInspectedTradeId(null)} onAskAI={onAuditTrade?(trade)=>onAuditTrade(run,trade,savedBot):undefined}/>}
         <p>{runSaved ? currentRun ? 'Saved result for the current strategy code.' : 'Saved historical result. Run a new backtest to test the current code.' : 'Result is visible here but has not been saved.'}</p>
         {run?.logs?.length ? <details><summary>Simulation assumptions and log</summary><pre className="tv-code-source">{run.logs.join('\n')}</pre></details> : null}
       </> : <p>{loadingRun ? 'Loading saved result…' : 'Run a backtest to see results here.'}</p>}
