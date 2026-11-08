@@ -109,7 +109,7 @@ export class PropDAOLiveService{
   try{
    const state=await this.runtime(grant,'status');
    const matched=state.grant?.id===grant.id;
-   let positions:any[]=[],closedTrades:any[]=[],pendingOrders:any[]|null=null,risk:any=null,accountError:string|undefined;
+   let positions:any[]|null=null,closedTrades:any[]=[],pendingOrders:any[]|null=null,risk:any=null,accountError:string|undefined,brokerExposureVerified=false;
    if(matched){
     try{
      const account=await this.deps.accounts.accountRisk(uid,grant.accountId);
@@ -128,6 +128,8 @@ export class PropDAOLiveService{
       status:String(o.status??'UNKNOWN'),type:String(o.orderType??o.type??''),
       createdAt:Number.isFinite(Number(o.createdAt??o.timestamp))?Number(o.createdAt??o.timestamp):null
      }));
+     // A successful broker account read, not Worker reachability, verifies exposure.
+     brokerExposureVerified=true;
      closedTrades=await this.deps.accounts.recentTrades(uid,grant.accountId);
     }catch(e){accountError=e instanceof Error?e.message:'PropDAO account activity unavailable'}
    }
@@ -139,6 +141,7 @@ export class PropDAOLiveService{
      paused:state.paused===true&&matched&&!grant.revokedAt&&Date.now()<grant.expiresAt,
      canResume:state.paused===true&&matched&&configured&&!state.pendingIntent&&!grant.revokedAt&&Date.now()<grant.expiresAt,
     accountId:grant.accountId,authorizationRevoked:Boolean(grant.revokedAt),grantExpiresAt:grant.expiresAt,codeHash:grant.codeHash,positions,pendingOrders,closedTrades,risk,accountError,
+    brokerExposureVerified,brokerExposure:brokerExposureVerified?(positions?.length?'open':pendingOrders?.length?'pending':'flat'):'unknown',
     error:!matched&&state.pendingIntent?'This account has an unresolved order from another bot. Reconcile it before deploying.':health.error};
 
   }catch(e){return {configured:true,deployed:true,running:false,uncertain:true,authorizationRevoked:Boolean(grant.revokedAt),accountId:grant.accountId,events:[],error:e instanceof Error?e.message:'Worker unavailable. Order status is unknown.'}}
