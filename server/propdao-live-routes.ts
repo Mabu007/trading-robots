@@ -7,7 +7,7 @@ import type {AgentBot} from './agent-registry.ts';
 import {venueOf} from '../shared/venues.ts';
 
 type Storage={read:(key:string)=>Promise<string|null>;write:(key:string,value:string)=>Promise<void>;remove?:(key:string)=>Promise<void>;list?:(prefix:string,limit:number)=>Promise<string[]>};
-type Dependencies=Storage&{uid:(req:Request,res:Response)=>Promise<string|null>;bot:(uid:string,id:string,req:Request)=>Promise<{asset:string;code:string;venue?:string;name?:string}|null>;accounts:PropDAOAccounts;agents?:AgentRegistry;request?:typeof fetch;exclusive?:<T>(uid:string,id:string,work:()=>Promise<T>)=>Promise<T>};
+type Dependencies=Storage&{/** Legacy unit fixtures only; never pass from HTTP routes. */unsafeLegacyDeployForTests?:boolean;uid:(req:Request,res:Response)=>Promise<string|null>;bot:(uid:string,id:string,req:Request)=>Promise<{asset:string;code:string;venue?:string;name?:string}|null>;accounts:PropDAOAccounts;agents?:AgentRegistry;request?:typeof fetch;exclusive?:<T>(uid:string,id:string,work:()=>Promise<T>)=>Promise<T>};
 export type PropGrant={id:string;uid:string;botId:string;agentId?:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;leverage:number;issuedAt:number;expiresAt:number;revokedAt?:number;runtimeScope?:'bot'|'lock'};
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 const safeId=(value:string)=>/^[A-Za-z0-9_-]{1,128}$/.test(value);
@@ -16,6 +16,35 @@ export class PropDAOLiveService{
  private readonly deps:Dependencies;
  constructor(deps:Dependencies){this.deps=deps;this.request=deps.request??fetch}
  private key(uid:string,botId:string){return `propdao-live/v1/${process.env.VERCEL_ENV||'development'}/${Buffer.from(uid).toString('base64url')}/${botId}.json`}
+
+ private reviewKey(uid:string,botId:string,id:string){return `propdao-live-reviews/v1/${process.env.VERCEL_ENV||'development'}/${Buffer.from(uid).toString('base64url')}/${botId}/${id}.json`}
+ /** A read-only, expiring review of the exact source, account, market and risk. */
+ async review(uid:string,botId:string,req:Request){
+  const accountId=req.body?.accountId,riskUsd=Number(req.body?.riskUsd),leverage=Number(req.body?.leverage??1);
+  if(!safeId(accountId)||!Number.isFinite(riskUsd)||riskUsd<=0||riskUsd>5)throw Error('Choose an owned account and risk from $0.01 to $5.');
+  const bot=await this.deps.bot(uid,botId,req);
+  if(!bot||bot.venue!=='propdao')throw Error('Save a PropDAO strategy before reviewing live deployment.');
+  const config=parseStrategyConfig(bot.code);
+  if(config.timeframes.some((tf:string)=>!['m1','m5','m15','m30','h1','h4'].includes(tf)))throw Error('Unsupported live strategy timeframe.');
+  const marketList=await this.deps.accounts.getPublicMarkets(),market=marketList.data.find((m:any)=>m.symbol===bot.asset);
+  if(!market||!Number.isFinite(leverage)||leverage<1||leverage>Number(market.maxLeverage))throw Error('Instrument or leverage is not currently supported on PropDAO.');
+  const account=await this.deps.accounts.accountRisk(uid,accountId);
+  if(!['active','funded'].includes(account.account.status)||account.risk.breached||!Number.isFinite(account.risk.roomUsd)||account.risk.roomUsd<=riskUsd*3)throw Error('Account risk room does not permit this deployment.');
+  const id=randomBytes(24).toString('hex'),createdAt=Date.now();
+  const data={version:1,id,uid,botId,accountId,riskUsd,leverage,symbol:bot.asset,codeHash:hash(bot.code),strategyRiskPercent:config.riskPercent,executionTimeframe:config.executionTimeframe,createdAt,expiresAt:createdAt+120000,consumedAt:null as number|null};
+  await this.deps.write(this.reviewKey(uid,botId,id),JSON.stringify(data));
+  return {...data,reviewId:id,environment:process.env.VERCEL_ENV||'development',evidence:'Existing browser backtests are research evidence, not independently certified live results.'};
+ }
+ private async consumeReview(uid:string,botId:string,input:any,bot:{asset:string;code:string},leverage:number){
+  if(this.deps.unsafeLegacyDeployForTests)return;
+  if(!safeId(input?.reviewId)||typeof input?.expectedCodeHash!=='string'||!/^[a-f0-9]{64}$/.test(input.expectedCodeHash))throw Error('A fresh deployment review is required.');
+  const reviewKey=this.reviewKey(uid,botId,input.reviewId),raw=await this.deps.read(reviewKey);
+  if(!raw)throw Error('Deployment review not found. Start a new review.');
+  const r=JSON.parse(raw);
+  if(r.version!==1||r.uid!==uid||r.botId!==botId||r.id!==input.reviewId||r.consumedAt!==null||!Number.isFinite(r.expiresAt)||Date.now()>=r.expiresAt)throw Error('Deployment review expired or already used.');
+  if(r.accountId!==input.accountId||r.symbol!==bot.asset||r.codeHash!==hash(bot.code)||r.codeHash!==input.expectedCodeHash||r.riskUsd!==Number(input.riskUsd)||r.leverage!==leverage)throw Error('Strategy revision, account or risk changed since review. Request a fresh review.');
+  await this.deps.write(reviewKey,JSON.stringify({...r,consumedAt:Date.now()}));
+ }
  private async grant(uid:string,botId:string):Promise<PropGrant|null>{const raw=await this.deps.read(this.key(uid,botId));if(!raw)return null;const g=JSON.parse(raw) as PropGrant;if(g.uid!==uid||g.botId!==botId)throw Error('Live authorization ownership mismatch');return g}
  private configured(){return Boolean(process.env.PROPDAO_LIVE_ENABLED==='true'&&process.env.PROPDAO_LIVE_RUNTIME_URL&&process.env.PROPDAO_LIVE_INTERNAL_SECRET&&process.env.PROPDAO_LIVE_INTERNAL_SECRET.length>=32)}
  private agentBot(uid:string,botId:string,bot:{asset:string;code:string;venue?:string;name?:string}):AgentBot{return {id:botId,ownerUid:uid,name:bot.name||'Trading agent',asset:bot.asset,venue:venueOf(bot.venue||'propdao'),code:bot.code}}
@@ -65,7 +94,7 @@ export class PropDAOLiveService{
    }
    return {configured,connected:health.connected,deployed:false,running:false,accountId:null,events:[],error:configured?'Connect a PropDAO account and authorize a deployment.':health.error||'Live runtime is not available.'};
   }
-  if(!health.connected)return {configured:false,connected:false,deployed:true,running:false,uncertain:true,accountId:grant.accountId,events:[],error:health.error};
+  if(!health.connected)return {configured:false,connected:false,deployed:true,running:false,uncertain:true,authorizationRevoked:Boolean(grant.revokedAt),accountId:grant.accountId,events:[],error:health.error};
   try{
    const state=await this.runtime(grant,'status');
    const matched=state.grant?.id===grant.id;
@@ -98,10 +127,10 @@ export class PropDAOLiveService{
     deployed:matched,running:state.running===true&&configured&&matched&&!grant.revokedAt&&Date.now()<grant.expiresAt,
      paused:state.paused===true&&matched&&!grant.revokedAt&&Date.now()<grant.expiresAt,
      canResume:state.paused===true&&matched&&configured&&!state.pendingIntent&&!grant.revokedAt&&Date.now()<grant.expiresAt,
-    accountId:grant.accountId,positions,pendingOrders,closedTrades,risk,accountError,
+    accountId:grant.accountId,authorizationRevoked:Boolean(grant.revokedAt),grantExpiresAt:grant.expiresAt,codeHash:grant.codeHash,positions,pendingOrders,closedTrades,risk,accountError,
     error:!matched&&state.pendingIntent?'This account has an unresolved order from another bot. Reconcile it before deploying.':health.error};
 
-  }catch(e){return {configured:true,deployed:true,running:false,uncertain:true,accountId:grant.accountId,events:[],error:e instanceof Error?e.message:'Worker unavailable. Order status is unknown.'}}
+  }catch(e){return {configured:true,deployed:true,running:false,uncertain:true,authorizationRevoked:Boolean(grant.revokedAt),accountId:grant.accountId,events:[],error:e instanceof Error?e.message:'Worker unavailable. Order status is unknown.'}}
  }
  async assertDeletable(uid:string,botId:string){
   const grant=await this.grant(uid,botId);
@@ -156,6 +185,7 @@ export class PropDAOLiveService{
   if(config.timeframes.some((tf:string)=>!['m1','m5','m15','m30','h1','h4'].includes(tf)))throw Error('Live timeframe is unsupported');
   const leverage=Number(input.leverage??1);
   if(!Number.isFinite(leverage)||leverage<1||leverage>Number(market.maxLeverage))throw Error('Selected leverage exceeds allowed market limit');
+  await this.consumeReview(uid,botId,input,bot,leverage);
   const now=Date.now();
   const grant:PropGrant={id:randomBytes(24).toString('hex'),uid,botId,...(this.deps.agents?{agentId:this.deps.agents.idFor(uid,botId)}:{}),accountId:input.accountId,symbol:bot.asset,coin:market.dex?`${market.dex}:${market.coin}`:market.coin,code:bot.code,codeHash:hash(bot.code),riskUsd:Number(input.riskUsd),leverage,issuedAt:now,expiresAt:now+7*24*3600_000,runtimeScope:'bot'};
   // Each new bot gets its own Durable Object; an unresolved order from the
@@ -245,18 +275,18 @@ export class PropDAOLiveService{
  }
  async stop(uid:string,botId:string,req?:Request){
   const g=await this.grant(uid,botId);
-  if(!g)return {running:false,deployed:false,stopped:true,alreadyStopped:true};
+  if(!g)return {running:false,deployed:false,stopped:true,alreadyStopped:true,authorizationRevoked:true,runtimeStopped:true,exposure:'unverified'};
   // Revoke order permission first, even if Cloudflare cannot be contacted.
-  await this.deps.write(this.key(uid,botId),JSON.stringify({...g,revokedAt:Date.now()}));
+  await this.deps.write(this.key(uid,botId),JSON.stringify({...g,revokedAt:g.revokedAt||Date.now()}));
   let bot:null|{asset:string;code:string;venue?:string;name?:string}=null;try{bot=await this.deps.bot(uid,botId,req as Request)}catch{}
   if(bot)await this.recordAgent(uid,botId,bot,{state:'unknown',action:'stop_requested',grantId:g.id,expiresAt:g.expiresAt,authorized:false},true);
   try{
    const state=await this.runtime(g,'stop',{}),final=await this.runtime(g,'status');
-   if(final.pendingIntent){if(bot)await this.recordAgent(uid,botId,bot,{state:'unknown',action:'stop_requires_reconciliation',grantId:g.id,expiresAt:g.expiresAt,authorized:false,error:'Stopped with an unresolved order requiring reconciliation.'},true);return {...final,running:false,deployed:false,stopped:true,needsReconciliation:true}}
+   if(final.pendingIntent){if(bot)await this.recordAgent(uid,botId,bot,{state:'unknown',action:'stop_requires_reconciliation',grantId:g.id,expiresAt:g.expiresAt,authorized:false,error:'Stopped with an unresolved order requiring reconciliation.'},true);return {...final,running:false,deployed:false,stopped:true,needsReconciliation:true,authorizationRevoked:true,runtimeStopped:true,exposure:'unverified'}}
    if(this.deps.remove)await this.deps.remove(this.key(uid,botId));
    if(bot)await this.recordAgent(uid,botId,bot,{state:'stopped',action:'stop_confirmed',grantId:g.id,expiresAt:g.expiresAt,authorized:false},true);
-   return {...state,running:false,paused:false,deployed:false,stopped:true};
-  }catch(error){if(bot)await this.recordAgent(uid,botId,bot,{state:'unknown',action:'stop_outcome_unknown',grantId:g.id,expiresAt:g.expiresAt,authorized:false,error:error instanceof Error?error.message:'Stop outcome is unknown.'},true);throw error}
+   return {...state,running:false,paused:false,deployed:false,stopped:true,authorizationRevoked:true,runtimeStopped:true,exposure:'unverified'};
+  }catch(error){const reason=error instanceof Error?error.message:'Stop outcome unknown';if(bot)await this.recordAgent(uid,botId,bot,{state:'unknown',action:'stop_outcome_unknown',grantId:g.id,expiresAt:g.expiresAt,authorized:false,error:reason},true);return {running:false,deployed:true,stopped:false,uncertain:true,authorizationRevoked:true,runtimeStopped:false,accountId:g.accountId,needsReconciliation:true,exposure:'unverified',error:'New-order authorization revoked. Worker stop and any remaining exposure are unverified: '+reason}}
  }
  async provider(input:any){
   const {uid,botId,grantId,action,payload}=input??{};
@@ -281,6 +311,7 @@ export function propDAOLiveRoutes(app:Express,deps:Dependencies){
  const route=(fn:(uid:string,id:string,req:Request)=>Promise<unknown>)=>async(req:Request,res:Response)=>{res.setHeader('Cache-Control','no-store');const uid=await deps.uid(req,res);if(!uid)return;const id=String(req.params.botId);if(!safeId(id))return res.status(400).json({error:'Invalid bot ID'});try{return res.json(await fn(uid,id,req))}catch(e){return res.status(/Unresolved prior order|reconcil|open orders or positions|already running or paused/.test(e instanceof Error?e.message:'')?409:400).json({error:e instanceof Error?e.message:'PropDAO live request failed'})}};
  app.get('/api/venues/propdao/bots/:botId/live',route((uid,id,req)=>service.status(uid,id,typeof req.query.accountId==='string'?req.query.accountId:undefined)));
  app.get('/api/venues/propdao/bots/:botId/live/market',route((uid,id)=>service.market(uid,id)));
+ app.post('/api/venues/propdao/bots/:botId/live/review',route((uid,id,req)=>deps.exclusive?deps.exclusive(uid,id,()=>service.review(uid,id,req)):service.review(uid,id,req)));
  app.post('/api/venues/propdao/bots/:botId/live',route((uid,id,req)=>{
   const work=()=>req.body?.action==='deploy'?service.deploy(uid,id,req):req.body?.action==='stop'?service.stop(uid,id,req):req.body?.action==='pause'?service.pause(uid,id,req):req.body?.action==='resume'?service.resume(uid,id,req):req.body?.action==='reconcile'?service.reconcile(uid,id,req):Promise.reject(Error('Unknown action'));
   return deps.exclusive?deps.exclusive(uid,id,work):work();
