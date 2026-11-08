@@ -76,3 +76,7 @@
  --deploy-panel:#121e18;--deploy-soft:#1d2a21;--deploy-ink:#e0efe5;--deploy-muted:#a9c1b1;--deploy-line:#395445;--deploy-accent:#4dc993;color-scheme:dark;
 }
 :root[data-theme="dark"] .tv-deploy-prior-stop{color:#eac388;border-color:#9d7947}
+
+.tv-deploy-prior-deploy{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:13px 0}
+.tv-deploy-prior-deploy button{min-height:40px;border-radius:9px;padding:9px 16px;cursor:pointer}
+.tv-deploy-prior-deploy small{font-size:11px;color:var(--deploy-muted);line-height:1.5}

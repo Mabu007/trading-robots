@@ -33,6 +33,10 @@ import {AnalysisChatCard} from './components/AnalysisChatCard';
 import {analysisId,analysisSource,analyzeMarket,type CodeAnalysis,type AnalysisKind,type MarketReport} from './code-analysis';
 import {resolveCodeReference,codeSuggestions,catalogContext} from './code-catalog';
 import {conversationRobot,semanticChatTitle} from './conversation-robot';
+import {ChatTaskChoices} from './components/ChatTaskChoices';
+import {backtestPreset,completeCreatePrompt,createReady,createTaskFromMessage,defaultTradingPreferences,isEditFollowup,isNewRobotRequest,parseMarket,parseRobotName,parseVenue,type TradingPreferences,type ConversationTask} from './conversation-workflow';
+import './components/chat-task-choices.css';
+
 import {strategyDiff} from './strategy-diff';
 import {AccountTrades} from './components/AccountTrades';
 import {BrokerPicker,type BrokerChoice} from './components/BrokerPicker';
@@ -102,6 +106,7 @@ function App(){
  const [screen,setScreen]=useState<'boot'|'landing'|'auth'|'bots'|'create'|'workspace'|'profile'|'shared'|'dashboard'>(()=>sharedIdFromPath(window.location.pathname)?'shared':'boot'),[profileReturnScreen,setProfileReturnScreen]=useState<'bots'|'create'|'workspace'>('bots'),[authReady,setAuthReady]=useState(false),[firebaseInitError,setFirebaseInitError]=useState('');
  const [savedDraft]=useState(readDraft),[created,setCreated]=useState(()=>savedDraft.created||false),[name,setName]=useState(()=>savedDraft.name||'');const [asset,setAsset]=useState(()=>savedDraft.asset||''),[prompt,setPrompt]=useState(()=>savedDraft.prompt||''),[code,setCode]=useState(()=>savedDraft.code??starterCode),[view,setView]=useState<'code'|'chart'>(()=>savedDraft.view||'code'),[tab,setTab]=useState<'code'|'chart'>('code'),[createError,setCreateError]=useState(''),[aiError,setAiError]=useState(''),[draftId,setDraftId]=useState(()=>savedDraft.id||makeBotId());
  const [venue,setVenue]=useState<Venue>(()=>venueOf(savedDraft.venue));
+ const [tradingPreferences,setTradingPreferences]=useState<TradingPreferences>(defaultTradingPreferences),[assistantTask,setAssistantTask]=useState<ConversationTask|null>(null);
  const [conversationId,setConversationId]=useState('general'),[conversationModel,setConversationModel]=useState<string|null>(null),[conversationLibrary,setConversationLibrary]=useState<{id:string;title:string}[]|null>(null),[recentChats,setRecentChats]=useState<{id:string;title:string;model?:string|null}[]>([]);
   const [chatAction,setChatAction]=useState<ConversationAction|null>(null);
   const [skills,setSkills]=useState<UserSkill[]>([]),[skillsRevision,setSkillsRevision]=useState(0),[skillsLoading,setSkillsLoading]=useState(true),[skillsError,setSkillsError]=useState('');
@@ -267,9 +272,9 @@ function App(){
  useEffect(()=>{let active=true;setCloudStatus('connecting');(async()=>{const client=await connectFirebase();if(!client)throw new Error('Firebase web app configuration is incomplete.');const profile=client.getProfile();if(active)setCloudClient(client);if(!profile){if(active){setCloudBots([]);setCloudStatus('local');setAuthReady(false);setScreen(current=>current==='auth'||window.location.pathname==='/sign-in'?'auth':sharedIdFromPath(window.location.pathname)?'shared':'landing')}return}if(profile.isAnonymous){if(active){setCloudStatus('connected');setCloudMessage('');setAuthReady(false);setScreen(current=>current==='auth'||window.location.pathname==='/sign-in'?'auth':sharedIdFromPath(window.location.pathname)?'shared':'auth')}return}let existing:CloudBot[]=[];let botLoadError='';try{existing=await client.listBots()}catch(error){botLoadError=error instanceof Error?error.message:'Could not load your robot library.'}if(active){hydrateAccountDraft(profile.uid);setCloudBots(existing);setCloudStatus(botLoadError?'error':'connected');setCloudMessage(botLoadError);setAuthReady(true);const marker=`trading-vibes:account:${profile.uid}`;const lastKey=`trading-vibes:last-page:${profile.uid}`;let returning=false,lastPage='';try{returning=localStorage.getItem(marker)==='true';lastPage=localStorage.getItem(lastKey)||'';localStorage.setItem(marker,'true')}catch{}const valid=['bots','create','workspace'].includes(lastPage)?lastPage as 'bots'|'create'|'workspace':null;if(window.location.pathname==='/sign-in')window.history.replaceState({},'','/');setPrimaryArea('chat');setScreen(sharedIdFromPath(window.location.pathname)?'shared':'workspace')}})().catch(error=>{if(active){setFirebaseInitError(readableFirebaseError(error));setCloudStatus('error');setCloudMessage(readableFirebaseError(error));setAuthReady(false);setScreen(current=>current==='auth'||window.location.pathname==='/sign-in'?'auth':sharedIdFromPath(window.location.pathname)?'shared':'landing')}});return()=>{active=false}},[cloudRetry]);
  useEffect(()=>{if(!authReady||!cloudClient||!['bots','create','workspace'].includes(screen))return;const profile=cloudClient.getProfile();if(!profile||profile.isAnonymous)return;try{localStorage.setItem(`trading-vibes:last-page:${profile.uid}`,screen)}catch{}},[authReady,cloudClient,screen]);
  useEffect(()=>{if(!created||screen!=='workspace'||!cloudClient||!codeHydrated||!code.trim()||liveLocked||liveCheck!=='ready')return;const timer=window.setTimeout(()=>{setCloudStatus('saving');const previous=cloudBots.find(bot=>bot.id===draftId)?.lastBacktest??null;const metrics=result?Object.fromEntries(Object.entries(result.metrics).map(([key,value])=>[key,typeof value==='number'&&!Number.isFinite(value)?String(value):value])):null;const cash=backtestMoneySummary(monetary);const bot:CloudBot={venue,id:draftId,name,asset,prompt,code,lastBacktest:result?{metrics:metrics as Record<string,number|string>,candleCount:result.candles.length,from,to,...(cash?{money:cash}:{})}:previous};botMutations.current.run(botMutationKey(draftId),async()=>{const {storageKey}=await userBotRequest<{storageKey:string}>(`/api/user-bots/${encodeURIComponent(draftId)}/current`,'PUT',{code,venue});await cloudClient.saveBot(bot,storageKey);return storageKey}).then(storageKey=>{setCloudBots(current=>[{...bot,storageKey},...current.filter(item=>item.id!==bot.id)]);setCloudStatus('connected');setCloudMessage('')}).catch(error=>{setCloudStatus('error');setCloudMessage(error instanceof Error?error.message:'Robot save failed; this device still has the local draft.')})},900);return()=>window.clearTimeout(timer)},[venue,created,cloudClient,draftId,name,asset,prompt,code,result,monetary,from,to,codeHydrated,screen,liveLocked,liveCheck]);
- useEffect(()=>{if(screen!=='workspace'||!authReady||!cloudClient||!chatHydrated||!chat.length)return;const persisted=busy==='chat'&&chat.at(-1)?.role==='assistant'?chat.slice(0,-1):chat;const timer=window.setTimeout(()=>{cloudClient.saveConversation(conversationId,persisted,semanticChatTitle(persisted,cloudBots)).then(()=>{
+ useEffect(()=>{if(screen!=='workspace'||!authReady||!cloudClient||!chatHydrated||!chat.length)return;const persisted=busy==='chat'&&chat.at(-1)?.role==='assistant'?chat.slice(0,-1):chat;const timer=window.setTimeout(()=>{cloudClient.saveConversation(conversationId,persisted,semanticChatTitle(persisted,cloudBots),assistantTask).then(()=>{
    if(persisted.at(-1)?.role==='assistant')void cloudClient.listConversations().then(items=>setRecentChats(items.slice(0,30))).catch(()=>undefined);
-  }).catch(error=>{setCloudStatus('error');setCloudMessage(error instanceof Error?error.message:'Could not sync this conversation.')})},350);return()=>window.clearTimeout(timer)},[authReady,cloudClient,conversationId,chat,chatHydrated,screen,busy]);
+  }).catch(error=>{setCloudStatus('error');setCloudMessage(error instanceof Error?error.message:'Could not sync this conversation.')})},350);return()=>window.clearTimeout(timer)},[authReady,cloudClient,conversationId,chat,chatHydrated,screen,busy,assistantTask]);
  const restoreConversationEvidence=async(client:CloudClient,id:string,messages:Chat[])=>{
   const ids=messages.flatMap(item=>item.toolReceiptId?[item.toolReceiptId]:[]);
   if(!ids.length)return messages;
@@ -286,15 +291,15 @@ function App(){
   setBusy('conversation');setChatHydrated(false);setChatOperation(null);setPendingCodeOperation(null);setPendingWatchAsset(null);setNewCodeTarget(null);setProposal('');setCodeEditTarget(null);setStagedReview(null);setAiError('');
   try{
    const previous=pending?.stoppedChat||chat;
-   if(previous.length&&chatHydrated)await cloudClient.saveConversation(conversationId,previous,semanticChatTitle(previous,cloudBots));
+   if(previous.length&&chatHydrated)await cloudClient.saveConversation(conversationId,previous,semanticChatTitle(previous,cloudBots),assistantTask);
    const record=await cloudClient.loadConversationRecord(id);
    const messages=await restoreConversationEvidence(cloudClient,id,record?.messages||[]);
    if(chatScopeRef.current!==scope)return;
-   setConversationId(id);setConversationModel(record?.model||null);setChat(messages);setConversationLibrary(null);setPrimaryArea('chat');setAgentWorkspace('overview');setChatCollapsed(false);setChatInput('');setSidebarOpen(window.innerWidth>720);
+   setConversationId(id);setConversationModel(record?.model||null);setAssistantTask(record?.task||null);setChat(messages);setConversationLibrary(null);setPrimaryArea('chat');setAgentWorkspace('overview');setChatCollapsed(false);setChatInput('');setSidebarOpen(window.innerWidth>720);
   }catch(error){setCloudMessage(err(error));}finally{conversationSwitching.current=false;setChatHydrated(true);setBusy('');}
  };
- const startNewConversation=()=>{if(busy&&!chatCanStop)return;const id=makeBotId();if(cloudClient){void switchConversation(id);return}setConversationId(id);setConversationModel(null);setChat([]);setChatInput('');setPrimaryArea('chat');setAgentWorkspace('overview');setMobilePanel(null);setSidebarOpen(window.innerWidth>720)};
- useEffect(()=>{if(!authReady||!cloudClient)return;let active=true;setChatHydrated(false);cloudClient.loadConversationRecord('general').then(async record=>{const messages=await restoreConversationEvidence(cloudClient,'general',record?.messages||[]);if(active){setConversationId('general');setConversationModel(record?.model||null);setChat(messages);setChatHydrated(true)}}).catch(error=>{if(active){setCloudMessage(err(error));setChatHydrated(false)}});return()=>{active=false}},[authReady,cloudClient]);
+ const startNewConversation=()=>{if(busy&&!chatCanStop)return;const id=makeBotId();if(cloudClient){void switchConversation(id);return}setConversationId(id);setConversationModel(null);setAssistantTask(null);setChat([]);setChatInput('');setPrimaryArea('chat');setAgentWorkspace('overview');setMobilePanel(null);setSidebarOpen(window.innerWidth>720)};
+ useEffect(()=>{if(!authReady||!cloudClient)return;let active=true;setChatHydrated(false);cloudClient.loadConversationRecord('general').then(async record=>{const messages=await restoreConversationEvidence(cloudClient,'general',record?.messages||[]);if(active){setConversationId('general');setConversationModel(record?.model||null);setAssistantTask(record?.task||null);setChat(messages);setChatHydrated(true)}}).catch(error=>{if(active){setCloudMessage(err(error));setChatHydrated(false)}});return()=>{active=false}},[authReady,cloudClient]);
  useEffect(()=>{watchNotifyEnabled.current=requestBrowserWatchAlerts},[requestBrowserWatchAlerts]);
  useEffect(()=>{watchSeen.current.clear();watchReady.current=false;if(!authReady||!cloudClient){setCodeWatches({});return}
   let active=true;const poll=async()=>{try{const result=await sharingRequest<{watches:CodeWatchStatus[]}>(cloudClient,'/api/code-watches');if(active){const events=(result.watches||[]).flatMap(w=>(w.events||[]).map(e=>({...e,watchName:String((w as any).name||w.id)})));const fresh=watchReady.current?events.filter(e=>!watchSeen.current.has(e.id)):[];for(const event of events)watchSeen.current.add(event.id);watchReady.current=true;setCodeWatches(Object.fromEntries((result.watches||[]).map(w=>[w.id,w])));if(fresh.length){const recent=fresh.slice(-3);setChat(messages=>[...messages,{role:'assistant',content:'**Code watch detection**\n'+recent.map(e=>'- '+e.watchName+' · '+e.kind+' · '+displayTime(e.time*1000)).join('\n')+'\n\nThese are monitor detections, not trades.'}]);if(watchNotifyEnabled.current&&typeof Notification!=='undefined'&&Notification.permission==='granted')for(const event of recent)try{new Notification('Trading Vibes · '+event.kind,{body:event.watchName+' · '+displayTime(event.time*1000)})}catch{}}}}catch{if(active)setCodeWatches(current=>Object.fromEntries(Object.entries(current).map(([id,w])=>[id,{...w,verified:false}])))} };
@@ -309,6 +314,10 @@ function App(){
    .finally(()=>{if(active)setSkillsLoading(false)});
   return()=>{active=false};
  },[authReady,cloudClient,activeProfile?.uid,skillsRevision]);
+ useEffect(()=>{if(!authReady||!cloudClient){setTradingPreferences(defaultTradingPreferences);return}
+  let active=true;cloudClient.loadTradingPreferences().then(prefs=>{if(active)setTradingPreferences(prefs)}).catch(error=>{if(active)setCloudMessage('Could not load trading preferences: '+err(error))});
+  return()=>{active=false};
+ },[authReady,cloudClient]);
  useEffect(()=>{if(!authReady||!cloudClient){setPersonality('');return}let active=true;void cloudClient.loadPersonality().then(value=>{if(active)setPersonality(value)}).catch(error=>{if(active)setCloudMessage('Personality could not be loaded: '+err(error))});return()=>{active=false}},[authReady,cloudClient]);
  useEffect(()=>{if(!authReady||!cloudClient){setBrokerConnections({propdao:'unknown',ctrader:'unknown',valr:'unknown'});return}let active=true;void Promise.allSettled([sharingRequest<{connected:boolean}>(cloudClient,'/api/venues/propdao/accounts'),sharingRequest<{connected:boolean}>(cloudClient,'/api/venues/ctrader/accounts'),sharingRequest<{connected:boolean}>(cloudClient,'/api/valr/account')]).then(results=>{if(!active)return;const state=(i:number)=>{const result=results[i];return result.status==='fulfilled'?(result.value.connected?'connected':'disconnected'):'unknown'};setBrokerConnections({propdao:state(0),ctrader:state(1),valr:state(2)})});return()=>{active=false}},[authReady,cloudClient,brokerRevision]);
  const updateSkill=async(skill:UserSkill)=>{if(!cloudClient)throw Error('Sign in to save your skills.');const previous=skills.find(item=>item.id===skill.id);
@@ -328,7 +337,7 @@ function App(){
    setRecentChats(items=>items.filter(item=>item.id!==action.id));
    if(conversationId===action.id){
     const fresh=makeBotId();
-    setChatHydrated(false);setConversationId(fresh);setConversationModel(null);setChat([]);setChatInput('');setProposal('');setChatOperation(null);setPendingWatchAsset(null);setPrimaryArea('chat');setChatHydrated(true);
+    setChatHydrated(false);setConversationId(fresh);setConversationModel(null);setAssistantTask(null);setChat([]);setChatInput('');setProposal('');setChatOperation(null);setPendingWatchAsset(null);setPrimaryArea('chat');setChatHydrated(true);
    }
   }finally{setBusy('')}
  };
@@ -368,6 +377,18 @@ function App(){
       candleCount:completed.candles.length,source:completed.source};
     setChat(current=>[...current,{role:'assistant',content:out.metrics.trades?'**'+runName+'** took '+out.metrics.trades+' trades and finished at **'+fmt(out.metrics.netReturn)+'R**. Its deepest drawdown was **'+fmt(out.metrics.maxDrawdown)+'R**. The trades below show how it got there.':'**'+runName+'** ran through '+completed.candles.length.toLocaleString()+' candles without opening a trade. This run shows no trade performance to evaluate.',context:{kind:'backtest-result',label:'Backtest · '+runName,data:card}}]);
    }if(cloudClient){const sparseSignals=decisions.flatMap((decision:any,index:number)=>decision?.action==='BUY'||decision?.action==='SELL'?[{index,action:decision.action,stopLoss:decision.stopLoss,takeProfit:decision.takeProfit}]:[]);const savedState={venue,result:completed,sparseSignals,riskPercent:cfg.riskPercent,propRiskPercent:venue==='propdao'?propRiskPercent:undefined,logs:logsRef.current,from,to,outputTab:'results',terminalOpen:true,strategyCode:runCode,asset:runAsset,savedAt:new Date().toISOString()};setBusy('sync');log('Backing up the completed run and syncing it to cloud storage…');const backupKey=`${cloudClient.getProfile()?.uid||'local'}:${draftId}`;try{const compressed=await compressBacktest(savedState);try{await savePendingBacktest(backupKey,compressed)}catch(backupError){log(`Local backup unavailable · ${err(backupError)}`)}await userBotRequest<{saved:boolean}>(`/api/user-bots/${encodeURIComponent(draftId)}/backtest`,'PUT',compressed);await clearPendingBacktest(backupKey).catch(()=>undefined);log('Completed backtest confirmed saved in cloud storage.')}catch(saveError){log(`Cloud sync not confirmed · ${err(saveError)}. Any completed local backup will retry when you reopen this bot.`)}}setTab('chart');setView('chart')}catch(e){await finishDurableRun('failed',undefined,err(e));setOutputTab('terminal');setTerminalOpen(true);log(`Backtest stopped · ${err(e)}`);if(chatBacktestBotRef.current===draftId){chatBacktestBotRef.current='';setChatBacktestBotId('');setChat(current=>[...current,{role:'assistant',content:'The backtest did not finish: '+err(e)+'. No result was saved as completed.'}])}}finally{abortRef.current=null;setBusy('')}};
+ const selectChatTaskChoice=(choice:string)=>{
+  const task=assistantTask;if(!task||busy)return;
+  if(task.kind==='backtest'){
+   let dates:{from:string;to:string}|null=null;
+   if(choice==='preset:7'||choice==='preset:30')dates=backtestPreset(choice==='preset:7'?7:30);
+   if(choice.startsWith('dates:')){const split=choice.slice(6).split(':');if(split.length===2)dates={from:split[0],to:split[1]}}
+   if(!dates||dates.to<dates.from)return;
+   void sendChat('Backtest "'+task.botName+'" from '+dates.from+' to '+dates.to+' UTC');
+   return;
+  }
+  void sendChat(choice);
+ };
  const retryChat=()=>{const last=[...chat].reverse().find(item=>item.role==='user');if(last)void sendChat(last.content,last.context,true)};
  const getRuntimeStatus=async():Promise<string>=>{
   if(!cloudClient)return 'Sign in to check agent status.';
@@ -397,7 +418,16 @@ function App(){
   return `${venueLabel[venue]} does not currently provide a verified execution-status tool in this workspace.`;
  };
  const sendChat=async(messageOverride?:string,attachedContext?:ChatContext,retryPrevious=false,requestedCode?:{tool:'find_code'|'backtest'|'deploy'|'stop'|'status';botId:string})=>{
-  const message=(messageOverride??chatInput).trim();if(!message||busy||!chatHydrated||chatTurnRef.current||conversationSwitching.current)return;
+  const submittedMessage=(messageOverride??chatInput).trim();let message=submittedMessage;
+  if(!message||busy||!chatHydrated||chatTurnRef.current||conversationSwitching.current)return;
+  // Rename a pending NEW robot proposal without dropping its already validated code.
+  const proposedName=newCodeTarget&&/\b(?:new name|name it|named|called)\b/i.test(submittedMessage)?parseRobotName(submittedMessage):null;
+  if(proposedName&&newCodeTarget){
+   setNewCodeTarget(current=>current?{...current,name:proposedName}:current);
+   setChatInput('');
+   setChat(items=>[...items,{role:'user',content:submittedMessage},{role:'assistant',content:'Updated the proposed robot name to **'+proposedName+'**. Review the strategy.js diff and save when you approve it.'}]);
+   return;
+  }
   followChat.current=true;
   const submittedScope=chatScopeRef.current;
   const controller=new AbortController();
@@ -407,7 +437,9 @@ function App(){
   let finish!:()=>void;
   setChatOperation(null);setPendingCodeOperation(null);setProposal('');setStagedReview(null);setCodeEditTarget(null);setNewCodeTarget(null);setPendingWatchAsset(null);
   const prior=retryPrevious?chat.slice(0,-2):chat;
-  const userMessage:Chat={role:'user',content:message,...(attachedContext?{context:attachedContext}:{})};
+  const visibleMessage=assistantTask?.kind==='choose-robot'&&submittedMessage.startsWith('robot:')?
+  'Selected '+(cloudBots.find(bot=>bot.id===submittedMessage.slice(6))?.name||'robot'):submittedMessage;
+  const userMessage:Chat={role:'user',content:visibleMessage,...(attachedContext?{context:attachedContext}:{})};
   const next=[...prior,userMessage];
   const turn={controller,done:new Promise<void>(resolve=>{finish=resolve}),stoppedChat:[...next,{role:'assistant',content:'Response stopped.'} as Chat],canStop:true};
   chatTurnRef.current=turn;
@@ -417,13 +449,48 @@ function App(){
   try{
   // Paint the submitted turn before waiting for the planner or network.
   setChatInput('');setAiError('');setChat([...next,{role:'assistant',content:'Thinking…'}]);
-  let command:string|null=null;
-  let planArgs:Record<string,unknown>={};
+   let command:string|null=null;
+   let forcedCommand:string|null=null,forcedBotId:string|null=null;
+   let planArgs:Record<string,unknown>={};
+   if(/^(?:cancel|never mind|nevermind|forget it|abort)(?: the task)?[.! ]*$/i.test(submittedMessage)&&assistantTask){
+    setAssistantTask(null);setChat([...next,{role:'assistant',content:'Cancelled this request. Your saved robots and broker connections are unchanged.'}]);return;
+   }
+   const startCreate=isNewRobotRequest(submittedMessage);
+   const anotherAction=/^\s*(?:backtest|retest|deploy|stop|check status|inspect|analyse|analyze)\b/i.test(submittedMessage);
+   if(startCreate||(assistantTask?.kind==='create'&&!anotherAction)){
+    const working=createTaskFromMessage(submittedMessage,startCreate?null:assistantTask,tradingPreferences,prior);
+    if(!createReady(working)){
+     setAssistantTask(working);
+     setChat([...next,{role:'assistant',content:'I have the new robot idea. Choose a market below and I’ll build the proposal using what you’ve already told me.'}]);return;
+    }
+    setAssistantTask(null);forcedCommand='create';
+    message=completeCreatePrompt(working,tradingPreferences);
+   }
+   if(assistantTask?.kind==='backtest'&&!startCreate){
+    const manualDates=chatBacktestDates(submittedMessage);
+    if(manualDates){
+     forcedCommand='backtest';forcedBotId=assistantTask.botId;setAssistantTask(null);
+     message='Backtest "'+assistantTask.botName+'" from '+manualDates.from+' to '+manualDates.to;
+    }else if(!anotherAction){
+     setChat([...next,{role:'assistant',content:'Choose the historical From and To dates in the card below. I’ll use that range for **'+assistantTask.botName+'**.'}]);return;
+    }else setAssistantTask(null);
+   }
+   if(assistantTask?.kind==='choose-robot'){
+    const direct=resolveCodeReference(submittedMessage,cloudBots)?.bot;
+    const clicked=submittedMessage.startsWith('robot:')?cloudBots.find(bot=>bot.id===submittedMessage.slice(6)):null;
+    const chosen=clicked||direct;
+    if(!chosen){
+     setChat([...next,{role:'assistant',content:'I could not match that name to a saved robot. Select one of the options below or type its exact name.'}]);return;
+    }
+    forcedBotId=chosen.id;forcedCommand=assistantTask.action;message=assistantTask.action+' "'+chosen.name+'"';
+    setAssistantTask(null);
+   }
+
   let focusedCode:{bot:CloudBot;source:string}|null=null;
   let creatingCode:{id:string;name:string;asset:string;venue:Venue;prompt:string}|null=null;
-  const requestedBot=requestedCode?cloudBots.find(bot=>bot.id===requestedCode.botId):undefined;
+  const requestedBot=forcedBotId?cloudBots.find(bot=>bot.id===forcedBotId):requestedCode?cloudBots.find(bot=>bot.id===requestedCode.botId):undefined;
   const named=resolveCodeReference(message,cloudBots);
-  const subject=requestedCode?null:conversationRobot(message,prior,cloudBots);
+  const subject=requestedCode||forcedBotId?null:conversationRobot(message,prior,cloudBots);
   const referenced=requestedBot?{bot:requestedBot,confidence:'exact' as const}:requestedCode?null:named??(subject?{bot:subject,confidence:'unique' as const}:null);
   const matchingAnalysis=codeAnalyses.find(a=>message.toLowerCase().includes(a.name.toLowerCase()));
   const directWatch=/\b(track|monitor|watch|notify|alert)\b/i.test(message)&&/\b(sweep|liquidity|volatility|atr)\b/i.test(message);
@@ -440,7 +507,11 @@ function App(){
    if(requestedCode&&!requestedBot)throw Error('That saved strategy is no longer available.');
    if(!attachedContext){
     if(!cloudClient)throw Error('Sign in to use your AI.');
-    if(requestedCode&&referenced){command=requestedCode.tool}
+    if(forcedCommand){command=forcedCommand}
+    else if(requestedCode&&referenced){command=requestedCode.tool}
+    else if(isEditFollowup(submittedMessage)){command='edit'}
+    else if(referenced&&/^(?:nice|okay|ok|now|please|yeah|yes)?[,\s!]*(?:deploy|start bot|run live)\s+/i.test(submittedMessage)){command='deploy'}
+    else if(referenced&&/^(?:nice|okay|ok|now|please)?[,\s!]*(?:backtest|retest)\b/i.test(submittedMessage)){command='backtest'}
     else if(/^\s*(?:please\s+)?(?:build|create|write|generate)\b/i.test(message)&&/\b(?:propdao|valr|hyperliquid|ctrader)\b/i.test(message)&&/\bstrategy\b/i.test(message)&&/\b(?:test|backtest|replay)\b/i.test(message)){command='create'}
     else if(referenced&&/^\s*(?:please\s+)?(?:make (?:it|this|the robot|a) (?:a )?better version|improve (?:it|this|the robot)|rewrite (?:it|this|the robot)|update (?:it|this|the robot)|change (?:it|this|the robot))\b/i.test(message)){command='edit'}
      else if(referenced&&/^\s*(?:please\s+)?(?:backtest|retest)\b/i.test(message)){command='backtest'}
@@ -448,7 +519,10 @@ function App(){
     else if(directWatch){command='watch'}else if(directMarketAnalysis){command='analyze_market'}else if(/\b(backtest|retest|run|deploy|stop|pause|status|create|build|write|generate|edit|update|modify|change|rename|delete|remove|add|skill|personality|connect|disconnect|broker|find|code|strategy|robot|bot)\b/i.test(message)){const planned=await request<{tool:string|null;args?:Record<string,unknown>}>(sdkPrimary?'/api/chat/sdk-plan':'/api/chat/plan','POST',{message,skills:skills.map(s=>s.name),personality,...(conversationModel?{model:conversationModel}:{})});checkpoint();command=planned.tool;planArgs=planned.args||{};}
    }
   }catch(error){checkpoint();const reason=err(error);setAiError(reason);setChat([...next,{role:'assistant',content:'Could not prepare this request: '+reason}]);setBusy('');return;}
-  if(sdkPrimary&&command==='manage_broker'&&planArgs.action==='inspect')command=null;
+   if(command==='edit_personality'&&!/\b(personality|profile|speaking style|conversation tone|chat personality)\b/i.test(submittedMessage)){
+    command=referenced&&isEditFollowup(submittedMessage)?'edit':null;
+   }
+   if(sdkPrimary&&command==='manage_broker'&&planArgs.action==='inspect')command=null;
   if(command&&['manage_skill','edit_personality','rename_code','delete_code','manage_broker'].includes(command)){
    try{
     if(!cloudClient||!activeProfile?.uid)throw Error('Sign in to manage your saved workspace.');
@@ -494,7 +568,11 @@ function App(){
    }catch(error){checkpoint();setChat([...next,{role:'assistant',content:'I could not prepare that change: '+err(error)}]);}
    return;
   }
-  if(command==='create'&&!/\b(propdao|valr|hyperliquid|ctrader)\b/i.test(message)){setChatInput('');setChat([...next,{role:'assistant',content:'Which market and venue should the new strategy use? For example: Create a GOLDUSDC strategy on PropDAO that trades M1 liquidity sweeps.'}]);return;}
+   if(command==='create'&&!/\b(propdao|valr|hyperliquid|ctrader)\b/i.test(message)){
+    const waiting=createTaskFromMessage(submittedMessage,null,tradingPreferences,prior);
+    if(!createReady(waiting)){setAssistantTask(waiting);setChat([...next,{role:'assistant',content:'Choose a market below. I’ll remember your answer and build the robot without restarting the conversation.'}]);return;}
+    message=completeCreatePrompt(waiting,tradingPreferences);setAssistantTask(null);
+   }
 
   if(command==='watch'){
    if(/\btelegram\b/i.test(message)){setChat([...next,{role:'assistant',content:'Telegram delivery is paused. I can prepare a watch that records detections or summarizes them with OpenRouter.'}]);return;}
@@ -562,6 +640,9 @@ function App(){
    }catch(error){checkpoint();setChat([...next,{role:'assistant',content:'Cannot verify '+marketName+' on '+venueLabel[requestedVenue]+': '+err(error)}]);return;}
    const title=(message.match(/(?:named|called)\s+["“]?([^"“”,.]{3,48})/i)?.[1]||requestedAsset+' AI strategy').trim().slice(0,64);
    creatingCode={id:makeBotId(),name:title,asset:requestedAsset,venue:requestedVenue,prompt:message};setNewCodeTarget(creatingCode);
+    const learned={...tradingPreferences,preferredAsset:requestedAsset,preferredVenue:requestedVenue};
+    setTradingPreferences(learned);
+    void cloudClient?.saveTradingPreferences(learned).catch(()=>undefined);
   }
   if(command&&command!=='edit'&&command!=='create'){
    setChatInput('');setAiError('');
@@ -569,9 +650,14 @@ function App(){
     if(!referenced&&(codeSuggestions(message,cloudBots).length>0||/["“][^"”]+["”]/.test(message))){setChat([...next,{role:'assistant',content:'The strategy name could match more than one saved item. Select the exact strategy in the Library before backtesting; no test has started.'}]);return;}
     const target=referenced?.bot||cloudBots.find(bot=>bot.id===draftId);
     if(!target){setChat([...next,{role:'assistant',content:'Choose saved code first. Mention the name, for example: Backtest MySol Robot.'}]);return;}
-    let dates:ReturnType<typeof chatBacktestDates>;
-    try{dates=chatBacktestDates(message)}catch(error){setChat([...next,{role:'assistant',content:err(error)}]);return;}
-    lockWorkspace();
+     let dates:ReturnType<typeof chatBacktestDates>;
+     try{dates=chatBacktestDates(message)}catch(error){setChat([...next,{role:'assistant',content:err(error)}]);return;}
+     if(!dates&&!/\bsaved historical data\b/i.test(message)){
+      setAssistantTask({kind:'backtest',botId:target.id,botName:target.name});
+      setChat([...next,{role:'assistant',content:'**'+target.name+'** is selected. Choose the historical range below; I’ll backtest that exact saved robot using UTC dates.'}]);return;
+     }
+     setAssistantTask(null);
+     lockWorkspace();
     queuedChatDates.current=null;
     chatBacktestBotRef.current=target.id;setChatBacktestBotId(target.id);
     if(target.id!==draftId){
@@ -617,10 +703,23 @@ function App(){
     finally{setBusy('');}
     return;
    }
-   if(command!=='deploy'&&command!=='stop')return;
-   if(!referenced&&(/["“][^"”]+["”]/.test(message)||codeSuggestions(message,cloudBots).length>0||!created)){
-    setChat([...next,{role:'assistant',content:'Which strategy should I '+command+'? Give me its exact saved name.'}]);return;
-   }
+    if(command!=='deploy'&&command!=='stop')return;
+    if(command==='deploy'&&referenced?.bot){
+     const bot=referenced.bot;
+     if(bot.venue==='propdao'){
+      setAssistantTask(null);setLibraryDeployment({bot,riskPercent:1});
+      setChat([...next,{role:'assistant',content:'Opening **Deploy** for **'+bot.name+'** ('+bot.asset+' · PropDAO). Select the account and risk settings, then review and explicitly confirm the exact deployment. Nothing is running from this message alone.'}]);
+      return;
+     }
+    }
+    if(!referenced){
+     const candidates=(codeSuggestions(message,cloudBots).length?codeSuggestions(message,cloudBots):cloudBots).slice(0,5);
+     if(candidates.length){
+      setAssistantTask({kind:'choose-robot',action:command,robotIds:candidates.map(bot=>bot.id)});
+      setChat([...next,{role:'assistant',content:'Which saved robot should I '+command+'? Choose below, or type a different name.'}]);return;
+     }
+     setChat([...next,{role:'assistant',content:'No saved robots were found. Create one before managing its deployment.'}]);return;
+    }
    if(referenced?.bot&&referenced.bot.id!==draftId){
     const target=referenced.bot;setChat([...next,{role:'assistant',content:'Loading '+target.name+' for the '+command+' review.'}]);
     try{lockWorkspace();await openCloudBot(target,{keepChat:true});checkpoint();setPendingCodeOperation({botId:target.id,action:command})}catch(error){checkpoint();setChat(current=>[...current,{role:'assistant',content:'Could not load '+target.name+': '+err(error)}])}return;
@@ -637,6 +736,9 @@ function App(){
   }else setCodeEditTarget(null);
   if(command==='edit'&&!created&&!focusedCode){setChat([...next,{role:'assistant',content:'Name a saved strategy to edit, or ask me to create one.'}]);return;}
   if(command==='edit'&&!referenced&&!/\b(current editor|this draft|open robot)\b/i.test(message)){
+   const candidates=(codeSuggestions(submittedMessage,cloudBots).length?codeSuggestions(submittedMessage,cloudBots):cloudBots).slice(0,5);
+   if(candidates.length){setAssistantTask({kind:'choose-robot',action:'edit',robotIds:candidates.map(bot=>bot.id)});setChat([...next,{role:'assistant',content:'Which saved robot would you like me to edit? Choose below. I will not modify the current editor unless it is your selected robot.'}]);return;}
+
    setChat([...next,{role:'assistant',content:'Which saved robot should I improve? Name it or open it from the Robots library. I won’t edit the unrelated robot currently loaded in the workspace.'}]);
    return;
   }
@@ -663,7 +765,7 @@ function App(){
   const requestedEditor={draftId,code};
   setChatInput('');setAiError('');setChat([...next,{role:'assistant',content:wantsCode?'Preparing a strategy edit…':'Thinking…'}]);setBusy('chat');
   try{
-   const appContext=sdkBacktestId?'Report the verified historical simulation tool result for strategy '+sdkBacktestId+' and its limitations.':sdkStrategyId?'Use the saved strategy tool result for this question. The requested strategy ID is '+sdkStrategyId+'.':focusedCode?'Retrieved saved code: '+focusedCode.bot.name+' on '+focusedCode.bot.asset+' · '+venueLabel[focusedCode.bot.venue||'valr']+'\nSaved backtest summary for THIS robot: '+JSON.stringify(focusedCode.bot.lastBacktest||'No saved backtest summary available.')+'\nExact saved source:\n'+focusedCode.source.slice(0,200000)+(focusedCode.source.length>200000?'\n[Source capped at 200,000 characters; file is incomplete. Report it clearly. Do not describe omitted code.]':''):command==='create'?'NEW strategy.js request for venue '+String(creatingCode?.venue||'propdao')+', market '+String(creatingCode?.asset||'GOLDUSDC')+'. Produce a complete strategy implementing config and onCandle. This is not an edit of existing source.':created?`Bot: ${name||'Untitled'}
+   const appContext=sdkBacktestId?'Report the verified historical simulation tool result for strategy '+sdkBacktestId+' and its limitations.':sdkStrategyId?'Use the saved strategy tool result for this question. The requested strategy ID is '+sdkStrategyId+'.':focusedCode?'Retrieved saved code: '+focusedCode.bot.name+' on '+focusedCode.bot.asset+' · '+venueLabel[focusedCode.bot.venue||'valr']+'\nSaved backtest summary for THIS robot: '+JSON.stringify(focusedCode.bot.lastBacktest||'No saved backtest summary available.')+'\nExact saved source:\n'+focusedCode.source.slice(0,200000)+(focusedCode.source.length>200000?'\n[Source capped at 200,000 characters; file is incomplete. Report it clearly. Do not describe omitted code.]':''):command==='create'?'NEW strategy.js request for venue '+String(creatingCode?.venue||'propdao')+', market '+String(creatingCode?.asset||'GOLDUSDC')+'. User-confirmed original task and preferences: '+String(creatingCode?.prompt||message).slice(0,4000)+'. Produce a complete strategy implementing config and onCandle. This is not an edit of existing source.':created?`Bot: ${name||'Untitled'}
 Asset: ${asset}
 Available price timeframes: ${selectedMarket?.timeframes.join(', ')||'unknown'}
 Current JavaScript strategy (authoritative):
@@ -672,6 +774,7 @@ Latest backtest errors or output:
 ${logs.slice(-8).join('\n')||'None'}
 Latest backtest metrics: ${result?JSON.stringify(result.metrics):'No completed backtest yet'}`:'No agent selected. The user can learn and converse without a strategy. Do not describe starter code as their strategy.';
    const system=`CONVERSATION ROBOT TARGET: ${focusedCode?'Robot '+focusedCode.bot.name+', saved robot ID '+focusedCode.bot.id+', venue '+focusedCode.bot.venue+', market '+focusedCode.bot.asset+' (not the editor bot '+name+')':'No verified named robot loaded; never assume the current editor is the robot the user refers to.'}. Never confuse two saved robot identities. An edit proposal and Apply button must name this exact robot; no code changes are saved until approved.
+SAVED TRADING PREFERENCES (user-controlled defaults, not trade authorization): ${JSON.stringify(tradingPreferences)}. Reuse the user's known market, venue, timeframe and backtest preferences when reasonable. New explicit instructions always override preferences. Do not repeatedly ask details already established in this chat or saved defaults. If a necessary target is ambiguous, ask one short, concrete question; for supported robot workflows the interface supplies two selectable options and a third custom answer. Never announce an action as completed without a confirmed result.
 OpenRouter and PropDAO are the available connections at launch. External app actions and new cTrader or VALR connections are paused.
 Trade audits: lead with the practical outcome and why it happened, in clear conversational paragraphs. Use exact UTC entry and exit timestamps (SAST in brackets). Most of the response should be enjoyable, understandable explanation without losing important technical facts. Put detailed formulas and source logic after the main takeaway. Routine simulated-vs-broker evidence limitations belong in a short “Research note” at the END; only place a limitation at the start if it changes the validity of the conclusion. Never claim a saved strategy has been edited until an Apply action has been validated and saved. When proposing edits, provide a complete strategy.js file in one code block; if you cannot, say no proposal was staged and never instruct the user to click a nonexistent Apply button.
 
@@ -1200,9 +1303,12 @@ SAVED CODE CATALOGUE (user-owned names/metadata; load the exact source before de
    if(!selected)return;
    if(selected.venue==='propdao'){setLibraryDeployment({bot:selected,riskPercent:1});return}
    void sendChat('Prepare deployment for "'+saved.name+'".',undefined,false,{tool:'deploy',botId:saved.botId});
- }:undefined} onInspect={id=>void openSavedTradeInspection(m.context!.data as BacktestCardData,id)}/>}</div>{m.context&&m.context.kind!=='backtest-result'&&m.context.kind!=='market-analysis'&&<button type="button" className="chat-context-chip" onClick={()=>setContextModal(m.context!)}><Braces size={12}/>{m.context.label}</button>}{aiError&&i===chat.length-1&&m.role==='assistant'&&<button className="ai-retry-button" onClick={retryChat} disabled={!!busy}><RotateCcw size={12}/> Retry</button>}</div>)}{createError&&<button className="retry-generation" onClick={()=>void create(true)} disabled={!!busy}><RotateCcw size={12}/> Retry generation</button>}{proposal&&<section className="proposal tv-code-proposal" role="group" aria-label="Proposed strategy code change">
+ }:undefined} onInspect={id=>void openSavedTradeInspection(m.context!.data as BacktestCardData,id)}/>}</div>{m.context&&m.context.kind!=='backtest-result'&&m.context.kind!=='market-analysis'&&<button type="button" className="chat-context-chip" onClick={()=>setContextModal(m.context!)}><Braces size={12}/>{m.context.label}</button>}{aiError&&i===chat.length-1&&m.role==='assistant'&&<button className="ai-retry-button" onClick={retryChat} disabled={!!busy}><RotateCcw size={12}/> Retry</button>}</div>)}{createError&&<button className="retry-generation" onClick={()=>void create(true)} disabled={!!busy}><RotateCcw size={12}/> Retry generation</button>}{assistantTask&&<ChatTaskChoices key={conversationId+':'+assistantTask.kind+':'+(assistantTask.kind==='backtest'?assistantTask.botId:assistantTask.kind==='create'?assistantTask.asset||'market':assistantTask.robotIds.join(','))}
+ task={assistantTask} prefs={tradingPreferences} bots={cloudBots} disabled={!!busy} onChoose={selectChatTaskChoice}
+ onCancel={()=>{setAssistantTask(null);setChat(items=>[...items,{role:'assistant',content:'Task cancelled. Nothing was saved or deployed.'}])}}/>}{proposal&&<section className="proposal tv-code-proposal" role="group" aria-label="Proposed strategy code change">
   <div className="tv-proposal-topline"><span><Sparkles size={15}/> ROBOT EDIT READY</span><span className="tv-proposal-no-save">Nothing saved yet</span></div>
   <h3>{codeEditTarget?'Update '+codeEditTarget.bot.name:newCodeTarget?'Create '+newCodeTarget.name:'Update current draft'}</h3>
+  {newCodeTarget&&<label className="tv-proposal-name">New robot name <input value={newCodeTarget.name} maxLength={64} onChange={event=>setNewCodeTarget(current=>current?{...current,name:event.target.value}:current)} aria-label="New robot name"/></label>}
   <p className="tv-proposal-identity">{codeEditTarget?codeEditTarget.bot.asset+' · '+venueLabel[venueOf(codeEditTarget.bot.venue)]+' · existing saved robot':newCodeTarget?newCodeTarget.asset+' · '+venueLabel[newCodeTarget.venue]+' · new robot':'Unsaved workspace draft'}</p>
   <p className="tv-proposal-summary">{proposalSummary}</p>
   <div className="tv-proposal-diff-outer">
@@ -1220,7 +1326,7 @@ SAVED CODE CATALOGUE (user-owned names/metadata; load the exact source before de
   {assistantChange.kind==='skill'?<><p>{assistantChange.action==='create'?'Create':assistantChange.action==='update'?'Update':'Delete'} skill <strong>{assistantChange.after?.name||assistantChange.before?.name}</strong>?</p>{assistantChange.after&&<><p>Instructions and triggers:</p><pre className="tv-review-content">{assistantChange.after.instructions}{'\n\nTriggers: '}{assistantChange.after.alwaysOn?'Every message':assistantChange.after.triggers.join(', ')||'When named'}{'\nEnabled: '}{assistantChange.after.enabled?'Yes':'No'}</pre></>}</>:assistantChange.kind==='personality'?<><p>Replace the personality profile with:</p><pre className="tv-review-content">{assistantChange.after||'(Use default personality)'}</pre></>:assistantChange.kind==='code'?<p>{assistantChange.action==='delete'?'Delete':'Rename'} <strong>{assistantChange.before.name}</strong>{assistantChange.action==='rename'?' to '+assistantChange.newName:' and its saved backtest and versions'}?</p>:<p>Open {assistantChange.broker.toUpperCase()} settings to {assistantChange.action} the account?</p>}
   {assistantReviewError&&<p role="alert" className="tv-skills-error">{assistantReviewError}</p>}
   <div className="market-buttons"><button type="button" className="ghost" disabled={assistantReviewBusy} onClick={()=>{setAssistantReviewOpen(false);setAssistantChange(null)}}>Cancel</button><button type="button" className="primary" disabled={assistantReviewBusy} onClick={()=>void confirmAssistantChange()}>{assistantReviewBusy?'Working…':'Confirm change'}</button></div>
- </Dialog>}{proposalReviewOpen&&proposal&&<Dialog title={newCodeTarget?'Review new code':'Review code update'} onClose={()=>void denyProposal()}><p>Review the complete strategy before saving{codeEditTarget?' to '+codeEditTarget.bot.name:''}.</p>{stagedReview&&<p>{stagedReview.asset} · {venueLabel[stagedReview.venue]} · Expires {displayTime(stagedReview.expiresAt)}</p>}{strategyReviewError&&<p role="alert">{strategyReviewError}</p>}<pre className="tv-review-content">{proposal}</pre><div className="market-buttons"><button type="button" className="ghost" disabled={!!busy} onClick={()=>void denyProposal()}>{stagedReview?'Deny':'Cancel'}</button><button type="button" className="primary" disabled={!!busy||Boolean(codeEditTarget&&!stagedReview)} onClick={()=>{if(!codeEditTarget)setProposalReviewOpen(false);void applyProposal()}}>Confirm and save</button></div></Dialog>}{brokerPickerOpen&&<BrokerPicker onClose={()=>setBrokerPickerOpen(false)} onChoose={openBrokerChoice}/>} {personalityOpen&&<PersonalityDialog value={personality} onClose={()=>setPersonalityOpen(false)} onSave={async value=>{if(!cloudClient)throw Error('Sign in to save your personality.');await cloudClient.savePersonality(value);setPersonality(value.trim())}}/>}{profileOpen&&cloudClient&&<ProfileSettingsDialog client={cloudClient} cloudStatus={cloudStatus} onClose={()=>setProfileOpen(false)} onChanged={()=>setProfileRevision(v=>v+1)} onSignOut={async()=>{setProfileOpen(false);await signOut()}}/>}<ChatConversationDialog action={chatAction} onClose={()=>setChatAction(null)} onSubmit={updateConversationAction}/>{savedTradeInspectionDialog}{marketDialogs}
+ </Dialog>}{proposalReviewOpen&&proposal&&<Dialog title={newCodeTarget?'Review new code':'Review code update'} onClose={()=>void denyProposal()}><p>Review the complete strategy before saving{codeEditTarget?' to '+codeEditTarget.bot.name:''}.</p>{stagedReview&&<p>{stagedReview.asset} · {venueLabel[stagedReview.venue]} · Expires {displayTime(stagedReview.expiresAt)}</p>}{strategyReviewError&&<p role="alert">{strategyReviewError}</p>}<pre className="tv-review-content">{proposal}</pre><div className="market-buttons"><button type="button" className="ghost" disabled={!!busy} onClick={()=>void denyProposal()}>{stagedReview?'Deny':'Cancel'}</button><button type="button" className="primary" disabled={!!busy||Boolean(codeEditTarget&&!stagedReview)} onClick={()=>{if(!codeEditTarget)setProposalReviewOpen(false);void applyProposal()}}>Confirm and save</button></div></Dialog>}{brokerPickerOpen&&<BrokerPicker onClose={()=>setBrokerPickerOpen(false)} onChoose={openBrokerChoice}/>} {personalityOpen&&<PersonalityDialog value={personality} onClose={()=>setPersonalityOpen(false)} onSave={async value=>{if(!cloudClient)throw Error('Sign in to save your personality.');await cloudClient.savePersonality(value);setPersonality(value.trim())}}/>}{profileOpen&&cloudClient&&<ProfileSettingsDialog client={cloudClient} cloudStatus={cloudStatus} onPreferencesSaved={setTradingPreferences} onClose={()=>setProfileOpen(false)} onChanged={()=>setProfileRevision(v=>v+1)} onSignOut={async()=>{setProfileOpen(false);await signOut()}}/>}<ChatConversationDialog action={chatAction} onClose={()=>setChatAction(null)} onSubmit={updateConversationAction}/>{savedTradeInspectionDialog}{marketDialogs}
  <nav className="mobile-actions"><button onClick={()=>{setChatCollapsed(false);setMobilePanel('chat')}}><MessageCircle size={17}/><span>AI chat</span>{chat.length>0&&<i/>}</button><button onClick={()=>setMobilePanel('terminal')}><Terminal size={17}/><span>Outputs</span>{logs.length>0&&<i/>}</button></nav>{mobilePanel==='terminal'&&<div className="mobile-sheet-backdrop" onClick={()=>setMobilePanel(null)}><section className="mobile-terminal-sheet" onClick={event=>event.stopPropagation()}><div className="sheet-grabber"/><OutputDock liveMode={propLiveMode} propLive={propLive} onPropLiveRefresh={()=>setPropLiveRevision(v=>v+1)} isPropDAO={venue==='propdao'} propEvaluation={propEvaluation} monetary={monetary} asset={asset} timeframe={propLiveMode?undefined:result?.timeframe} from={from} to={to} logs={logs} result={result} selectedTrade={selectedTrade} showTradeModal={tradeDetailsOpen} busy={busy} active={outputTab} collapsed={false} onTabChange={setOutputTab} onCollapse={()=>setMobilePanel(null)} onClear={clearLogs} onDeleteBacktest={deleteSavedBacktest} onStop={()=>abortRef.current?.abort()} onSelectTrade={trade=>{setSelectedTrade(trade);setTradeDetailsOpen(false);setFocusTrade(trade);setView('chart');setTab('chart');setOutputTab('trades');setMobilePanel(null)}} onClearSelectedTrade={()=>{setSelectedTrade(null);setTradeDetailsOpen(false)}} onAuditTrade={askAiToAuditTrade} versions={versions} versionsLoading={versionsLoading} versionError={versionError} onLoadVersion={loadSavedVersion} onRenameVersion={renameSavedVersion} onDeleteVersion={deleteSavedVersion} compact/></section></div>}
  {codeWarning&&<CodeWarningDialog dontShow={dontShowCodeWarning} setDontShow={setDontShowCodeWarning} onCancel={()=>setCodeWarning(false)} onContinue={continueToCode}/>}<ChatContextModal context={contextModal} onClose={()=>setContextModal(null)}/><div className="keyboard-shortcut"><Command size={11}/> + ↵ <span>Backtest</span></div>
  </main>
