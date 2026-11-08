@@ -2,13 +2,15 @@ import {createHash,timingSafeEqual,randomBytes} from 'node:crypto';
 import type {Express,Request,Response} from 'express';
 import {parseStrategyConfig} from '../src/strategy.ts';
 import {inspectBacktestEvidence} from './strategy-backtest-evidence.ts';
+import {runTrustedBacktestReplay,ReplayUnavailable,ReplayMismatch,type TrustedReplayReceipt} from './trusted-backtest-replay.ts';
+import {DwellirHistory} from './dwellir-history.ts';
 import {PropDAOAccounts,PropDAONoSubmissionError} from './propdao-account.ts';
 import type {AgentRegistry} from './agent-registry.ts';
 import type {AgentBot} from './agent-registry.ts';
 import {venueOf} from '../shared/venues.ts';
 
 type Storage={read:(key:string)=>Promise<string|null>;write:(key:string,value:string)=>Promise<void>;remove?:(key:string)=>Promise<void>;list?:(prefix:string,limit:number)=>Promise<string[]>};
-type Dependencies=Storage&{/** Legacy unit fixtures only; never pass from HTTP routes. */unsafeLegacyDeployForTests?:boolean;uid:(req:Request,res:Response)=>Promise<string|null>;bot:(uid:string,id:string,req:Request)=>Promise<{asset:string;code:string;venue?:string;name?:string}|null>;accounts:PropDAOAccounts;agents?:AgentRegistry;request?:typeof fetch;exclusive?:<T>(uid:string,id:string,work:()=>Promise<T>)=>Promise<T>};
+type Dependencies=Storage&{/** Legacy unit fixtures only; never pass from HTTP routes. */unsafeLegacyDeployForTests?:boolean;uid:(req:Request,res:Response)=>Promise<string|null>;bot:(uid:string,id:string,req:Request)=>Promise<{asset:string;code:string;venue?:string;name?:string}|null>;accounts:PropDAOAccounts;agents?:AgentRegistry;request?:typeof fetch;exclusive?:<T>(uid:string,id:string,work:()=>Promise<T>)=>Promise<T>;history?:Pick<DwellirHistory,'candles'>};
 export type PropGrant={id:string;uid:string;botId:string;agentId?:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;leverage:number;issuedAt:number;expiresAt:number;revokedAt?:number;runtimeScope?:'bot'|'lock'};
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 const safeId=(value:string)=>/^[A-Za-z0-9_-]{1,128}$/.test(value);
@@ -39,10 +41,28 @@ export class PropDAOLiveService{
   const rawBacktest=await this.deps.read(this.backtestKey(uid,botId));
   if(!rawBacktest)throw Error('A saved backtest of this exact strategy is required before deployment. Run a backtest and save it first.');
   const evidence=inspectBacktestEvidence(rawBacktest,uid,botId,{code:bot.code,asset:bot.asset,venue:'propdao',executionTimeframe:config.executionTimeframe});
+  // Prefer independent server replay on provider reference history, without
+  // treating historical reference fills as actual executable broker fills.
+  // Unsupported/old/missing data falls back to a clearly marked browser
+  // validation. A checked mismatch MUST block rather than downgrade.
+  let replay:TrustedReplayReceipt|null=null,verificationNote='Independent server replay unavailable; browser-produced simulation integrity checks only.';
+  const providerSymbol=bot.asset==='GOLDUSDC'?'xyz:GOLD':(typeof market.coin==='string'?market.coin:'');
+  try{
+   const history=this.deps.history??new DwellirHistory();
+   replay=await runTrustedBacktestReplay({
+    raw:rawBacktest,uid,botId,code:bot.code,asset:bot.asset,providerSymbol,
+    load:async({asset,timeframe,from,to})=>history.candles({asset,timeframe,from,to})
+   });
+   verificationNote='Exact strategy revision and historical reference candles were independently replayed using server QuickJS. Results matched. PropDAO fills and future performance remain unverified.';
+  }catch(error){
+   if(error instanceof ReplayMismatch)throw error;
+   if(!(error instanceof ReplayUnavailable))throw Error('Unexpected replay verification failure. Retry the review.');
+   verificationNote=error.message+' Browser-generated simulation validated for internal consistency only; NOT independently replayed.';
+  }
   const id=randomBytes(24).toString('hex'),createdAt=Date.now();
-  const data={version:1,id,uid,botId,accountId,riskUsd,leverage,symbol:bot.asset,codeHash,evidenceHash:evidence.receiptHash,backtest:{from:evidence.from,to:evidence.to,source:evidence.source,savedAt:evidence.savedAt,provenance:evidence.provenance},strategyRiskPercent:config.riskPercent,executionTimeframe:config.executionTimeframe,createdAt,expiresAt:createdAt+120000,consumedAt:null as number|null};
+  const data={version:1,id,uid,botId,accountId,riskUsd,leverage,symbol:bot.asset,codeHash,evidenceHash:evidence.receiptHash,backtest:{from:evidence.from,to:evidence.to,source:evidence.source,savedAt:evidence.savedAt,provenance:replay?.provenance??evidence.provenance,replayHash:replay?.replayHash??null,verifiedCandles:replay?.candleCount??null,browserObservedCandles:evidence.observedCandles,calendarIntervals:evidence.calendarIntervals},strategyRiskPercent:config.riskPercent,executionTimeframe:config.executionTimeframe,createdAt,expiresAt:createdAt+120000,consumedAt:null as number|null};
   await this.deps.write(this.reviewKey(uid,botId,id),JSON.stringify(data));
-  return {...data,reviewId:id,environment:process.env.VERCEL_ENV||'development',evidence:'Source matches the saved browser backtest. The simulation and fills are client-produced research, not independently certified by a trusted runner.'};
+  return {...data,reviewId:id,environment:process.env.VERCEL_ENV||'development',evidence:verificationNote};
  }
  private async consumeReview(uid:string,botId:string,input:any,bot:{asset:string;code:string},leverage:number){
   if(this.deps.unsafeLegacyDeployForTests)return;
@@ -109,7 +129,7 @@ export class PropDAOLiveService{
   try{
    const state=await this.runtime(grant,'status');
    const matched=state.grant?.id===grant.id;
-   let positions:any[]=[],closedTrades:any[]=[],pendingOrders:any[]|null=null,risk:any=null,accountError:string|undefined;
+   let positions:any[]|null=null,closedTrades:any[]|null=null,pendingOrders:any[]|null=null,risk:any=null,accountError:string|undefined,brokerExposureVerified=false;
    if(matched){
     try{
      const account=await this.deps.accounts.accountRisk(uid,grant.accountId);
@@ -128,6 +148,8 @@ export class PropDAOLiveService{
       status:String(o.status??'UNKNOWN'),type:String(o.orderType??o.type??''),
       createdAt:Number.isFinite(Number(o.createdAt??o.timestamp))?Number(o.createdAt??o.timestamp):null
      }));
+     // A successful broker account read, not Worker reachability, verifies exposure.
+     brokerExposureVerified=true;
      closedTrades=await this.deps.accounts.recentTrades(uid,grant.accountId);
     }catch(e){accountError=e instanceof Error?e.message:'PropDAO account activity unavailable'}
    }
@@ -139,6 +161,7 @@ export class PropDAOLiveService{
      paused:state.paused===true&&matched&&!grant.revokedAt&&Date.now()<grant.expiresAt,
      canResume:state.paused===true&&matched&&configured&&!state.pendingIntent&&!grant.revokedAt&&Date.now()<grant.expiresAt,
     accountId:grant.accountId,authorizationRevoked:Boolean(grant.revokedAt),grantExpiresAt:grant.expiresAt,codeHash:grant.codeHash,positions,pendingOrders,closedTrades,risk,accountError,
+    brokerExposureVerified,brokerExposure:brokerExposureVerified?(positions?.length?'open':pendingOrders?.length?'pending':'flat'):'unknown',
     error:!matched&&state.pendingIntent?'This account has an unresolved order from another bot. Reconcile it before deploying.':health.error};
 
   }catch(e){return {configured:true,deployed:true,running:false,uncertain:true,authorizationRevoked:Boolean(grant.revokedAt),accountId:grant.accountId,events:[],error:e instanceof Error?e.message:'Worker unavailable. Order status is unknown.'}}

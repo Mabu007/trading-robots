@@ -145,7 +145,7 @@ export function createAgentReadTools(uid:string,read:ReadObject,deps?:{runtimeSt
     const status=await bounded(deps.runtimeStatus(agentId),10000);
     if(!status||typeof status!=='object'||(status as any).agentId!==agentId)throw Error('Invalid status');
     const data=status as Record<string,unknown>,clean:Record<string,unknown>={};
-    for(const field of ['agentId','state','verified','nextCheck','openPositions','checkedAt','updatedAt','error']){
+    for(const field of ['agentId','state','verified','nextCheck','openPositions','brokerExposure','brokerExposureVerified','checkedAt','updatedAt','error']){
      const value=summaryValue(data[field]);if(value!==undefined)clean[field]=value;
     }
     return {available:true,source:'owner-checked agent runtime',...clean};
