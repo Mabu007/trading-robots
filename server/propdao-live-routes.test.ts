@@ -2,6 +2,7 @@ import {afterEach,describe,expect,it,vi} from 'vitest';
 import {PropDAOLiveService} from './propdao-live-routes.ts';
 import {starterCode} from '../src/strategy.ts';
 import {gzipSync} from 'node:zlib';
+import {simulate} from '../src/engine.ts';
 import type {PropDAOAccounts} from './propdao-account.ts';
 
 afterEach(()=>vi.unstubAllEnvs());
@@ -9,7 +10,7 @@ const setup=(strictReviews=false)=>{
  const saved=new Map<string,string>();
  if(strictReviews){
   const body={venue:'propdao',asset:'BTCUSDC',strategyCode:starterCode,riskPercent:1,from:'2026-11-01',to:'2026-11-02',
-   result:{timeframe:'m1',source:'test fixture candles',candles:[{time:1,open:100,high:101,low:99,close:100,volume:1}],trades:[],metrics:{trades:0}}};
+   result:{...simulate([{time:Date.parse('2026-11-01T00:00:00Z')/1000,open:100,high:101,low:99,close:100,volume:1},{time:Date.parse('2026-11-01T00:01:00Z')/1000,open:100,high:102,low:99,close:100,volume:1}],[{action:'WAIT'},{action:'WAIT'}]),timeframe:'m1',source:'test fixture candles'}};
   const bytes=Buffer.from(JSON.stringify(body)),payload=gzipSync(bytes).toString('base64');
   saved.set(`user-bots/${Buffer.from('alice').toString('base64url')}/bot-1/backtest.json`,JSON.stringify({format:'gzip-base64',version:2,payload,uncompressedBytes:bytes.length,userId:'alice',botId:'bot-1',savedAt:'2026-11-03T00:00:00.000Z'}));
  }
