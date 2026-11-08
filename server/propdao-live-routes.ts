@@ -109,7 +109,7 @@ export class PropDAOLiveService{
   try{
    const state=await this.runtime(grant,'status');
    const matched=state.grant?.id===grant.id;
-   let positions:any[]|null=null,closedTrades:any[]=[],pendingOrders:any[]|null=null,risk:any=null,accountError:string|undefined,brokerExposureVerified=false;
+   let positions:any[]|null=null,closedTrades:any[]|null=null,pendingOrders:any[]|null=null,risk:any=null,accountError:string|undefined,brokerExposureVerified=false;
    if(matched){
     try{
      const account=await this.deps.accounts.accountRisk(uid,grant.accountId);
