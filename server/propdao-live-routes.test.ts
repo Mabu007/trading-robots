@@ -59,6 +59,19 @@ describe('PropDAO live execution authorization',()=>{
   expect(state.pendingIntent).toEqual({intentId:'tv-unknown'});
   expect(JSON.stringify(state)).not.toContain('do not return');
  });
+ it('reports unknown exposure instead of zero positions when broker read fails but Worker is reachable',async()=>{
+  vi.stubEnv('PROPDAO_LIVE_ENABLED','true');vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
+  const {svc,accounts,saved,fetcher}=setup();
+  await svc.deploy('alice','bot-1',{body:{accountId:'prop-1',riskUsd:2,leverage:1,confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'}} as any);
+  const grant=JSON.parse([...saved.values()][0]);
+  fetcher.mockImplementation(async(url:string)=>String(url).endsWith('/health')?Response.json({ready:true}):Response.json({grant:{id:grant.id},running:true,paused:false,events:[]}));
+  accounts.accountRisk.mockRejectedValueOnce(Error('broker temporarily unavailable'));
+  const status=await svc.status('alice','bot-1');
+  expect(status).toMatchObject({deployed:true,running:true,brokerExposureVerified:false,brokerExposure:'unknown'});
+  expect(status.positions).toBeNull();
+  expect(status.pendingOrders).toBeNull();
+  expect(status.accountError).toContain('broker temporarily unavailable');
+ });
  it('isolates bots on the same account while keeping order submission separately gated',async()=>{
   vi.stubEnv('PROPDAO_LIVE_ENABLED','true');vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
   const {svc,fetcher,accounts,saved}=setup();
