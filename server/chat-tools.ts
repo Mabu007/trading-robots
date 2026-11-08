@@ -55,6 +55,13 @@ export function parsePlannedAction(message:any):Planned{
  return {tool:name,args};
 }
 export function parseToolSelection(message:any):ChatTool|null{return parsePlannedAction(message).tool}
+export function plannerFailure(status:number|undefined):{status:number;error:string}{
+ if(status===429)return {status:429,error:'OpenRouter rate-limited the selected model. Choose another model in AI settings or retry later. Your request was not executed.'};
+ if(status===401||status===403)return {status:409,error:'OpenRouter rejected this key or model. Check AI Settings and reconnect or change model. Your request was not executed.'};
+ if(status===402)return {status:402,error:'OpenRouter has insufficient credits for this model. Add credits or select a free/available model. Your request was not executed.'};
+ if(status===400||status===422)return {status:422,error:'This OpenRouter model could not perform the requested tool action. Select a tool-capable model in AI Settings. Your request was not executed.'};
+ return {status:502,error:'AI tool selection failed or the provider is unavailable. No action was executed.'};
+}
 export function chatToolRoutes(app:Express,accounts:OpenRouterAccounts,authenticate:(req:Request,res:Reply)=>Promise<string|null>,request:typeof fetch=fetch){
  // SDK planner only proposes an action; it cannot execute or approve one.
  app.post('/api/chat/sdk-plan',async(req,res)=>{
@@ -79,7 +86,7 @@ export function chatToolRoutes(app:Express,accounts:OpenRouterAccounts,authentic
    const calls=result.toolCalls.map(call=>({type:'function',function:{name:call.toolName,arguments:JSON.stringify(call.input)}}));
    const plan=parsePlannedAction({tool_calls:calls});
    return res.json({tool:plan.tool,...(Object.keys(plan.args).length?{args:plan.args}:{}),requiresConfirmation:['deploy','stop','edit','create','manage_skill','edit_personality','rename_code','delete_code','manage_broker'].includes(plan.tool||'')});
-  }catch{return res.status(502).json({error:'AI tool selection failed. No action was executed.'})}
+  }catch(e){const error=e as {statusCode?:number;status?:number;cause?:{statusCode?:number}};const failure=plannerFailure(error?.statusCode??error?.status??error?.cause?.statusCode);return res.status(failure.status).json({error:failure.error})}
  });
  app.post('/api/chat/plan',async(req,res)=>{
   res.setHeader('Cache-Control','no-store');
@@ -93,7 +100,7 @@ export function chatToolRoutes(app:Express,accounts:OpenRouterAccounts,authentic
    const account=await accounts.load(uid);if(!account)return res.status(409).json({error:'Connect OpenRouter in Apps.'});
    if(model&&!(await accounts.models()).some(m=>m.id===model))return res.status(400).json({error:'This model is not in the current OpenRouter catalogue.'});
    const response=await request('https://openrouter.ai/api/v1/chat/completions',{method:'POST',headers:{Authorization:`Bearer ${account.apiKey}`,'Content-Type':'application/json'},body:JSON.stringify({model:model||account.model,temperature:0,max_tokens:1800,parallel_tool_calls:false,tools:toolDefinitions,tool_choice:'auto',messages:[{role:'system',content:'Select a tool only when the user explicitly requests that action. General education and explanation need no tool, except use find_code for questions about named saved source. Never claim an action happened or infer approval. For changes to skills, personality, code or brokers, propose a review; do not execute. Skill names: '+JSON.stringify(skillNames)+'. Existing personality: '+JSON.stringify(profile)},{role:'user',content:message}]}),signal:AbortSignal.timeout(30000)});
-   if(!response.ok)return res.status(502).json({error:'The selected AI model could not select a tool. Check AI settings or retry.'});
+   if(!response.ok){const failure=plannerFailure(response.status);return res.status(failure.status).json({error:failure.error})}
    const body=await response.json() as any;
    if(!body.choices?.[0]?.message)throw Error('Missing model response');
    const plan=parsePlannedAction(body.choices[0].message);
