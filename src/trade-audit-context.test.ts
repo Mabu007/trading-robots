@@ -33,3 +33,24 @@ describe('AI trade audit uses exact saved robot and historical price context',()
   expect(audit.contextLimit).toContain('Only the first 180');
  });
 });
+
+it('uses the saved candles and complete strategy source for an 18K+ strategy without fetching external history',()=>{
+ const run=make();run.strategyCode='export function onCandle(ctx) {\n'+(' const volume = ctx.candle.volume;\n'.repeat(750))+' return {action:"WAIT"}; }';
+ const evidence=createBacktestTradeAudit(run,1);
+ expect(evidence.strategy).toBe(run.strategyCode);
+ expect(evidence.strategySourceComplete).toBe(true);
+ expect(evidence.evidence).toMatchObject({kind:'saved-client-simulation',savedCandles:260,attachedDuring:16,inTradeContextComplete:true,
+  entryStopDistance:1,targetRAtFill:2,reportedPnlR:1});
+ expect(evidence.historySource).toContain('R2');
+ expect(evidence.contextLimit).not.toContain('18,000');
+});
+
+it('does not turn a long source or insufficient saved OHLC into invented independent proof',()=>{
+ const run=make();run.strategyCode='x'.repeat(61000);
+ run.result.candles=[];
+ const evidence=createBacktestTradeAudit(run,1);
+ expect(evidence.strategySourceComplete).toBe(false);
+ expect(evidence.evidence.savedCandles).toBe(0);
+ expect(evidence.evidence.touchSequence).toBe('not-evaluable');
+ expect(evidence.contextLimit).toContain('NOT attached');
+});

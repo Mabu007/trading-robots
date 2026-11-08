@@ -93,7 +93,7 @@ export function ChatEvidence({trace,onAsk,theme}:{trace:ToolTrace[];theme:AppThe
   {time&&<div className="vibes-evidence-caption">Hyperliquid {snapshot?.quote?.coin??chart?.coin} · {snapshot?.quote?'midpoint':'last close'} · {displayTime(time)}</div>}
   <div className="vibes-evidence-actions">
    {chart&&<button type="button" aria-expanded={showChart} onClick={()=>setShowChart(v=>!v)}><ChartCandlestick size={15}/>{showChart?'Hide chart':'View chart'}</button>}
-   {chart&&onAsk&&<button type="button" onClick={()=>onAsk('What’s driving '+chart.coin+' right now? Search recent news and distinguish confirmed drivers from possibilities.')}><Sparkles size={15}/>What’s driving it?</button>}
+
    {(sources.length>0||other.length>0)&&<button type="button" aria-expanded={showSources} onClick={()=>setShowSources(v=>!v)}><Link2 size={15}/>Sources<ChevronDown size={13}/></button>}
   </div>
   {showChart&&chart&&<EvidenceChart evidence={chart} theme={theme}/>}

@@ -1,7 +1,7 @@
 import type {Venue} from '../shared/venues';
 
 export type AgentState='backtest_running'|'backtest_completed'|'backtest_failed'|'deployment_pending'|'running'|'paused'|'stopped'|'unknown';
-export type PersistentAgent={
+export type PersistentAgent={archivedAt?:number;
  schemaVersion:1;id:string;ownerUid:string;botId:string;name:string;asset:string;venue:Venue;mode:'backtest'|'live';state:AgentState;
  strategy:{version:string;codeHash:string;revision:number};
  configuration:{timeframes:string[];executionTimeframe:string;riskPercent:number;riskReward:number};

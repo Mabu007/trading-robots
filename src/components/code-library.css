@@ -76,3 +76,17 @@
  .tv-code-deployments .tv-code-item-actions{width:100%;justify-content:flex-start}
  .tv-code-deployments .tv-code-inspect-button{flex:1}
 }
+/* Confirmed stopped robots are historical records, not active deployments. */
+.tv-stopped-robots{margin-top:20px;padding:15px;border:1px solid var(--tv-shell-line);border-radius:14px;background:var(--tv-shell-panel-muted)}
+.tv-stopped-robots h4{margin:0;font-size:13px;display:flex;gap:8px;align-items:center}
+.tv-stopped-robots h4 span{padding:3px 8px;border-radius:999px;background:var(--tv-shell-panel);font-size:11px;color:var(--tv-shell-muted)}
+.tv-stopped-robots>p{margin:6px 0 14px;color:var(--tv-shell-muted);font-size:11px;line-height:1.6}
+.tv-stopped-robot-row{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:12px 0;border-top:1px solid var(--tv-shell-line)}
+.tv-stopped-robot-row>div:first-child{display:flex;flex-direction:column;gap:5px;min-width:0}
+.tv-stopped-robot-row strong{font-size:12px;color:var(--tv-shell-ink)}
+.tv-stopped-robot-row small{font-size:10px;color:var(--tv-shell-muted)}
+.tv-stopped-robot-row .tv-code-item-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.tv-stopped-robot-row button{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:9px 11px;border:1px solid var(--tv-shell-line);border-radius:9px;background:var(--tv-shell-panel);color:var(--tv-shell-ink);font-size:11px;cursor:pointer}
+.tv-stopped-robot-row button:first-child{background:var(--tv-shell-accent);border-color:var(--tv-shell-accent);color:#fff}
+.tv-stopped-robot-row button.tv-clear-robot{color:#b7565b}
+@media(max-width:620px){.tv-stopped-robot-row{flex-direction:column;align-items:stretch}.tv-stopped-robot-row .tv-code-item-actions button{flex:1}}

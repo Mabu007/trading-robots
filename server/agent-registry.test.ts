@@ -99,3 +99,23 @@ it('authenticates agent route access and rejects unowned bots for backtest recor
   expect((await fetch(base+'/api/agents',{headers:{'X-Fixture-Uid':'alice'}})).status).toBe(200);
  }finally{await new Promise<void>(resolve=>server.close(()=>resolve()))}
 });
+
+it('archives only owner-verified stopped live records, never running or uncertain execution',async()=>{
+ const {store}=memory(),registry=new AgentRegistry(store,time());
+ const id=registry.idFor('alice',bot.id);
+ await registry.liveTransition('alice',bot,{state:'running',action:'deploy_confirmed',grantId:'grant-1',expiresAt:100_000,authorized:true});
+ await expect(registry.archiveStopped('alice',id)).rejects.toThrow(/confirmed stopped/);
+ await registry.liveTransition('alice',bot,{state:'unknown',action:'stop_outcome_unknown',grantId:'grant-1',expiresAt:100_000,authorized:false});
+ await expect(registry.archiveStopped('alice',id)).rejects.toThrow(/confirmed stopped/);
+ await registry.liveTransition('alice',bot,{state:'stopped',action:'stop_confirmed',grantId:'grant-1',expiresAt:100_000,authorized:false});
+ await expect(registry.archiveStopped('bob',id)).rejects.toThrow(/not found/);
+ const result=await registry.archiveStopped('alice',id);
+ expect(result).toMatchObject({archived:true,agentId:id});
+ expect(await registry.list('alice')).toHaveLength(0);
+ expect((await registry.get('alice',id)).archivedAt).toBeDefined();
+ const audit=await registry.audit('alice',id);
+ expect(audit.some(entry=>entry.action==='stopped_record_archived')).toBe(true);
+ // Deploying a NEW reviewed grant restores this record to the active listing.
+ await registry.liveTransition('alice',bot,{state:'running',action:'deploy_confirmed',grantId:'grant-2',expiresAt:200_000,authorized:true});
+ expect(await registry.list('alice')).toHaveLength(1);
+});
