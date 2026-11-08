@@ -259,7 +259,7 @@ describe('revision- and account-bound PropDAO deployment review',()=>{
   const reviewed=await svc.review('alice','bot-1',{body:requestBody} as any);
   expect(reviewed).toMatchObject({accountId:'prop-1',symbol:'BTCUSDC',riskUsd:2,leverage:1});
   const body={...requestBody,reviewId:reviewed.reviewId,expectedCodeHash:reviewed.codeHash,confirm:auth};
-  await expect(svc.deploy('alice','bot-1',{body:{...body,accountId:'prop-2'}} as any)).rejects.toThrow(/scope changed/);
+  await expect(svc.deploy('alice','bot-1',{body:{...body,accountId:'prop-2'}} as any)).rejects.toThrow(/changed since review/);
   await svc.deploy('alice','bot-1',{body} as any);
   await expect(svc.deploy('alice','bot-1',{body} as any)).rejects.toThrow(/already used/);
  });
@@ -267,8 +267,8 @@ describe('revision- and account-bound PropDAO deployment review',()=>{
   const {svc}=setupReady();
   const reviewed=await svc.review('alice','bot-1',{body:requestBody} as any);
   const base={...requestBody,reviewId:reviewed.reviewId,expectedCodeHash:reviewed.codeHash,confirm:auth};
-  await expect(svc.deploy('alice','bot-1',{body:{...base,riskUsd:3}} as any)).rejects.toThrow(/scope changed/);
-  await expect(svc.deploy('alice','bot-1',{body:{...base,expectedCodeHash:'a'.repeat(64)}} as any)).rejects.toThrow(/scope changed/);
+  await expect(svc.deploy('alice','bot-1',{body:{...base,riskUsd:3}} as any)).rejects.toThrow(/changed since review/);
+  await expect(svc.deploy('alice','bot-1',{body:{...base,expectedCodeHash:'a'.repeat(64)}} as any)).rejects.toThrow(/changed since review/);
   vi.useFakeTimers();
   try{
    vi.setSystemTime(reviewed.expiresAt+1);
