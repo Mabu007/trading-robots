@@ -28,6 +28,7 @@ export function CodeLibrary({bots,current,analyses,watches,agents,runtimeStates,
   setStopBusy(true);setOperationNotice('');
   try{
    const outcome=await onManageDeployment(agent,action);
+   if(outcome?.delegatedToChat){setOperationNotice('Opened the existing Chat-based management review for '+String(outcome.venue||'this broker')+'. No broker action has been executed.');return;}
    if(action==='stop'){
     setStopAgent(null);
     setOperationNotice(outcome?.authorizationRevoked?(outcome.runtimeStopped?'New-order authorization revoked and runtime stop confirmed. Existing positions and orders still require broker verification.':'New-order authorization revoked. Worker stop is UNVERIFIED; check broker exposure and reconcile before replacing the strategy.'):'Stop outcome could not be verified. Check the broker and refresh status.');
@@ -73,7 +74,7 @@ export function CodeLibrary({bots,current,analyses,watches,agents,runtimeStates,
      </div>
      <div className="tv-code-item-actions">
       <button type="button" onClick={()=>void manage(agent,'status')}>Check status</button>
-      {(state==='running'||state==='paused'||state==='unverified')&&<button type="button" onClick={()=>setStopAgent(agent)}>Stop new entries</button>}
+      {(state==='running'||state==='paused'||state==='unverified')&&<button type="button" onClick={()=>{if(agent.venue==='propdao')setStopAgent(agent);else void manage(agent,'stop')}}>{agent.venue==='propdao'?'Stop new entries':'Review stop'}</button>}
      </div>
     </article>;
    })}
