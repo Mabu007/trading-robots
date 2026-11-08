@@ -640,7 +640,7 @@ app.post('/api/ai', async (req, res) => {
   const lastUser=[...messages].reverse().find((m:any)=>m.role==='user');
   const earlierPublicQuestion=[...messages].reverse().filter((m:any)=>m.role==='user').slice(1,4).find((m:any)=>researchRequested(m.content));
   const referentialFollowup=typeof lastUser?.content==='string'&&lastUser.content.length<140&&/\b(what about|and (?:the |what)|how about|what caused|tell me more|why|does (?:that|it)|is (?:it|that))\b/i.test(lastUser.content);
-  const researchMode=req.body?.researchMode===true&&(researchRequested(lastUser?.content)||Boolean(referentialFollowup&&earlierPublicQuestion));
+  const researchMode=req.body?.researchMode===true&&req.body?.auditMode!==true&&(researchRequested(lastUser?.content)||Boolean(referentialFollowup&&earlierPublicQuestion));
   let aiMessages=[{role:'system',content:vibesPersona},...messages];
   let publicEvidence:Awaited<ReturnType<typeof researchBrief>>|undefined;
   if(researchMode){
@@ -825,7 +825,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
   const referentialFollowup=typeof lastUser?.content==='string'&&lastUser.content.length<140&&/\b(what about|and (?:the |what)|how about|what caused|tell me more|why|does (?:that|it)|is (?:it|that))\b/i.test(lastUser.content);
   const currentQuestion=String(lastUser?.content||'');
   const officialResearch=publicFinanceRequested(currentQuestion);
-  const researchMode=!strategyId&&!backtestId&&req.body?.researchMode===true&&(officialResearch||researchRequested(lastUser?.content)||Boolean(referentialFollowup&&earlierPublicQuestion));
+  const researchMode=!strategyId&&!backtestId&&req.body?.researchMode===true&&req.body?.auditMode!==true&&(officialResearch||researchRequested(lastUser?.content)||Boolean(referentialFollowup&&earlierPublicQuestion));
   let aiMessages=[{role:'system',content:vibesPersona},...messages];
   let publicEvidence:Awaited<ReturnType<typeof researchBrief>>|undefined;
   if(researchMode){
@@ -920,7 +920,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
      const input={botId:backtestId,lookbackCandles:240};
      requestedEvidence=await runRead('runVerifiedBacktest',input,async toolCallId=>runner.execute!(input,{toolCallId,messages:[],context:{},abortSignal:clientAbort.signal}));
     }
-    const marketTools=req.body?.includeMarketContext===true&&!requestedEvidence?{
+    const marketTools=req.body?.includeMarketContext===true&&req.body?.auditMode!==true&&!requestedEvidence?{
       ...(researchMode?publicFinanceTools(clientAbort.signal):{}),
       ...(!researchMode?scopePrivateTools(createAgentReadTools(uid,readR2Object,{
         runtimeStatus:async(agentId)=>{

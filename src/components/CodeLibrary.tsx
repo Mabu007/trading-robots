@@ -1,12 +1,14 @@
 import {displayTime} from '../display-time';
 import {useEffect,useMemo,useState} from 'react';
 import {createPortal} from 'react-dom';
-import {Activity,ArrowRight,Bot,Clock3,Code2,Eye,Pencil,Plus,RefreshCw,Search,Sparkles,Trash2,X} from 'lucide-react';
+import {Activity,ArrowRight,Bot,Clock3,Code2,Eye,Pencil,Play,Plus,RefreshCw,Search,Sparkles,Trash2,X} from 'lucide-react';
 import {Dialog} from './Dialog';
 import type {CloudBot, CloudClient} from '../firebase';
 import {StrategyWorkbench, type WorkbenchView} from './StrategyWorkbench';
 import {PropDAODeployDialog} from './Marketplace';
 import {DeployedRobotInspector} from './DeployedRobotInspector';
+import {robotDisplayState,canClearRobot} from '../robot-lifecycle';
+import {sharingRequest} from './BotSharing';
 import type {StrategyRun} from '../strategy-workbench';
 import type {Trade} from '../types';
 import type {AppTheme} from '../theme';
@@ -33,27 +35,54 @@ export function codeState(bot:CloudBot,agents:PersistentAgent[],states:Record<st
  const agent=agents.find(a=>a.botId===bot.id&&a.mode==='live');
  if(!agent)return 'Saved';
  const live=states[agent.id];
+ if(robotDisplayState(agent,live)==='stopped')return 'Stopped';
  if(!live||live.verified!==true)return 'Checking';
  if(live.state==='running')return 'Running';
  if(live.state==='paused')return 'Paused';
  return live.state==='stopped'||live.state==='not-deployed'?'Stopped':'Checking';
 }
 export function CodeLibrary({client,bots,current,analyses,watches,agents,runtimeStates,onAsk,onSaved,onRenameBot,onDeleteBot,onRenameAnalysis,onDeleteAnalysis,onRunAnalysis,onWatch,onStopWatch,onDeploy,deploymentError,onRefreshDeployments,onManageDeployment,onAuditTrade,onConnectBroker,theme}:Props){
- const deployments=agents.filter(agent=>agent.mode==='live'&&agent.deployment?.grantId).sort((a,b)=>(b.deployment?.authorizedAt||0)-(a.deployment?.authorizedAt||0));
+ const deployments=agents.filter(agent=>agent.mode==='live'&&agent.deployment?.grantId&&!agent.archivedAt).sort((a,b)=>(b.deployment?.authorizedAt||0)-(a.deployment?.authorizedAt||0));
+ const activeDeployments=deployments.filter(agent=>robotDisplayState(agent,runtimeStates[agent.id])!=='stopped');
+ const stoppedDeployments=deployments.filter(agent=>robotDisplayState(agent,runtimeStates[agent.id])==='stopped');
  const [query,setQuery]=useState('');
  const [selectedAnalysis,setSelectedAnalysis]=useState<CodeAnalysis|null>(null);
  const [workbench,setWorkbench]=useState<{bot:CloudBot|null;view:WorkbenchView}|null>(null);
  const [localDeploy,setLocalDeploy]=useState<{bot:CloudBot;riskPercent:number;codeHash?:string}|null>(null);
  const [selectedDeployment,setSelectedDeployment]=useState<PersistentAgent|null>(null);
+ const [clearTarget,setClearTarget]=useState<PersistentAgent|null>(null),[clearBusy,setClearBusy]=useState(false);
+ const restart=(agent:PersistentAgent)=>{
+  if(robotDisplayState(agent,runtimeStates[agent.id])!=='stopped'){setOperationNotice('Robot stop has not been confirmed. Reconcile the broker first.');return}
+  const bot=bots.find(item=>item.id===agent.botId);
+  if(!bot){setOperationNotice('Saved robot code is unavailable. Open the robot to recover its exact strategy before restarting.');return}
+  if(bot.venue!=='propdao'){onDeploy(bot,1);return}
+  setSelectedDeployment(null);setLocalDeploy({bot,riskPercent:1});
+ };
+ const clear=async(agent:PersistentAgent)=>{
+  if(!client||clearBusy||!canClearRobot(agent,runtimeStates[agent.id]))return;
+  setClearBusy(true);setOperationNotice('');
+  try{await sharingRequest(client,'/api/agents/'+encodeURIComponent(agent.id)+'/archive','POST',{});
+   setClearTarget(null);setSelectedDeployment(null);
+   setOperationNotice('Stopped robot cleared from the deployed list. Its saved strategy and audit history are preserved.');
+   await Promise.resolve(onRefreshDeployments());
+  }catch(error){setOperationNotice('Could not clear the robot: '+(error instanceof Error?error.message:'Unknown error'))}
+  finally{setClearBusy(false)}
+ };
  const [refreshing,setRefreshing]=useState(false);
  const refreshDeployments=async()=>{
   if(refreshing)return;
   setRefreshing(true);
-  try{await Promise.resolve(onRefreshDeployments());setOperationNotice('Refresh requested. Check each robot for broker-confirmed details; unavailable provider reads remain unverified.')}
+  try{await Promise.resolve(onRefreshDeployments())}
   catch(cause){setOperationNotice('Could not refresh robot status: '+(cause instanceof Error?cause.message:'Unknown error'))}
   finally{setRefreshing(false)}
  };
  const openWorkbench=(bot:CloudBot|null,view:WorkbenchView)=>setWorkbench({bot,view});
+ useEffect(()=>{
+  if(!selectedDeployment)return;
+  const fresh=agents.find(agent=>agent.id===selectedDeployment.id);
+  if(fresh&&fresh!==selectedDeployment)setSelectedDeployment(fresh);
+ },[agents,selectedDeployment]);
+
  const [stopAgent,setStopAgent]=useState<PersistentAgent|null>(null),[stopBusy,setStopBusy]=useState(false),[operationNotice,setOperationNotice]=useState('');
  const manage=async(agent:PersistentAgent,action:'status'|'stop')=>{
   setStopBusy(true);setOperationNotice('');
@@ -89,12 +118,12 @@ export function CodeLibrary({client,bots,current,analyses,watches,agents,runtime
     <button type="button" onClick={()=>void refreshDeployments()} disabled={refreshing}><RefreshCw size={14}/>{refreshing?'Refreshing…':'Refresh status'}</button></header>
    {deploymentError&&<p role="alert">{deploymentError}</p>}
     {operationNotice&&<p role="status">{operationNotice}</p>}
-   {deployments.map(agent=>{
+   {activeDeployments.map(agent=>{
     const runtime=runtimeStates[agent.id];
-    const state=runtime?.verified===true?runtime.state:'unverified';
+    const state=robotDisplayState(agent,runtime);
     return <article className="tv-code-item" key={agent.id}>
      <span className="tv-code-item-icon"><Activity size={18}/></span>
-     <div className="tv-code-item-content"><div className="tv-code-item-title"><strong>{agent.name}</strong><span className={'tv-code-state '+(state==='running'?'running':'')}><i/>{state==='unverified'?'Status unverified':state[0].toUpperCase()+state.slice(1)}</span></div>
+     <div className="tv-code-item-content"><div className="tv-code-item-title"><strong>{agent.name}</strong><span className={'tv-code-state '+(state==='running'?'running':'')}><i/>{state==='verification-required'?'Verification required':state[0].toUpperCase()+state.slice(1)}</span></div>
       <p>{agent.asset} · {venueLabel[agent.venue]} · v{agent.strategy.revision}</p>
       {runtime?.lastSignal&&<small>Last signal · {runtime.lastSignal}</small>}
       {runtime?.error&&<small>{runtime.error}</small>}
@@ -102,11 +131,22 @@ export function CodeLibrary({client,bots,current,analyses,watches,agents,runtime
      <div className="tv-code-item-actions">
        <button type="button" className="tv-code-inspect-button" onClick={()=>setSelectedDeployment(agent)}><Eye size={15}/> Inspect & manage</button>
       <button type="button" onClick={()=>void manage(agent,'status')}>Quick check</button>
-      {(state==='running'||state==='paused'||state==='unverified')&&<button type="button" onClick={()=>{if(agent.venue==='propdao')setStopAgent(agent);else void manage(agent,'stop')}}>{agent.venue==='propdao'?'Stop new entries':'Review stop'}</button>}
+      {(state==='running'||state==='paused'||state==='verification-required')&&<button type="button" onClick={()=>{if(agent.venue==='propdao')setStopAgent(agent);else void manage(agent,'stop')}}>{agent.venue==='propdao'?'Stop new entries':'Review stop'}</button>}
      </div>
     </article>;
    })}
-    {!deployments.length&&!deploymentError&&<div className="tv-code-empty-deploy">
+    {stoppedDeployments.length>0&&<section className="tv-stopped-robots" aria-label="Stopped robots">
+    <h4>Stopped robots <span>{stoppedDeployments.length}</span></h4>
+    <p>New entries are disabled. Broker exposure is verified separately. Restart creates a new authorization review.</p>
+    {stoppedDeployments.map(agent=><article className="tv-stopped-robot-row" key={agent.id}>
+     <div><strong>{agent.name}</strong><small>{agent.asset} · {venueLabel[agent.venue]} · v{agent.strategy.revision} · Stopped</small></div>
+     <div className="tv-code-item-actions"><button type="button" onClick={()=>restart(agent)}><Play size={14}/> Start Bot</button>
+      <button type="button" onClick={()=>setSelectedDeployment(agent)}>Inspect</button>
+      <button type="button" className="tv-clear-robot" onClick={()=>setClearTarget(agent)} aria-label={'Clear stopped robot '+agent.name}><Trash2 size={15}/> Clear</button>
+     </div>
+    </article>)}
+   </section>}
+   {!deployments.length&&!deploymentError&&<div className="tv-code-empty-deploy">
   <Bot size={21}/><strong>No deployed robots yet</strong>
   <span>Finish a saved backtest and deploy an exact reviewed revision. Only broker-confirmed deployments appear here.</span>
  </div>}
@@ -122,10 +162,15 @@ export function CodeLibrary({client,bots,current,analyses,watches,agents,runtime
     if(bot.venue==='propdao'){setLocalDeploy({bot,riskPercent,codeHash});return}
     onDeploy(bot,riskPercent,codeHash);
    }}/>}
+   {clearTarget&&<Dialog title="Clear stopped robot" busy={clearBusy} onClose={()=>setClearTarget(null)}>
+     <p>Remove <strong>{clearTarget.name}</strong> from the deployed robots list? This only archives a confirmed stopped deployment record. It does not delete your saved robot, broker positions or audit history.</p>
+     <div className="market-buttons"><button type="button" className="ghost" onClick={()=>setClearTarget(null)}>Cancel</button>
+     <button type="button" className="primary" disabled={clearBusy} onClick={()=>void clear(clearTarget)}>{clearBusy?'Clearing…':'Clear stopped robot'}</button></div>
+   </Dialog>}
    {selectedDeployment&&client&&typeof document!=='undefined'&&createPortal(
     <DeployedRobotInspector key={selectedDeployment.id} client={client}
      agent={selectedDeployment} onClose={()=>setSelectedDeployment(null)}
-     onRefreshAgents={onRefreshDeployments} onStop={onManageDeployment}/>,document.body)}
+     onRefreshAgents={onRefreshDeployments} onStop={onManageDeployment} onRestart={restart} onClear={agent=>setClearTarget(agent)}/>,document.body)}
    {localDeploy&&client&&typeof document!=='undefined'&&createPortal(
    <PropDAODeployDialog key={localDeploy.bot.id+':'+(localDeploy.codeHash||'saved')} client={client}
     botId={localDeploy.bot.id} expectedCodeHash={localDeploy.codeHash}

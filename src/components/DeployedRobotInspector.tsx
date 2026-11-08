@@ -1,10 +1,11 @@
 import {useCallback,useEffect,useRef,useState} from 'react';
-import {Activity,AlertTriangle,Bot,CheckCircle2,Clock3,RefreshCw,ShieldCheck,Square,Wifi,Zap} from 'lucide-react';
+import {Activity,AlertTriangle,Bot,CheckCircle2,Clock3,Play,RefreshCw,ShieldCheck,Square,Trash2,Wifi,Zap} from 'lucide-react';
 import type {CloudClient} from '../firebase';
 import type {PersistentAgent} from '../agents';
 import {sharingRequest} from './BotSharing';
 import {Dialog} from './Dialog';
 import {displayTime} from '../display-time';
+import {robotDisplayState,canClearRobot} from '../robot-lifecycle';
 import './deployed-robot-inspector.css';
 
 type Snapshot=Record<string,any>;
@@ -25,10 +26,11 @@ const stateName=(s:Snapshot|null,agent:PersistentAgent)=>{
  if(s.deployed)return 'Stopped';
  return agent.state==='unknown'?'Status unknown':'No active authorization';
 };
-export function DeployedRobotInspector({client,agent,onClose,onRefreshAgents,onStop}:{
+export function DeployedRobotInspector({client,agent,onClose,onRefreshAgents,onStop,onRestart,onClear}:{
  client:CloudClient;agent:PersistentAgent;onClose:()=>void;
  onRefreshAgents:()=>Promise<void>|void;
  onStop:(agent:PersistentAgent,action:'status'|'stop')=>Promise<any>;
+ onRestart?:(agent:PersistentAgent)=>void;onClear?:(agent:PersistentAgent)=>void;
 }){
  const [snapshot,setSnapshot]=useState<Snapshot|null>(null);
  const [loading,setLoading]=useState(true);
@@ -57,7 +59,8 @@ export function DeployedRobotInspector({client,agent,onClose,onRefreshAgents,onS
   const id=window.setInterval(()=>{if(!document.hidden&&!stopping)void refresh()},30000);
   return()=>window.clearInterval(id);
  },[agent.venue,refresh,stopping]);
- const state=stateName(snapshot,agent);
+ const stopped=robotDisplayState(agent)==='stopped';
+ const state=stopped?'Stopped · new entries disabled':stateName(snapshot,agent);
  const verified=Boolean(snapshot&&!snapshot.uncertain&&!snapshot.statusUnavailable&&snapshot.connected);
  const exposureVerified=verified&&snapshot?.brokerExposureVerified===true;
  const exposure=exposureVerified?String(snapshot?.brokerExposure||'verified'):'Unknown / not independently verified';
@@ -140,7 +143,9 @@ export function DeployedRobotInspector({client,agent,onClose,onRefreshAgents,onS
    </dl>
   </section>
   <div className="tv-deployed-footnote"><AlertTriangle size={15}/> Stopping a robot revokes authorization for new entries. It does not guarantee existing positions or resting orders are closed. Inspect your broker separately.</div>
-  <div className="tv-deployed-actions">{agent.venue==='propdao'&&!snapshot?.authorizationRevoked&&
+  <div className="tv-deployed-actions">{stopped&&onRestart&&<button type="button" className="tv-deployed-secondary" onClick={()=>onRestart(agent)}><Play size={15}/> Start Bot</button>}
+   {stopped&&onClear&&canClearRobot(agent)&&<button type="button" className="tv-deployed-secondary" onClick={()=>onClear(agent)}><Trash2 size={15}/> Clear</button>}
+   {agent.venue==='propdao'&&!stopped&&!snapshot?.authorizationRevoked&&
    <button type="button" className="tv-deployed-stop" disabled={stopping||loading} onClick={()=>setConfirmStop(current=>!current)}><Square size={15}/> Stop new entries</button>}
    <button type="button" className="tv-deployed-secondary" onClick={onClose}>Close</button></div>
   {confirmStop&&<section className="tv-deployed-stop-confirm" role="alertdialog" aria-label="Confirm robot stop">

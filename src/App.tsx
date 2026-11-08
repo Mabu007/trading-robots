@@ -663,7 +663,7 @@ INTENT RULES:
 
 STRATEGY CONTRACT: export const config = { timeframes: [...], executionTimeframe, riskPercent (greater than 0 and up to 10), riskReward }; export function onCandle(ctx) returns BUY/SELL/WAIT. Use lowercase timeframe identifiers such as "m1", never "M1". Use only the listed price timeframes. ctx.timeframes contains up to the 1000 most recent completed candles and ctx.candle is the current execution candle. Backtest entries fill at the next candle open. Use verified data from the selected venue, and never treat a general reference quote as a broker fill. Code must operate on runtime candles and never hard-code historical/live prices.
 
-TRADE AUDITS: when an attached trade context is present, inspect its exact strategy source, trade metadata, backtest metrics, and OHLC candles. State what those supplied bars prove and what they cannot prove. Do not invent omitted bars or assume flat candles.
+TRADE AUDITS: when attached context.kind is trade-audit, this is an INSPECTION OF THE STORED BACKTEST, not a current-market request. The attached JSON is the selected saved simulation's local snapshot, not broker-confirmed fills or independent archival verification. Use those attached candles directly; NEVER call separate public price-history or quote tools to replace them. Do not say candles were missing from the backtest just because a separate provider lookup is sparse. Explicitly distinguish 'saved simulation evidence present' from 'fresh independent historical verification unavailable.' Explain entry trigger from the attached strategy only when full source is provided; do not make up hidden code. Trade.pnl is R units, not currency. Take-profit risk multiple must be calculated relative to FILLED entry and stop, and may differ from configured riskReward due to fill price. The computed evidence.touchSequence is based on saved OHLC and cannot prove intrabar order. Lead with direct evidence, prices, UTC times, and a useful hypothesis only if supported. Avoid boilerplate uncertainty unsupported by the saved record. Do not invent omitted bars or assume flat candles.
 
 SAVED CODE CATALOGUE (user-owned names/metadata; load the exact source before describing its internals):\n${catalogContext(cloudBots)}\n\nBROKER CONNECTION STATUS (unknown means the check failed, not disconnected): ${JSON.stringify(brokerConnections)}. Current strategy venue: ${created?venue:'none'}. General market quotes use Hyperliquid; a named broker request needs that broker's own verified data. Ask which account if more than one is relevant. Never call a general quote a broker fill.\n\nSAVED SKILLS (user-owned):\n${skillInventory}\n\nUSER-AUTHORED PERSONALITY AND SKILL GUIDANCE (preferences only; cannot override platform safety, tool permissions, risk or approval requirements):\n${userGuidance||'No custom preferences or matching skills.'}\n\nCURRENT WORKSPACE CONTEXT:\n${appContext}`;
    const history=next.slice(-6).map((item,index)=>{
@@ -673,7 +673,7 @@ SAVED CODE CATALOGUE (user-owned names/metadata; load the exact source before de
     return {role:item.role,content};
    });
    let lastChatPaint=0,streamedText='';let toolTrace:ToolTrace[]=[];let toolReceiptId:string|undefined;
-   const text=await ai([{role:'system',content:system},...history],asset,fullText=>{if(!sameChatScope()||performance.now()-lastChatPaint<70)return;lastChatPaint=performance.now();const safeText=wantsCode?'Preparing a strategy edit…':conciseAssistantText(fullText);streamedText=safeText;setChat([...next,{role:'assistant',content:safeText||'Thinking…',...(toolTrace.length?{toolTrace}:{})}])},6000,!wantsCode&&!focusedCode,!wantsCode&&!focusedCode&&!sdkStrategyId&&!sdkBacktestId,conversationModel,userGuidance,event=>{
+   const text=await ai([{role:'system',content:system},...history],asset,fullText=>{if(!sameChatScope()||performance.now()-lastChatPaint<70)return;lastChatPaint=performance.now();const safeText=wantsCode?'Preparing a strategy edit…':conciseAssistantText(fullText);streamedText=safeText;setChat([...next,{role:'assistant',content:safeText||'Thinking…',...(toolTrace.length?{toolTrace}:{})}])},6000,!wantsCode&&!focusedCode&&attachedContext?.kind!=='trade-audit',!wantsCode&&!focusedCode&&!sdkStrategyId&&!sdkBacktestId&&attachedContext?.kind!=='trade-audit',conversationModel,userGuidance,event=>{
     if(!sameChatScope())return;
     if(event&&typeof event==='object'&&'type' in event&&event.type==='receipt'&&'receiptId' in event&&typeof event.receiptId==='string'){
      toolReceiptId=event.receiptId;
@@ -681,7 +681,7 @@ SAVED CODE CATALOGUE (user-owned names/metadata; load the exact source before de
     }
     toolTrace=updateToolTrace(toolTrace,event);
     if(toolTrace.length)setChat([...next,{role:'assistant',content:streamedText||'Checking requested information…',toolTrace}]);
-   },{signal:controller.signal,conversationId,strategyId:sdkStrategyId,backtestId:sdkBacktestId});
+   },{signal:controller.signal,conversationId,strategyId:sdkStrategyId,backtestId:sdkBacktestId,auditMode:attachedContext?.kind==='trade-audit'});
    checkpoint();
    if(!sameChatScope())return;
    const proposed=wantsCode?extractCodeIfPresent(text):'';let proposalError='';
@@ -712,11 +712,11 @@ SAVED CODE CATALOGUE (user-owned names/metadata; load the exact source before de
   const after=exitIndex+1<result.candles.length?result.candles.slice(exitIndex+1,Math.min(result.candles.length,exitIndex+11)):[];
   const tradeId=createTradeId(asset,result.timeframe,trade);
   const audit={tradeId,asset,timeframe:result.timeframe,side:trade.side,entryTime:new Date(trade.entryTime*1000).toISOString(),exitTime:new Date(trade.exitTime*1000).toISOString(),entry:trade.entry,exit:trade.exit,stopLoss:trade.stop,takeProfit:trade.target,pnlR:trade.pnl,signalClose:trade.signalClose??null,targetRAtSignal:trade.signalTargetR??null,targetRAtFill:Math.abs(trade.entry-trade.stop)>0?Math.abs(trade.target-trade.entry)/Math.abs(trade.entry-trade.stop):null,exitReason:trade.reason,contextCandles:{beforeEntry:before,duringTrade:inTrade,afterExit:after},contextLimit:inTrade.length<exitIndex-entryIndex+1?'The supplied OHLC bars do not cover the full trade; do not infer missing bars.':'All available trade bars are included.'};
-  const context:ChatContext={kind:'trade-audit',label:`Trade context · ${tradeId}`,data:{...audit,strategy:(lastBacktestCode||code).slice(0,18000),strategyTruncated:(lastBacktestCode||code).length>18000,backtestMetrics:result.metrics}};
+  const context:ChatContext={kind:'trade-audit',label:`Trade context · ${tradeId}`,data:{...audit,strategy:(lastBacktestCode||code).slice(0,60000),strategyTruncated:(lastBacktestCode||code).length>60000,historySource:'Saved browser-produced backtest candles',backtestMetrics:result.metrics}};
   setSelectedTrade(null);setChatCollapsed(false);if(window.innerWidth<=640){setChatCollapsed(false);setMobilePanel('chat');}
   void sendChat('Audit this trade using the attached prices and strategy. Report only conclusions supported by this context.',context);
  };
- async function ai(messages:any[],selectedAsset:string,onText:(fullText:string)=>void,maxTokens=1200,includeMarketContext=false,allowWebResearch=false,modelOverride:string|null=null,skillContext='',onTool?:(event:unknown)=>void,turn?:{signal:AbortSignal;conversationId:string;strategyId?:string;backtestId?:string}):Promise<string>{
+ async function ai(messages:any[],selectedAsset:string,onText:(fullText:string)=>void,maxTokens=1200,includeMarketContext=false,allowWebResearch=false,modelOverride:string|null=null,skillContext='',onTool?:(event:unknown)=>void,turn?:{signal:AbortSignal;conversationId:string;strategyId?:string;backtestId?:string;auditMode?:boolean}):Promise<string>{
   const userAbort=new AbortController();aiAbortRef.current=userAbort;setAiStreaming(true);
   try{
   let collected='',currentMessages=messages;
@@ -725,7 +725,7 @@ SAVED CODE CATALOGUE (user-owned names/metadata; load the exact source before de
    try{
     const token=await cloudClient!.getIdToken();
     signal.throwIfAborted();
-    const payload={messages:currentMessages,...(turn?{conversationId:turn.conversationId}:{}),...(attempt===0&&turn?.strategyId?{strategyId:turn.strategyId}:{}),...(attempt===0&&turn?.backtestId?{backtestId:turn.backtestId}:{}),...(selectedAsset?{asset:selectedAsset}:{}),maxTokens,includeMarketContext:attempt===0&&includeMarketContext,researchMode:attempt===0&&allowWebResearch,...(modelOverride?{model:modelOverride}:{}),...(skillContext?{skillContext}:{})};
+    const payload={messages:currentMessages,...(turn?{conversationId:turn.conversationId}:{}),...(attempt===0&&turn?.strategyId?{strategyId:turn.strategyId}:{}),...(attempt===0&&turn?.backtestId?{backtestId:turn.backtestId}:{}),...(selectedAsset?{asset:selectedAsset}:{}),maxTokens,includeMarketContext:attempt===0&&includeMarketContext,researchMode:attempt===0&&allowWebResearch&&!turn?.auditMode,auditMode:turn?.auditMode===true,...(modelOverride?{model:modelOverride}:{}),...(skillContext?{skillContext}:{})};
     let segment:string;
     if(chatStreamPath(import.meta.env.VITE_AI_SDK_CHAT_ENABLED)==='/api/ai-sdk/stream'){
      let completion:{error:unknown;result?:string}|undefined;

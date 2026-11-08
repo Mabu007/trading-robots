@@ -31,3 +31,20 @@
 .tv-trade-inspection-dialog .app-dialog-content{min-width:0}
 .tv-trade-inspection-dialog .tv-trade-inspector{margin:0}
 @media(max-width:650px){.tv-trade-inspection-dialog{width:100%;max-height:94dvh;padding:9px}}
+
+.tv-trade-inspector-head-actions{display:flex;align-items:center;gap:7px;flex:none}
+.tv-trade-inspector-chart-toolbar{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:11px 0 12px}
+.tv-chart-focus{display:inline-flex;align-items:center;gap:7px;min-height:33px;padding:7px 10px;border:1px solid #4d6959;border-radius:9px;background:transparent;color:inherit;font-size:11px;cursor:pointer}
+.tv-chart-focus strong{font-size:11px;font-variant-numeric:tabular-nums}
+.tv-chart-focus.is-selected{background:#1f6c4d;border-color:#44936e;color:#fff}
+.tv-chart-stop strong{color:#f7909c}.tv-chart-target strong{color:#53d6a5}
+.tv-chart-focus.is-selected strong{color:inherit}
+.tv-trade-inspector.is-expanded{position:fixed;inset:0;z-index:40000;margin:0!important;border-radius:0;display:flex;flex-direction:column;overflow-y:auto;padding:clamp(12px,2vw,30px);max-width:none;max-height:none}
+.tv-trade-inspector.is-expanded .tv-trade-inspector-chart{height:66dvh;min-height:330px;flex:none}
+.tv-trade-inspector.is-expanded .tv-trade-inspector-facts{grid-template-columns:repeat(6,minmax(0,1fr))}
+:root[data-theme="light"] .tv-chart-focus{color:#2c503d;border-color:#c8e0d0}
+:root[data-theme="light"] .tv-chart-focus.is-selected{color:#fff;background:#18845b;border-color:#18845b}
+:root[data-theme="light"] .tv-chart-stop strong{color:#b74754}
+:root[data-theme="light"] .tv-chart-target strong{color:#16855f}
+:root[data-theme="light"] .tv-chart-focus.is-selected strong{color:#fff}
+@media(max-width:680px){.tv-trade-inspector.is-expanded .tv-trade-inspector-facts{grid-template-columns:repeat(2,minmax(0,1fr))}.tv-trade-inspector-chart-toolbar{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.tv-chart-focus{flex-direction:column;align-items:start;gap:3px;min-width:0;padding:7px;font-size:10px}.tv-chart-focus strong{font-size:10px;overflow-wrap:anywhere}.tv-trade-inspector.is-expanded .tv-trade-inspector-chart{height:55dvh}}

@@ -7,7 +7,7 @@ import type {RecordData,RecordStore} from './firestore-store.ts';
 export type AgentState='backtest_running'|'backtest_completed'|'backtest_failed'|'deployment_pending'|'running'|'paused'|'stopped'|'unknown';
 export type AgentBot={id:string;ownerUid:string;name:string;asset:string;venue:Venue;code:string;updatedAt?:number|string};
 export type AgentPermissions={marketDataRead:boolean;backtests:boolean;strategyProposals:boolean;brokerStateRead:boolean;paperExecution:boolean;liveExecution:boolean;executionManagement:boolean};
-export type AgentRecord={schemaVersion:1;id:string;ownerUid:string;botId:string;name:string;asset:string;venue:Venue;mode:'backtest'|'live';state:AgentState;strategy:{version:string;codeHash:string;revision:number};configuration:{timeframes:string[];executionTimeframe:string;riskPercent:number;riskReward:number};permissions:AgentPermissions;createdAt:number;updatedAt:number;lastEventAt:number;activeBacktest?:{runId:string;codeHash:string;startedAt:number;heartbeatAt?:number};deployment?:{grantId:string;authorizedAt:number;expiresAt:number;codeHash?:string;strategyVersion?:string;limits:Record<string,string|number|boolean>};lastBacktest?:{runId:string;codeHash:string;completedAt:number;summary:Record<string,number|string>};lastError?:string};
+export type AgentRecord={archivedAt?:number;schemaVersion:1;id:string;ownerUid:string;botId:string;name:string;asset:string;venue:Venue;mode:'backtest'|'live';state:AgentState;strategy:{version:string;codeHash:string;revision:number};configuration:{timeframes:string[];executionTimeframe:string;riskPercent:number;riskReward:number};permissions:AgentPermissions;createdAt:number;updatedAt:number;lastEventAt:number;activeBacktest?:{runId:string;codeHash:string;startedAt:number;heartbeatAt?:number};deployment?:{grantId:string;authorizedAt:number;expiresAt:number;codeHash?:string;strategyVersion?:string;limits:Record<string,string|number|boolean>};lastBacktest?:{runId:string;codeHash:string;completedAt:number;summary:Record<string,number|string>};lastError?:string};
 export type AgentAuditEvent={id:string;agentId:string;ownerUid:string;actorUid:string;action:string;fromState:AgentState|null;toState:AgentState;occurredAt:number;source:'backtest-workspace'|'live-runtime';strategyVersion:string;details:Record<string,string|number|boolean|null>};
 
 const digest=(value:string)=>createHash('sha256').update(value).digest('hex');
@@ -54,9 +54,35 @@ export class AgentRegistry{
   const collection=`users/${uid}/agents`,rows=await this.store.query(collection);
   for(const row of rows){if(row.ownerUid!==uid||row.state!=='backtest_running'||!row.activeBacktest)continue;const heartbeat=row.activeBacktest.heartbeatAt||row.activeBacktest.startedAt;if(this.now()-heartbeat>AgentRegistry.BACKTEST_STALE_AFTER_MS)await this.failStaleBacktest(uid,String(row.id),String(row.activeBacktest.runId),heartbeat)}
   const fresh=await this.store.query(collection);
-  return fresh.filter(row=>row.ownerUid===uid&&row.schemaVersion===1&&typeof row.botId==='string').map(row=>row as AgentRecord).sort((a,b)=>b.updatedAt-a.updatedAt);
+  return fresh.filter(row=>row.ownerUid===uid&&row.schemaVersion===1&&typeof row.botId==='string'&&!row.archivedAt).map(row=>row as AgentRecord).sort((a,b)=>b.updatedAt-a.updatedAt);
  }
  async get(uid:string,id:string){return this.owned(uid,id)}
+ /** Archive a confirmed-stopped historical record, not a running robot.
+  * This is UI organisation only; no Worker/broker state is mutated.
+  * An unknown outcome must be reconciled before a record can be archived.
+  */
+ async archiveStopped(uid:string,id:string){
+  const current=await this.owned(uid,id);
+  if(current.mode!=='live'||current.state!=='stopped'||current.permissions.liveExecution||!current.deployment?.grantId)
+   throw Error('Only a confirmed stopped robot with revoked execution permission can be cleared. Reconcile runtime and broker state first.');
+  if(current.archivedAt)return {archived:true,agentId:id};
+  const at=this.now(),path=this.path(uid,id);
+  const event=this.event(uid,current,{action:'stopped_record_archived',fromState:'stopped',toState:'stopped',source:'live-runtime',
+   details:{executionAuthorized:false,archiveOnly:true}});
+  const auditPath=this.auditPath(uid,id,event.id);
+  const apply=(prior:AgentRecord|null)=>{
+   if(!prior||prior.ownerUid!==uid||prior.mode!=='live'||prior.state!=='stopped'||prior.permissions.liveExecution||!prior.deployment?.grantId)
+    throw Error('Robot state changed. Refresh before clearing its historical record.');
+   return {...prior,archivedAt:at,updatedAt:at,lastEventAt:at};
+  };
+  if(this.store.transaction){
+   await this.store.transaction([path,auditPath],rows=>({[path]:apply(rows[0] as AgentRecord|null),[auditPath]:event}));
+  }else{
+   const prior=await this.store.get(path) as AgentRecord|null;
+   await this.store.put(path,apply(prior));await this.store.create(auditPath,event);
+  }
+  return {archived:true,agentId:id};
+ }
  async audit(uid:string,id:string):Promise<AgentAuditEvent[]>{
   await this.owned(uid,id);const rows=await this.store.query(`${this.path(uid,id)}/audit`);return rows.filter(row=>row.ownerUid===uid&&row.agentId===id).map(row=>row as AgentAuditEvent).sort((a,b)=>a.occurredAt-b.occurredAt).slice(-100);
  }
@@ -129,6 +155,7 @@ export function agentRoutes(app:Express,deps:AgentRoutes){
  app.get('/api/agents/:id/audit',route((uid,req)=>deps.registry.audit(uid,String(req.params.id))));
  app.get('/api/agents/:id/status',route(async(uid,req)=>{const agent=await deps.registry.get(uid,String(req.params.id));if(!deps.runtimeStatus)return {agentId:agent.id,state:agent.state,verified:false};return deps.runtimeStatus(uid,agent)}));
  app.get('/api/agents/:id',route((uid,req)=>deps.registry.get(uid,String(req.params.id))));
+ app.post('/api/agents/:id/archive',route((uid,req)=>deps.registry.archiveStopped(uid,String(req.params.id))));
  app.post('/api/agents/backtest',route(async(uid,req)=>{
   const input=req.body||{},botId=String(input.botId||'');if(!safeId(botId))throw Error('Choose a saved strategy before recording a backtest');
   const saved=await deps.bot(uid,botId,req);if(!saved)throw Error('Saved strategy ownership could not be verified');
