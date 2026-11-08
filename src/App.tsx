@@ -1095,7 +1095,13 @@ SAVED CODE CATALOGUE (user-owned names/metadata; load the exact source before de
  <div className="tv-destination-shell" hidden={primaryArea!=='markets'}><MarketsHub active={primaryArea==='markets'} loadHistory={loadMarketHistory} onAskAI={question=>{setPrimaryArea('chat');setAgentWorkspace('overview');setChatCollapsed(false);setChatInput(question)}} onBuildStrategy={(market,marketVenue)=>{if(busy)return;beginCreateRobot();setVenue(marketVenue);setAsset(market);setPrompt('Help me build a strategy for '+market+'. Explain the entry, exit and risk rules before generating code.')}}/></div>
  <div className="tv-destination-shell" hidden={primaryArea!=='code'}><CodeLibrary bots={cloudBots} analyses={codeAnalyses} watches={codeWatches} current={created&&!cloudBots.some(bot=>bot.id===draftId)?{id:draftId,name,asset,venue,prompt,code}:null} agents={agentRecords} runtimeStates={agentRuntimeStates} deploymentError={agentError} onRefreshDeployments={()=>void refreshAgentRecords()} onManageDeployment={async(agent,action)=>{
   if(!cloudClient)throw Error('Sign in to manage this deployment.');
-  if(agent.venue!=='propdao')throw Error('Direct management for this venue is not verified. Use its dedicated broker controls.');
+  if(agent.venue!=='propdao'){
+   const bot=cloudBots.find(item=>item.id===agent.botId);
+   if(!bot)throw Error('The saved strategy linked to this deployment could not be found.');
+   setPrimaryArea('chat');setChatCollapsed(false);
+   void sendChat((action==='status'?'Check the runtime status of ':'Prepare a stop review for ')+'"'+agent.name+'".',undefined,false,{tool:action,botId:bot.id});
+   return {delegatedToChat:true,venue:agent.venue};
+  }
   const endpoint=`/api/venues/propdao/bots/${encodeURIComponent(agent.botId)}/live`;
   const status=action==='stop'
    ?await sharingRequest<any>(cloudClient,endpoint,'POST',{action:'stop'})
