@@ -6,7 +6,7 @@ const props={venue:'propdao' as const,name:'Gold trend',asset:'GOLDUSDC',created
 
 describe('MT5-style trading desk',()=>{
  it('renders independent open positions, pending orders and closed-trade history',()=>{
-  const html=renderToStaticMarkup(<TradesHub {...props} propLive={{deployed:true,running:true,accountId:'prop-1',risk:{equity:1000,roomUsd:50},positions:[{id:'pos-1',symbol:'GOLDUSDC',side:'BUY',qty:0.25,entry:4000,mark:4020,slPrice:3990,tpPrice:4040,unrealizedPnl:5}],pendingOrders:[{id:'ord-1',symbol:'GOLDUSDC',side:'SELL',qty:1,price:4050,type:'LIMIT',status:'PENDING'}],closedTrades:[{id:'closed-1',symbol:'GOLDUSDC',side:'SELL',qty:0.5,entry:4100,exit:4050,pnl:25,fee:0.15,closedAt:1762371000,reason:'target'}]}}/>);
+  const html=renderToStaticMarkup(<TradesHub {...props} propLive={{brokerExposureVerified:true,deployed:true,running:true,accountId:'prop-1',risk:{equity:1000,roomUsd:50},positions:[{id:'pos-1',symbol:'GOLDUSDC',side:'BUY',qty:0.25,entry:4000,mark:4020,slPrice:3990,tpPrice:4040,unrealizedPnl:5}],pendingOrders:[{id:'ord-1',symbol:'GOLDUSDC',side:'SELL',qty:1,price:4050,type:'LIMIT',status:'PENDING'}],closedTrades:[{id:'closed-1',symbol:'GOLDUSDC',side:'SELL',qty:0.5,entry:4100,exit:4050,pnl:25,fee:0.15,closedAt:1762371000,reason:'target'}]}}/>);
   expect(html).toContain('Open positions');
   expect(html).toContain('Pending orders');
   expect(html).toContain('Trade history');
@@ -18,7 +18,7 @@ describe('MT5-style trading desk',()=>{
   expect(html).toContain('LIMIT');
  });
  it('never equates an unresolved order intent with a verified broker pending order',()=>{
-  const html=renderToStaticMarkup(<TradesHub {...props} propLive={{pendingOrders:[],positions:[],closedTrades:[],pendingIntent:{intentId:'tv-pending-123'},risk:null}}/>);
+  const html=renderToStaticMarkup(<TradesHub {...props} propLive={{brokerExposureVerified:true,pendingOrders:[],positions:[],closedTrades:[],pendingIntent:{intentId:'tv-pending-123'},risk:null}}/>);
   expect(html).toContain('0 records');
   expect(html).toContain('Unresolved order intent');
   expect(html).toContain('not a confirmed provider order');
@@ -36,7 +36,7 @@ describe('MT5-style trading desk',()=>{
  });
  it('renders an empty strategy state instead of fabricated trades',()=>{
   const html=renderToStaticMarkup(<TradesHub {...props} created={false} propLive={null}/>);
-  expect(html).toContain('Select a strategy');
+  expect(html).toContain('Select a robot');
   expect(html).not.toContain('Pending orders');
  });
  it('formats provider numbers and timestamps conservatively',()=>{
