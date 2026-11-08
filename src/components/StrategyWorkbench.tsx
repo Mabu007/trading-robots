@@ -204,13 +204,13 @@ export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, 
     onDeploy(savedBot, riskPercent, codeHash);
   });
   const card = run ? savedBacktestCard({id, name, venue, asset, prompt: rules}, run) : null;
-  return <Dialog title={bot ? bot.name : 'Write a strategy'} className="tv-strategy-workbench" busy={Boolean(busy)} onClose={onClose}>
-    <div className="market-buttons tv-workbench-tabs" role="group" aria-label="Strategy workspace">
+  return <Dialog title={bot ? bot.name : 'Write a robot'} className="tv-strategy-workbench" busy={Boolean(busy)} onClose={onClose}>
+    <div className="market-buttons tv-workbench-tabs" role="group" aria-label="Robot workspace">
       {(['write', 'backtest', 'result'] as const).map(tab => <button key={tab} type="button" disabled={Boolean(busy)} aria-pressed={view === tab} className={view === tab ? 'primary' : 'ghost'} onClick={() => setView(tab)}>{{write: 'Write strategy', backtest: 'Backtest', result: 'Results'}[tab]}</button>)}
     </div>
     <p>{lockedIdentity ? `${asset} · ${venueLabel[venue]}` : 'Write JavaScript yourself or describe your rules and let AI generate a draft.'}</p>
     {!lockedIdentity && <div className="tv-workbench-fields">
-      <label>Strategy name<input value={name} maxLength={64} disabled={Boolean(busy)} onChange={event => setName(event.target.value)} data-dialog-initial-focus /></label>
+      <label>Robot name<input value={name} maxLength={64} disabled={Boolean(busy)} onChange={event => setName(event.target.value)} data-dialog-initial-focus /></label>
       <label>Venue<select value={venue} disabled={Boolean(busy)} onChange={event => {
         setVenue(event.target.value as Venue); setAsset(''); setMarkets([]);
       }}>{writableVenues.map(item => <option key={item} value={item}>{venueLabel[item]}</option>)}</select></label>
@@ -226,11 +226,11 @@ export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, 
         <label>Trading rules<textarea rows={4} value={rules} maxLength={12_000} disabled={Boolean(busy)} onChange={event => setRules(event.target.value)} placeholder="Describe the timeframe, entries, exits and risk rules." /></label>
         <button type="button" className="ghost" disabled={Boolean(busy) || !sourceReady || !rules.trim()} onClick={generate}>Generate strategy.js</button>
       </details>}
-      <label>Strategy JavaScript<textarea className="tv-workbench-editor" rows={12} spellCheck={false} readOnly={venue === 'ctrader'} value={code} disabled={Boolean(busy) || !sourceReady} onChange={event => setCode(event.target.value)} placeholder={sourceReady ? 'Paste or write strategy.js here.' : 'Loading saved source…'} /></label>
+      <label>Robot JavaScript<textarea className="tv-workbench-editor" rows={12} spellCheck={false} readOnly={venue === 'ctrader'} value={code} disabled={Boolean(busy) || !sourceReady} onChange={event => setCode(event.target.value)} placeholder={sourceReady ? 'Paste or write strategy.js here.' : 'Loading saved source…'} /></label>
       <div className="market-buttons">
         {!code && sourceReady && <button type="button" className="ghost" disabled={Boolean(busy)} onClick={() => setCode(starterCode)}>Insert example</button>}
         <button type="button" className="ghost" disabled={Boolean(busy) || !sourceReady || !code.trim() || savedCode === code || venue === 'ctrader'} onClick={() => void perform('save', async signal => {
-          await save(signal); setNotice('Strategy saved.');
+          await save(signal); setNotice('Robot saved.');
         })}>Save strategy</button>
         <button type="button" className="primary" disabled={Boolean(busy) || !sourceReady || !code.trim() || venue === 'ctrader'} onClick={() => setView('backtest')}>Set up backtest</button>
       </div>
@@ -246,7 +246,7 @@ export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, 
         <button type="button" className="primary" disabled={Boolean(busy) || !sourceReady || !code.trim() || !from || !to || venue === 'ctrader'} onClick={backtest}>Run backtest</button>
       </div>
     </>}
-    {view === 'result' && <section ref={resultsSection} aria-label="Strategy backtest result">
+    {view === 'result' && <section ref={resultsSection} aria-label="Robot backtest result">
       {card ? <>
         <BacktestChatCard data={card} />
         <p>{runSaved ? currentRun ? 'Saved result for the current strategy code.' : 'Saved historical result. Run a new backtest to test the current code.' : 'Result is visible here but has not been saved.'}</p>
