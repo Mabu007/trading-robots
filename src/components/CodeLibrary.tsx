@@ -1,9 +1,14 @@
 import {displayTime} from '../display-time';
 import {useEffect,useMemo,useState} from 'react';
+import {createPortal} from 'react-dom';
 import {Activity,ArrowRight,Bot,Clock3,Code2,Pencil,Plus,Search,Sparkles,Trash2,X} from 'lucide-react';
 import {Dialog} from './Dialog';
 import type {CloudBot, CloudClient} from '../firebase';
 import {StrategyWorkbench, type WorkbenchView} from './StrategyWorkbench';
+import {PropDAODeployDialog} from './Marketplace';
+import type {StrategyRun} from '../strategy-workbench';
+import type {Trade} from '../types';
+import type {AppTheme} from '../theme';
 import type {CodeAnalysis} from '../code-analysis';
 import type {PersistentAgent} from '../agents';
 import {venueLabel} from '../../shared/venues';
@@ -15,6 +20,8 @@ type Props={
  client:CloudClient|null; bots:CloudBot[]; current:CloudBot|null; analyses:CodeAnalysis[];
  watches:Record<string,CodeWatchStatus>; agents:PersistentAgent[]; runtimeStates:Record<string,Runtime>;
  onAsk:(question:string,bot?:CloudBot)=>void; onSaved:(bot:CloudBot)=>void;
+ onAuditTrade?:(run:StrategyRun,trade:Trade,bot:CloudBot|null)=>void;
+ onConnectBroker?:()=>void; theme?:AppTheme;
  onRenameBot:(bot:CloudBot,name:string)=>Promise<void>; onDeleteBot:(bot:CloudBot)=>Promise<void>;
  onRenameAnalysis:(analysis:CodeAnalysis,name:string)=>Promise<void>; onDeleteAnalysis:(analysis:CodeAnalysis)=>Promise<void>;
  onRunAnalysis:(asset:CodeAnalysis)=>void; onWatch:(asset:CodeAnalysis)=>void; onStopWatch:(asset:CodeAnalysis)=>void;
@@ -30,11 +37,12 @@ export function codeState(bot:CloudBot,agents:PersistentAgent[],states:Record<st
  if(live.state==='paused')return 'Paused';
  return live.state==='stopped'||live.state==='not-deployed'?'Stopped':'Checking';
 }
-export function CodeLibrary({client,bots,current,analyses,watches,agents,runtimeStates,onAsk,onSaved,onRenameBot,onDeleteBot,onRenameAnalysis,onDeleteAnalysis,onRunAnalysis,onWatch,onStopWatch,onDeploy,deploymentError,onRefreshDeployments,onManageDeployment}:Props){
+export function CodeLibrary({client,bots,current,analyses,watches,agents,runtimeStates,onAsk,onSaved,onRenameBot,onDeleteBot,onRenameAnalysis,onDeleteAnalysis,onRunAnalysis,onWatch,onStopWatch,onDeploy,deploymentError,onRefreshDeployments,onManageDeployment,onAuditTrade,onConnectBroker,theme}:Props){
  const deployments=agents.filter(agent=>agent.mode==='live'&&agent.deployment?.grantId);
  const [query,setQuery]=useState('');
  const [selectedAnalysis,setSelectedAnalysis]=useState<CodeAnalysis|null>(null);
  const [workbench,setWorkbench]=useState<{bot:CloudBot|null;view:WorkbenchView}|null>(null);
+ const [localDeploy,setLocalDeploy]=useState<{bot:CloudBot;riskPercent:number;codeHash?:string}|null>(null);
  const openWorkbench=(bot:CloudBot|null,view:WorkbenchView)=>setWorkbench({bot,view});
  const [stopAgent,setStopAgent]=useState<PersistentAgent|null>(null),[stopBusy,setStopBusy]=useState(false),[operationNotice,setOperationNotice]=useState('');
  const manage=async(agent:PersistentAgent,action:'status'|'stop')=>{
@@ -91,11 +99,21 @@ export function CodeLibrary({client,bots,current,analyses,watches,agents,runtime
   </section>
   <div className="tv-code-list">{items.map(bot=>{const state=codeState(bot,agents,runtimeStates);const agent=agents.find(a=>a.botId===bot.id&&a.mode==='live');return <article className="tv-code-item" key={bot.id}><span className="tv-code-item-icon"><Code2 size={18}/></span><div className="tv-code-item-content"><div className="tv-code-item-title"><strong>{bot.name||'Untitled code'}</strong><span className={'tv-code-state '+state.toLowerCase()}><i/>{state}</span></div><p>{bot.asset||'Unknown market'} · {venueLabel[bot.venue||'valr']} · Deterministic strategy.js</p><small>{bot.lastBacktest?'Last backtest · '+bot.lastBacktest.from+' to '+bot.lastBacktest.to:'No saved backtest yet'}{agent?.deployment?' · Deployed version '+agent.strategy.version:''}</small></div><div className="tv-code-item-actions"><button type="button" disabled={!client} onClick={()=>openWorkbench(bot,'write')}><Code2 size={15}/> Open</button><button type="button" disabled={!client} onClick={()=>openWorkbench(bot,'backtest')}><Activity size={15}/> Run backtest</button>{bot.lastBacktest&&<button type="button" disabled={!client} onClick={()=>openWorkbench(bot,'result')}>View last result</button>}<button type="button" className="tv-code-icon-action" title="Discuss with AI" aria-label={'Discuss '+bot.name+' with AI'} onClick={()=>onAsk('Explain the saved strategy named "'+bot.name+'".',bot)}><Sparkles size={15}/></button><button type="button" className="tv-code-icon-action" title="Rename" aria-label={'Rename '+bot.name} onClick={()=>chooseAction('rename','bot',bot)}><Pencil size={15}/></button><button type="button" className="tv-code-icon-action" title="Delete" aria-label={'Delete '+bot.name} onClick={()=>chooseAction('delete','bot',bot)}><Trash2 size={15}/></button></div></article>})}{analysisItems.map(asset=><article className="tv-code-item" key={asset.id}><span className="tv-code-item-icon"><Activity size={18}/></span><div className="tv-code-item-content"><div className="tv-code-item-title"><strong>{asset.name}</strong><span className={"tv-code-state "+(watches[asset.id]?.verified&&watches[asset.id]?.running?"running":"")}><i/>{watches[asset.id]?.verified&&watches[asset.id]?.running?"Running":watches[asset.id]&&!watches[asset.id].verified?"Status unknown":"Callable"}</span></div><p>{asset.asset} · {venueLabel[asset.venue]} · {asset.timeframe.toUpperCase()} · {asset.kind==='liquidity_sweeps'?'Liquidity sweeps':'Volatility profile'}</p><small>Read-only deterministic analysis tool. Runs on verified historical candles.</small></div><div className="tv-code-item-actions"><button type="button" onClick={()=>setSelectedAnalysis(asset)}><Code2 size={15}/> View</button><button type="button" onClick={()=>onRunAnalysis(asset)}><Activity size={15}/> Run</button><button type="button" aria-label={'Discuss '+asset.name+' with AI'} onClick={()=>onAsk('Explain the saved Code analysis named "'+asset.name+'" and how its detection works.')}><Sparkles size={15}/></button><button type="button" className="tv-code-icon-action" aria-label={'Rename '+asset.name} onClick={()=>chooseAction('rename','analysis',asset)}><Pencil size={15}/></button><button type="button" className="tv-code-icon-action" aria-label={'Delete '+asset.name} onClick={()=>chooseAction('delete','analysis',asset)}><Trash2 size={15}/></button></div></article>)}{!(items.length||analysisItems.length)&&<div className="tv-code-empty"><Bot size={23}/><strong>No matching code</strong><p>Write a new strategy or search your saved strategies by name.</p><button disabled={!client} onClick={()=>openWorkbench(null,'write')}>Write a robot <ArrowRight size={14}/></button></div>}</div>
   {selectedAnalysis&&<div className="tv-code-modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)setSelectedAnalysis(null)}}><section className="tv-code-modal" role="dialog" aria-modal="true" aria-labelledby="tv-analysis-modal-title"><header><div><span className="tv-code-eyebrow"><Activity size={15}/> REUSABLE ANALYSIS · READ ONLY</span><h2 id="tv-analysis-modal-title">{selectedAnalysis.name}</h2><p>{selectedAnalysis.asset} · {selectedAnalysis.timeframe.toUpperCase()} · {venueLabel[selectedAnalysis.venue]}</p></div><button type="button" aria-label="Close code details" onClick={()=>setSelectedAnalysis(null)}><X size={18}/></button></header><div className="tv-code-modal-body"><div className="tv-code-info"><span>Tool type<strong>{selectedAnalysis.kind.replaceAll('_',' ')}</strong></span><span>Mode<strong>On-demand analysis</strong></span><span>Continuous monitor<strong className={watches[selectedAnalysis.id]?.verified&&watches[selectedAnalysis.id]?.running?'running':''}>{watches[selectedAnalysis.id]?.verified&&watches[selectedAnalysis.id]?.running?'Running':watches[selectedAnalysis.id]&&!watches[selectedAnalysis.id]?.verified?'Status unverified':'Not deployed'}</strong></span></div>{watches[selectedAnalysis.id]?.events?.length?<div className="tv-code-runtime"><strong>Recent monitor detections</strong>{watches[selectedAnalysis.id].events!.slice(-8).reverse().map(event=><span key={event.id}>{displayTime(event.time*1000)} · {event.kind} · {event.price}{event.output?' · '+event.output:''}</span>)}{watches[selectedAnalysis.id].nextAlarm&&<span>Next check: {displayTime(watches[selectedAnalysis.id].nextAlarm)}</span>}</div>:null}<pre tabIndex={0} className="tv-code-source"><code>{selectedAnalysis.source}</code></pre><p>Source is an auditable representation of a trusted scanner. Trading Vibes executes its validated implementation; arbitrary JavaScript is not evaluated.</p></div><footer><button type="button" onClick={()=>{setSelectedAnalysis(null);onAsk('Explain the saved Code analysis "'+selectedAnalysis.name+'".')}}><Sparkles size={15}/> Discuss</button><button type="button" onClick={()=>{const asset=selectedAnalysis;setSelectedAnalysis(null);watches[asset.id]?.verified&&watches[asset.id]?.running?onStopWatch(asset):onWatch(asset)}}><Clock3 size={15}/>{watches[selectedAnalysis.id]?.verified&&watches[selectedAnalysis.id]?.running?"Stop watch":"Review watch"}</button><button type="button" className="tv-code-new" onClick={()=>{const asset=selectedAnalysis;setSelectedAnalysis(null);onRunAnalysis(asset)}}><Activity size={15}/> Run analysis</button></footer></section></div>}
-  {workbench&&client&&<StrategyWorkbench bot={workbench.bot} client={client} initialView={workbench.view}
-   onSaved={onSaved} onClose={()=>setWorkbench(null)} onDeploy={(bot,riskPercent,codeHash)=>{
+   {workbench&&client&&<StrategyWorkbench bot={workbench.bot} client={client} initialView={workbench.view} theme={theme}
+   onSaved={onSaved} onClose={()=>setWorkbench(null)}
+   onAuditTrade={(run,trade,bot)=>{setWorkbench(null);onAuditTrade?.(run,trade,bot)}}
+   onDeploy={(bot,riskPercent,codeHash)=>{
     setWorkbench(null);
+    // Keep this dialog mounted independently through the old workbench's teardown.
+    if(bot.venue==='propdao'){setLocalDeploy({bot,riskPercent,codeHash});return}
     onDeploy(bot,riskPercent,codeHash);
    }}/>}
+  {localDeploy&&client&&typeof document!=='undefined'&&createPortal(
+   <PropDAODeployDialog key={localDeploy.bot.id+':'+(localDeploy.codeHash||'saved')} client={client}
+    botId={localDeploy.bot.id} expectedCodeHash={localDeploy.codeHash}
+    onClose={()=>{setLocalDeploy(null);onRefreshDeployments()}}
+    onConnect={()=>{setLocalDeploy(null);onConnectBroker?.()}}
+    onLog={()=>onRefreshDeployments()}/>,document.body)}
   {stopAgent&&<Dialog title="Stop new PropDAO entries" busy={stopBusy} onClose={()=>setStopAgent(null)}>
     <p><strong>{stopAgent.name}</strong> · {stopAgent.asset} · {venueLabel[stopAgent.venue]}</p>
     <p>This revokes new-order permission before asking Cloudflare to stop. It does not cancel pending orders or close existing positions. An unavailable Worker does not prevent revocation; independently verify your broker account.</p>
