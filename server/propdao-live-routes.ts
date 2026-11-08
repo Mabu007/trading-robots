@@ -60,7 +60,7 @@ export class PropDAOLiveService{
    verificationNote=error.message+' Browser-generated simulation validated for internal consistency only; NOT independently replayed.';
   }
   const id=randomBytes(24).toString('hex'),createdAt=Date.now();
-  const data={version:1,id,uid,botId,accountId,riskUsd,leverage,symbol:bot.asset,codeHash,evidenceHash:evidence.receiptHash,backtest:{from:evidence.from,to:evidence.to,source:evidence.source,savedAt:evidence.savedAt,provenance:replay?.provenance??evidence.provenance,replayHash:replay?.replayHash??null,verifiedCandles:replay?.candleCount??null},strategyRiskPercent:config.riskPercent,executionTimeframe:config.executionTimeframe,createdAt,expiresAt:createdAt+120000,consumedAt:null as number|null};
+  const data={version:1,id,uid,botId,accountId,riskUsd,leverage,symbol:bot.asset,codeHash,evidenceHash:evidence.receiptHash,backtest:{from:evidence.from,to:evidence.to,source:evidence.source,savedAt:evidence.savedAt,provenance:replay?.provenance??evidence.provenance,replayHash:replay?.replayHash??null,verifiedCandles:replay?.candleCount??null,browserObservedCandles:evidence.observedCandles,calendarIntervals:evidence.calendarIntervals},strategyRiskPercent:config.riskPercent,executionTimeframe:config.executionTimeframe,createdAt,expiresAt:createdAt+120000,consumedAt:null as number|null};
   await this.deps.write(this.reviewKey(uid,botId,id),JSON.stringify(data));
   return {...data,reviewId:id,environment:process.env.VERCEL_ENV||'development',evidence:verificationNote};
  }
