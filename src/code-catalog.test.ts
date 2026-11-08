@@ -9,6 +9,7 @@ const bots=[
 describe('saved Code library lookup',()=>{
  it('resolves a unique, named saved robot',()=>{expect(resolveCodeReference('Please backtest MySol Robot',bots)?.bot.id).toBe('bot-a')});
  it('resolves a quoted name exactly',()=>{expect(resolveCodeReference('Run "Gold Sweep Finder" and show the result',bots)?.bot.id).toBe('bot-b')});
+ it('honors an explicitly quoted longer revision over a shorter matching name',()=>{const versions=[...bots,{...bots[1],id:'bot-v2',name:'Gold Sweep Finder v2'}];expect(resolveCodeReference('Backtest "Gold Sweep Finder v2"',versions)?.bot.id).toBe('bot-v2');expect(resolveCodeReference('Backtest Gold Sweep Finder v2',versions)).toBeNull()});
  it('does not invent or guess unnamed code',()=>{expect(resolveCodeReference('run that strategy from last week',bots)).toBeNull()});
  it('fails closed on ambiguous duplicate names',()=>{expect(resolveCodeReference('run MySol Robot',[...bots,{...bots[0],id:'bot-d'}])).toBeNull()});
  it('searches by owned asset or code label without revealing source',()=>{expect(codeSuggestions('Find our Gold sweep detector',bots).map(b=>b.id)).toContain('bot-b');expect(catalogContext(bots)).not.toContain('onCandle')});

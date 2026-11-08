@@ -34,6 +34,9 @@ it('authenticates a Firebase token and streams a model response through the SDK 
   }
   if(url==='https://openrouter.ai/api/v1/chat/completions'){
    const sent=JSON.parse(String(init?.body));
+   if(sent.messages.some((x:{content:unknown})=>x.content==='Rate-limited draft')){
+    return Response.json({error:{message:'Provider returned error',code:429}},{status:429});
+   }
    if(sent.messages.some((x:{content:unknown})=>x.content==='Gold news today')){
     researchCalls++;
     const sentText=JSON.stringify(sent);
@@ -92,6 +95,8 @@ it('authenticates a Firebase token and streams a model response through the SDK 
   const chunks:string[]=[];
   const text=await postApiStream(url,{messages:[{role:'system',content:'Explain clearly.'},{role:'user',content:'Hello'}]},'AI',(_chunk,full)=>chunks.push(full),undefined,token);
   expect(text).toBe('Hello trader');expect(chunks.at(-1)).toBe('Hello trader');
+  await expect(postApiStream(url,{messages:[{role:'user',content:'Rate-limited draft'}]},'AI',()=>{},undefined,token))
+   .rejects.toThrow(/OpenRouter rate-limited the selected model/);
   const book=await postApiStream(url,{messages:[{role:'user',content:'Book'}],includeMarketContext:true},'AI',()=>undefined,undefined,token);
   expect(book).toBe('Hello trader');expect(toolCalls).toBe(2);expect(bookRequests).toBe(1);
   const strategy=await postApiStream(url,{messages:[{role:'user',content:'Strategy'}],includeMarketContext:true},'AI',()=>undefined,undefined,token);

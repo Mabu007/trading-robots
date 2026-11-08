@@ -42,10 +42,12 @@ function PropDAOAccount({client,onClose}:{client:CloudClient;onClose:()=>void}){
   </>}
  </Modal>;
 }
-export function PropDAODeployDialog({client,botId,onClose,onLog}:{client:CloudClient;botId:string;onClose:()=>void;onLog:(line:string)=>void}){
+export function PropDAODeployDialog({client,botId,expectedCodeHash,onClose,onLog}:{client:CloudClient;botId:string;expectedCodeHash?:string;onClose:()=>void;onLog:(line:string)=>void}){
  const [accounts,setAccounts]=useState<{accountId:string;status:string}[]>([]);
  const [accountId,setAccountId]=useState(''),[riskUsd,setRiskUsd]=useState('2'),[leverage,setLeverage]=useState('1'),[confirmed,setConfirmed]=useState(false),[reconcileConfirmed,setReconcileConfirmed]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[status,setStatus]=useState<any>(null);
- const load=async(accountOverride?:string)=>{setBusy(true);setError('');try{
+ const [review,setReview]=useState<{reviewId:string;codeHash:string;accountId:string;symbol:string;riskUsd:number;leverage:number;executionTimeframe:string;strategyRiskPercent:number;expiresAt:number;environment:string;evidence:string;backtest:{from:string;to:string;source:string;savedAt:string;provenance:string}}|null>(null);
+ const invalidateReview=()=>{setReview(null);setConfirmed(false)};
+ const load=async(accountOverride?:string)=>{invalidateReview();setBusy(true);setError('');try{
   const accountsResult=await sharingRequest<any>(client,'/api/venues/propdao/accounts');
   const list=accountsResult.accounts||[];setAccounts(list);
   let saved='';try{saved=localStorage.getItem('trading-vibes:propdao:selected-account')||''}catch{}
@@ -57,12 +59,30 @@ export function PropDAODeployDialog({client,botId,onClose,onLog}:{client:CloudCl
   setAccountId(preferred||live.accountId||'');
  }catch(e){setError(message(e))}finally{setBusy(false)}};
  useEffect(()=>{void load()},[client,botId]);
- const deploy=async()=>{
-  if(!confirmed||!accountId)return;setBusy(true);setError('');
+ const requestReview=async()=>{
+  if(!accountId)return;setBusy(true);setError('');invalidateReview();
   try{
-   const next=await sharingRequest<any>(client,`/api/venues/propdao/bots/${encodeURIComponent(botId)}/live`,'POST',{action:'deploy',accountId,riskUsd:Number(riskUsd),leverage:Number(leverage),confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'});
-   onLog(`PropDAO live · deployment accepted · ${accountId}`);setStatus(next);onClose();
+   const next=await sharingRequest<NonNullable<typeof review>>(client,`/api/venues/propdao/bots/${encodeURIComponent(botId)}/live/review`,'POST',{accountId,riskUsd:Number(riskUsd),leverage:Number(leverage),expectedCodeHash});
+   setReview(next);
   }catch(e){setError(message(e))}finally{setBusy(false)}
+ };
+ const deploy=async()=>{
+  if(!review||!confirmed||!accountId)return;
+  if(review.expiresAt<=Date.now()||review.accountId!==accountId||review.riskUsd!==Number(riskUsd)||review.leverage!==Number(leverage)){invalidateReview();setError('Review expired or settings changed. Request a new review.');return}
+  setBusy(true);setError('');setReview(null);setConfirmed(false);
+  try{
+   const next=await sharingRequest<any>(client,`/api/venues/propdao/bots/${encodeURIComponent(botId)}/live`,'POST',{action:'deploy',accountId,riskUsd:Number(riskUsd),leverage:Number(leverage),reviewId:review.reviewId,expectedCodeHash:review.codeHash,confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'});
+   setStatus(next);
+   if(next.running===true&&next.grant?.id){
+    onLog(`PropDAO live · deployment accepted · running confirmed · ${accountId}`);onClose();
+   }else{
+    setStatus({...next,deployed:true,uncertain:true,accountId});
+    onLog('PropDAO live · deployment response unverified · check account and runtime before trying again.');
+    setError('The Worker did not confirm a running deployment. Check the exact account and refresh runtime status; do not submit another deployment blindly.');
+   }
+  }catch(e){
+   const reason=message(e);setStatus((old:any)=>({...old,deployed:true,uncertain:true,error:reason}));setError('Deployment outcome needs verification: '+reason+'. Check runtime and account status before requesting a new review.');
+  }finally{setBusy(false)}
  };
  const reconcile=async()=>{
   if(!reconcileConfirmed||!status?.pendingIntent)return;
@@ -77,28 +97,41 @@ export function PropDAODeployDialog({client,botId,onClose,onLog}:{client:CloudCl
  };
  const control=async()=>{
   setBusy(true);setError('');try{
-   await sharingRequest(client,`/api/venues/propdao/bots/${encodeURIComponent(botId)}/live`,'POST',{action:'stop'});
-   onLog('PropDAO live · permanently stopped; authorization revoked. Save any strategy.js edits and Deploy again for a fresh Cloudflare instance. Positions already on PropDAO remain open.');
-   onClose();
+   const next=await sharingRequest<any>(client,`/api/venues/propdao/bots/${encodeURIComponent(botId)}/live`,'POST',{action:'stop'});
+   setStatus(next);invalidateReview();
+   if(next.authorizationRevoked===true&&next.runtimeStopped===true){
+    onLog('PropDAO live · permanently stopped; authorization revoked. Existing broker positions and orders require independent verification.');
+    onClose();
+   }else if(next.authorizationRevoked===true){
+    onLog('PropDAO live · new orders revoked; Worker stop unverified. Check open positions and orders before retrying.');
+    setError(next.error||'Order authorization was revoked, but the Worker has not confirmed it stopped. Existing exposure is unknown.');
+   }else setError('Stop authorization could not be verified. Refresh status and check the broker.');
+
   }catch(e){setError(message(e))}finally{setBusy(false)}
  };
  const selected=accounts.find(a=>a.accountId===accountId);
- return <Modal title="Deploy · PropDAO" close={onClose}>
-  <p>Deploy your saved strategy to a live Cloudflare instance. Stop revokes its authorization; subsequent Deploy starts fresh with the latest saved strategy.js.</p>
+ return <Dialog title="Deploy · PropDAO" onClose={onClose} busy={busy}>
+  <p>Authorize an exact saved strategy revision on a specific PropDAO account. Review the code hash, instrument and risk before confirming. Stop revokes permission for new entries; existing broker positions need separate checks.</p>
   {error&&<p className="share-error" role="alert">{error}</p>}
-  <div className="market-status"><strong>{status?.pendingIntent?'Unresolved order · deployment locked':status?.running?'Running · LIVE':status?.paused?'Paused old deployment · stop to restart':status?.deployed?'Stopped · authorize to restart':status?.configured?'Runtime connected · ready to authorize':'Runtime not configured'}</strong><span>{status?.error||'Strategy scheduling uses a Cloudflare Durable Object. Stop disables new entries, not existing positions.'}</span>   {status?.lastEvaluation&&<span>Last live strategy decision: {status.lastEvaluation.action||'WAIT'}{status.lastEvaluation.reason?' · '+status.lastEvaluation.reason:''} · {new Date(status.lastEvaluation.time).toLocaleString()}</span>}
+  <div className="market-status"><strong>{status?.pendingIntent?'Unresolved order · deployment locked':status?.uncertain||status?.statusUnavailable?'Runtime status unverified':status?.running?'Running · LIVE':status?.paused?'Paused old deployment · stop to restart':status?.deployed?'Stopped · authorize to restart':status?.configured?'Runtime connected · ready to authorize':'Runtime not configured'}</strong><span>{status?.error||'Strategy scheduling uses a Cloudflare Durable Object. Stop disables new entries, not existing positions.'}</span>   {status?.lastEvaluation&&<span>Last live strategy decision: {status.lastEvaluation.action||'WAIT'}{status.lastEvaluation.reason?' · '+status.lastEvaluation.reason:''} · {new Date(status.lastEvaluation.time).toLocaleString()}</span>}
    {status?.lastMarketData?.timeframes&&<details><summary>Live candle coverage · {status.lastMarketData.executionTimeframe?.toUpperCase()} execution</summary>
     <div>{Object.entries(status.lastMarketData.timeframes as Record<string,{requested:number;received:number;ready:boolean;recentGap:boolean}>).map(([tf,v])=>
      <div key={tf}>{tf.toUpperCase()}: {v.received} candles loaded (target {v.requested}) · {v.ready?'latest closed bar ready':v.recentGap?'recent data gap':'limited/late data'}</div>)}</div>
    </details>}</div>
   {status?.pendingIntent&&<div className="market-status" role="alert"><strong>Reconciliation required</strong><span>Intent: {status.pendingIntent.intentId||'Unknown'} · {status.pendingIntent.symbol||'Unknown symbol'}</span><span>Open your PropDAO terminal first and verify that no positions or resting orders remain. Reconciliation checks account history and two fresh snapshots; it never submits a new order or cancels an existing one.</span><label className="warning-remember"><input type="checkbox" checked={reconcileConfirmed} disabled={busy} onChange={e=>setReconcileConfirmed(e.target.checked)}/>I have checked the selected PropDAO account and it has no open positions or orders.</label><div className="market-buttons"><button type="button" className="ghost" disabled={busy||!reconcileConfirmed} onClick={()=>void reconcile()}>{busy?'Verifying…':'Reconcile pending order'}</button></div></div>}
+  {status?.authorizationRevoked&&<p role="status">New-order permission was revoked. The Worker and remaining exposure may still require verification.</p>}
   {status?.blockingBotId&&<p className="output-disclaimer">This account was previously deployed from bot {status.blockingBotId}. Its stored order intent is account-scoped.</p>}
-  {accounts.length?<label>PropDAO account<select disabled={busy||Boolean(status?.running||status?.paused)} value={accountId} onChange={e=>{setAccountId(e.target.value);void load(e.target.value)}}><option value="">Choose account</option>{accounts.map(a=><option key={a.accountId} value={a.accountId}>{a.accountId} · {a.status}</option>)}</select></label>:<p>Connect your PropDAO API key in Account settings before deploying.</p>}
-  <div className="field-row"><label>Risk per trade (USDC)<select disabled={busy||Boolean(status?.running||status?.paused)} value={riskUsd} onChange={e=>setRiskUsd(e.target.value)}>{['0.5','1','2','3','5'].map(x=><option key={x} value={x}>${x}</option>)}</select></label><label>Leverage<select disabled={busy||Boolean(status?.running||status?.paused)} value={leverage} onChange={e=>setLeverage(e.target.value)}><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label></div>
+  {accounts.length?<label>PropDAO account<select disabled={busy||Boolean(status?.running||status?.paused)} value={accountId} onChange={e=>{invalidateReview();setReconcileConfirmed(false);setAccountId(e.target.value);void load(e.target.value)}}><option value="">Choose account</option>{accounts.map(a=><option key={a.accountId} value={a.accountId}>{a.accountId} · {a.status}</option>)}</select></label>:<p>Connect your PropDAO API key in Account settings before deploying.</p>}
+  <div className="field-row"><label>Risk per trade (USDC)<select disabled={busy||Boolean(status?.running||status?.paused)} value={riskUsd} onChange={e=>{invalidateReview();setRiskUsd(e.target.value)}}>{['0.5','1','2','3','5'].map(x=><option key={x} value={x}>${x}</option>)}</select></label><label>Leverage<select disabled={busy||Boolean(status?.running||status?.paused)} value={leverage} onChange={e=>{invalidateReview();setLeverage(e.target.value)}}><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label></div>
   <p className="output-disclaimer">Each bot has its own Cloudflare runtime. Bots on one PropDAO account can run independently, but the account-wide order guard skips entries while another position or order is open. Stop disables new orders, not existing positions. Save your edited strategy after stopping, then Deploy to load the new code.</p>
-  {!status?.running&&!status?.paused&&<label className="warning-remember"><input type="checkbox" disabled={busy||!status?.configured} checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>I authorize automated orders on my selected simulated-capital PropDAO evaluation or funded account.</label>}
-  <div className="market-buttons">{status?.running||status?.paused||(status?.deployed&&status?.uncertain)?<button className="primary" disabled={busy} onClick={()=>void control()}>{busy?'Stopping…':'Stop bot'}</button>:<button className="primary" disabled={busy||!status?.configured||Boolean(status?.pendingIntent)||Boolean(status?.statusUnavailable)||!selected||!['active','funded'].includes(selected.status)||!confirmed} onClick={()=>void deploy()}>{busy?'Authorizing…':'Deploy live robot'}</button>}<button className="ghost" disabled={busy} onClick={()=>void load()}>Refresh status</button><button className="ghost" disabled={busy} onClick={onClose}>Close</button></div>
- </Modal>;
+  {review&&<div className="market-status" role="group" aria-label="Exact deployment review"><strong>Reviewed source · {review.symbol} · {review.environment}</strong><span>Account: {review.accountId} · Risk per entry: ${review.riskUsd} USDC · Leverage: {review.leverage}×</span><span>Execution: {review.executionTimeframe.toUpperCase()} · Strategy riskPercent: {review.strategyRiskPercent}% (separate from live USDC risk)</span><span>Source SHA-256: <code>{review.codeHash}</code></span><span>Matching saved backtest: {review.backtest.from} to {review.backtest.to} · {review.backtest.source}</span><span>Test evidence: Browser-produced research, not independently certified fills</span><span>Review expires: {new Date(review.expiresAt).toLocaleString()}</span><span>{review.evidence}</span></div>}
+  {!status?.running&&!status?.paused&&review&&<label className="warning-remember"><input type="checkbox" disabled={busy||!status?.configured||review.expiresAt<=Date.now()} checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>I authorize automated orders on my selected simulated-capital PropDAO evaluation or funded account.</label>}
+  <div className="market-buttons">
+   {status?.deployed||status?.running||status?.paused?<button type="button" className="ghost" disabled={busy} onClick={()=>void control()}>{busy?'Stopping…':'Stop new entries'}</button>:null}
+   {!status?.deployed&&!status?.running&&!status?.paused&&(!review?<button type="button" className="primary" disabled={busy||!status?.configured||Boolean(status?.pendingIntent)||Boolean(status?.statusUnavailable)||!selected||!['active','funded'].includes(selected.status)} onClick={()=>void requestReview()}>Review exact deployment</button>:<button type="button" className="primary" disabled={busy||review.expiresAt<=Date.now()||!confirmed} onClick={()=>void deploy()}>{busy?'Authorizing…':'Authorize reviewed deployment'}</button>)}
+   <button type="button" className="ghost" disabled={busy} onClick={()=>void load()}>Refresh status</button><button type="button" className="ghost" disabled={busy} onClick={onClose}>Close</button>
+  </div>
+ </Dialog>;
 }
 export function DeploymentDialog({onClose}:{client:CloudClient;botId:string;onClose:()=>void;onBroker?:(privateBotId:string)=>void;onFollow?:()=>void;onLog?:(line:string)=>void;timeframe?:string}){
  return <Modal title="Deploy with VALR" close={onClose}><p>Open the robot in your workspace and choose Deploy to choose Demo or Live with VALR market data.</p><p>Choose Demo or Live from Deploy in your robot’s workspace. Live requires a verified VALR connection and runtime.</p><button className="primary" onClick={onClose}>Close</button></Modal>;

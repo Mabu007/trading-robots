@@ -30,3 +30,22 @@
   color: inherit;
   cursor: pointer;
 }
+
+.app-dialog.tv-strategy-workbench.market-modal { width: min(860px, 100%); max-height: 92dvh; }
+.tv-strategy-workbench .app-dialog-content { min-width: 0; overflow: auto; }
+.tv-workbench-tabs { margin-top: 0; }
+.tv-workbench-fields { display: grid; grid-template-columns: 2fr 1fr 1.4fr; gap: 12px; }
+.tv-workbench-ai { padding: 12px; border: 1px solid var(--tv-shell-line); border-radius: 10px; margin: 12px 0; }
+.tv-workbench-ai summary { cursor: pointer; }
+.tv-strategy-workbench textarea {
+  width: 100%; box-sizing: border-box; resize: vertical; padding: 10px;
+  border: 1px solid var(--tv-shell-line); border-radius: 8px;
+  background: var(--tv-shell-panel-muted); color: var(--tv-shell-ink);
+}
+.tv-workbench-editor { min-height: 190px; font: 13px/1.55 ui-monospace, monospace; tab-size: 2; }
+.tv-strategy-workbench .tv-backtest-chat-card { max-width: 100%; }
+@media (max-width: 600px) {
+  .tv-workbench-fields { grid-template-columns: 1fr; gap: 0; }
+  .tv-code-item-actions { flex-wrap: wrap; padding-left: 0; }
+  .tv-strategy-workbench .field-row { flex-wrap: wrap; }
+}
