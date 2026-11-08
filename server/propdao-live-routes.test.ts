@@ -261,6 +261,9 @@ describe('revision- and account-bound PropDAO deployment review',()=>{
   const body={...requestBody,reviewId:reviewed.reviewId,expectedCodeHash:reviewed.codeHash,confirm:auth};
   await expect(svc.deploy('alice','bot-1',{body:{...body,accountId:'prop-2'}} as any)).rejects.toThrow(/changed since review/);
   await svc.deploy('alice','bot-1',{body} as any);
+  await expect(svc.deploy('alice','bot-1',{body} as any)).rejects.toThrow(/Existing deployment authorization/);
+  await expect(svc.review('alice','bot-1',{body:requestBody} as any)).rejects.toThrow(/already exists/);
+  await svc.stop('alice','bot-1');
   await expect(svc.deploy('alice','bot-1',{body} as any)).rejects.toThrow(/already used/);
  });
  it('rejects modified risk, stale source hashes, and expired reviews',async()=>{
