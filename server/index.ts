@@ -16,6 +16,7 @@ import {registerAIPlatformRoutes} from './ai-platform.ts';
 import {phase2FeatureEnabled,phase2SharedModelTestEnabled} from './phase2-feature-gates.ts';
 import {createAgentBacktestTool,agentBacktestInputSchema} from './agent-backtest-tools.ts';
 import {createBrokerConnectionReadTool} from './agent-broker-read.ts';
+import {createPropDAOAccountSnapshotTool} from './agent-account-snapshot.ts';
 import {ValrAccounts} from './valr-account.ts';
 import {scopePrivateTools} from './agent-tool-discovery.ts';
 import {ApprovalIntents} from './approval-intents.ts';
@@ -200,7 +201,7 @@ const ctraderTokenLock=new ValrAccountLock(marketplace.store,'ctraderTokenLocks'
 const valrExclusive=<T>(uid:string,task:()=>Promise<T>)=>FirestoreStore.configured()?valrLock.run(uid,task):task();
 // Serialize changes to one PropDAO bot with deletion across server instances.
 const propBotExclusive=<T>(uid:string,id:string,task:()=>Promise<T>)=>FirestoreStore.configured()?propBotLock.run(uid+':'+id,task):task();
-const propdaoLiveService=propDAOLiveRoutes(app,{uid:firebaseUidOrReply,bot:ownedPropDAOBot,accounts:propdaoAccounts,agents:agentRegistry,read:readR2Object,write:writeR2Object,remove:deleteR2Object,list:listR2Objects,exclusive:propBotExclusive});
+const propdaoLiveService=propDAOLiveRoutes(app,{uid:firebaseUidOrReply,bot:ownedPropDAOBot,accounts:propdaoAccounts,agents:agentRegistry,read:readR2Object,write:writeR2Object,remove:deleteR2Object,list:listR2Objects,exclusive:propBotExclusive,history:dwellirHistory});
 propDAORoutes(app,propdaoAccounts,firebaseUidOrReply,uid=>propdaoLiveService.beforeCredentialChange(uid));
 const ctraderStore={read:readR2Object,write:writeR2Object,remove:deleteR2Object,list:listR2Objects};
 const ctraderBroker=new CTraderService(ctraderStore,fetch,(uid,work)=>{if(!FirestoreStore.configured())throw Error('cTrader account locking is unavailable.');return ctraderTokenLock.run(uid,work)});
@@ -949,6 +950,9 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
         ctrader:user=>ctraderBroker.list(user),
         valr:async user=>Boolean(await valrConnectionReader.load(user))
        })
+      }:{}),
+      ...(!researchMode&&/\b(account|equity|balance|positions?|orders?|exposure|risk room)\b/i.test(String(lastUser?.content||''))?{
+       getPropDAOAccountSnapshot:createPropDAOAccountSnapshotTool(uid,(owner,accountId)=>propdaoAccounts.accountRisk(owner,accountId))
       }:{}),
       ...(/\b(candles?|ohlc|historical prices|price history|historical data)\b/i.test(query)?{
        getMarketHistory:tool({
