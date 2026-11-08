@@ -554,6 +554,7 @@ function App(){
   if(command&&command!=='edit'&&command!=='create'){
    setChatInput('');setAiError('');
    if(command==='backtest'){
+    if(!referenced&&(codeSuggestions(message,cloudBots).length>0||/["“][^"”]+["”]/.test(message))){setChat([...next,{role:'assistant',content:'The strategy name could match more than one saved item. Select the exact strategy in the Library before backtesting; no test has started.'}]);return;}
     const target=referenced?.bot||cloudBots.find(bot=>bot.id===draftId);
     if(!target){setChat([...next,{role:'assistant',content:'Choose saved code first. Mention the name, for example: Backtest MySol Robot.'}]);return;}
     let dates:ReturnType<typeof chatBacktestDates>;
@@ -605,7 +606,7 @@ function App(){
     return;
    }
    if(command!=='deploy'&&command!=='stop')return;
-   if(!referenced&&(/["“][^"”]+["”]/.test(message)||!created)){
+   if(!referenced&&(/["“][^"”]+["”]/.test(message)||codeSuggestions(message,cloudBots).length>0||!created)){
     setChat([...next,{role:'assistant',content:'Which strategy should I '+command+'? Give me its exact saved name.'}]);return;
    }
    if(referenced?.bot&&referenced.bot.id!==draftId){
