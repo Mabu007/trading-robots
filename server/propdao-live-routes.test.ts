@@ -4,7 +4,7 @@ import {starterCode} from '../src/strategy.ts';
 import type {PropDAOAccounts} from './propdao-account.ts';
 
 afterEach(()=>vi.unstubAllEnvs());
-const setup=()=>{
+const setup=(strictReviews=false)=>{
  const saved=new Map<string,string>();
  const storage={read:vi.fn(async(k:string)=>saved.get(k)??null),write:vi.fn(async(k:string,v:string)=>{saved.set(k,v)}),remove:vi.fn(async(k:string)=>{saved.delete(k)}),list:vi.fn(async(prefix:string)=>[...saved.keys()].filter(k=>k.startsWith(prefix)))};
  const accounts={
@@ -14,7 +14,7 @@ const setup=()=>{
   recentTrades:vi.fn(async()=>[]),
  };
  const fetcher=vi.fn(async(url:string)=>String(url).endsWith('/health')?Response.json({ready:true}):Response.json({grant:null,running:false,paused:false,pendingIntent:null,events:['authorized']}));
- const svc=new PropDAOLiveService({...storage,uid:async()=> 'alice',bot:async()=>({asset:'BTCUSDC',venue:'propdao',code:starterCode}),accounts:accounts as unknown as PropDAOAccounts,request:fetcher as unknown as typeof fetch});
+ const svc=new PropDAOLiveService({...storage,unsafeLegacyDeployForTests:!strictReviews,uid:async()=> 'alice',bot:async()=>({asset:'BTCUSDC',venue:'propdao',code:starterCode}),accounts:accounts as unknown as PropDAOAccounts,request:fetcher as unknown as typeof fetch});
  return {svc,fetcher,accounts,saved,storage};
 };
 describe('PropDAO live execution authorization',()=>{
@@ -132,7 +132,8 @@ describe('PropDAO live execution authorization',()=>{
   await svc.deploy('alice','bot-1',{body:{accountId:'prop-1',riskUsd:2,leverage:1,confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'}} as any);
   const grant=JSON.parse([...saved.values()][0]);
   fetcher.mockRejectedValueOnce(new Error('Worker offline'));
-  await expect(svc.stop('alice','bot-1')).rejects.toThrow('Worker offline');
+  const stopped=await svc.stop('alice','bot-1');
+  expect(stopped).toMatchObject({authorizationRevoked:true,runtimeStopped:false,uncertain:true,needsReconciliation:true});
   await expect(svc.provider({uid:'alice',botId:'bot-1',grantId:grant.id,action:'execute'})).rejects.toThrow(/authorization expired/);
   expect(accounts.executeOrder).not.toHaveBeenCalled();
  });
@@ -235,5 +236,43 @@ describe('PropDAO live execution authorization',()=>{
  it('rejects pause and resume without an account-scoped grant',async()=>{
   const {svc}=setup();await expect(svc.pause('alice','bot-1')).rejects.toThrow(/No active/);
   await expect(svc.resume('alice','bot-1',{} as any)).rejects.toThrow(/authorization has ended/);
+ });
+});
+
+
+describe('revision- and account-bound PropDAO deployment review',()=>{
+ const setupReady=()=>{
+  vi.stubEnv('PROPDAO_LIVE_ENABLED','true');
+  vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');
+  vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
+  return setup(true);
+ };
+ const requestBody={accountId:'prop-1',riskUsd:2,leverage:1};
+ const auth='I AUTHORIZE PROPDAO SIMULATED LIVE TRADING';
+ it('requires a review even when a legacy client supplies a confirmation string',async()=>{
+  const {svc,saved}=setupReady();
+  await expect(svc.deploy('alice','bot-1',{body:{...requestBody,confirm:auth}} as any)).rejects.toThrow(/fresh deployment review/);
+  expect(saved.size).toBe(0);
+ });
+ it('pins the reviewed code hash, instrument and exact account and consumes only once',async()=>{
+  const {svc}=setupReady();
+  const reviewed=await svc.review('alice','bot-1',{body:requestBody} as any);
+  expect(reviewed).toMatchObject({accountId:'prop-1',symbol:'BTCUSDC',riskUsd:2,leverage:1});
+  const body={...requestBody,reviewId:reviewed.reviewId,expectedCodeHash:reviewed.codeHash,confirm:auth};
+  await expect(svc.deploy('alice','bot-1',{body:{...body,accountId:'prop-2'}} as any)).rejects.toThrow(/scope changed/);
+  await svc.deploy('alice','bot-1',{body} as any);
+  await expect(svc.deploy('alice','bot-1',{body} as any)).rejects.toThrow(/already used/);
+ });
+ it('rejects modified risk, stale source hashes, and expired reviews',async()=>{
+  const {svc}=setupReady();
+  const reviewed=await svc.review('alice','bot-1',{body:requestBody} as any);
+  const base={...requestBody,reviewId:reviewed.reviewId,expectedCodeHash:reviewed.codeHash,confirm:auth};
+  await expect(svc.deploy('alice','bot-1',{body:{...base,riskUsd:3}} as any)).rejects.toThrow(/scope changed/);
+  await expect(svc.deploy('alice','bot-1',{body:{...base,expectedCodeHash:'a'.repeat(64)}} as any)).rejects.toThrow(/scope changed/);
+  vi.useFakeTimers();
+  try{
+   vi.setSystemTime(reviewed.expiresAt+1);
+   await expect(svc.deploy('alice','bot-1',{body:base} as any)).rejects.toThrow(/expired/);
+  }finally{vi.useRealTimers()}
  });
 });
