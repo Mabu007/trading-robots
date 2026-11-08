@@ -76,11 +76,12 @@ export function PropDAODeployDialog({client,botId,onClose,onLog}:{client:CloudCl
    if(next.running===true&&next.grant?.id){
     onLog(`PropDAO live · deployment accepted · running confirmed · ${accountId}`);onClose();
    }else{
+    setStatus({...next,deployed:true,uncertain:true,accountId});
     onLog('PropDAO live · deployment response unverified · check account and runtime before trying again.');
     setError('The Worker did not confirm a running deployment. Check the exact account and refresh runtime status; do not submit another deployment blindly.');
    }
   }catch(e){
-   const reason=message(e);setError('Deployment outcome needs verification: '+reason+'. Check runtime and account status before requesting a new review.');
+   const reason=message(e);setStatus(old=>({...old,deployed:true,uncertain:true,error:reason}));setError('Deployment outcome needs verification: '+reason+'. Check runtime and account status before requesting a new review.');
   }finally{setBusy(false)}
  };
  const reconcile=async()=>{
