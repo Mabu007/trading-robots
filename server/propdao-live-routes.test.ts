@@ -1,11 +1,18 @@
 import {afterEach,describe,expect,it,vi} from 'vitest';
 import {PropDAOLiveService} from './propdao-live-routes.ts';
 import {starterCode} from '../src/strategy.ts';
+import {gzipSync} from 'node:zlib';
 import type {PropDAOAccounts} from './propdao-account.ts';
 
 afterEach(()=>vi.unstubAllEnvs());
 const setup=(strictReviews=false)=>{
  const saved=new Map<string,string>();
+ if(strictReviews){
+  const body={venue:'propdao',asset:'BTCUSDC',strategyCode:starterCode,riskPercent:1,from:'2026-11-01',to:'2026-11-02',
+   result:{timeframe:'m1',source:'test fixture candles',candles:[{time:1,open:100,high:101,low:99,close:100,volume:1}],trades:[],metrics:{trades:0}}};
+  const bytes=Buffer.from(JSON.stringify(body)),payload=gzipSync(bytes).toString('base64');
+  saved.set(`user-bots/${Buffer.from('alice').toString('base64url')}/bot-1/backtest.json`,JSON.stringify({format:'gzip-base64',version:2,payload,uncompressedBytes:bytes.length,userId:'alice',botId:'bot-1',savedAt:'2026-11-03T00:00:00.000Z'}));
+ }
  const storage={read:vi.fn(async(k:string)=>saved.get(k)??null),write:vi.fn(async(k:string,v:string)=>{saved.set(k,v)}),remove:vi.fn(async(k:string)=>{saved.delete(k)}),list:vi.fn(async(prefix:string)=>[...saved.keys()].filter(k=>k.startsWith(prefix)))};
  const accounts={
   accountRisk:vi.fn(async()=>({account:{status:'active'},risk:{equity:1000,roomUsd:50,breached:false},positions:[],orders:[]})),
@@ -252,12 +259,12 @@ describe('revision- and account-bound PropDAO deployment review',()=>{
  it('requires a review even when a legacy client supplies a confirmation string',async()=>{
   const {svc,saved}=setupReady();
   await expect(svc.deploy('alice','bot-1',{body:{...requestBody,confirm:auth}} as any)).rejects.toThrow(/fresh deployment review/);
-  expect(saved.size).toBe(0);
+  expect([...saved.keys()].filter(key=>key.includes('propdao-live/v1')).length).toBe(0);
  });
  it('pins the reviewed code hash, instrument and exact account and consumes only once',async()=>{
   const {svc}=setupReady();
   const reviewed=await svc.review('alice','bot-1',{body:requestBody} as any);
-  expect(reviewed).toMatchObject({accountId:'prop-1',symbol:'BTCUSDC',riskUsd:2,leverage:1});
+  expect(reviewed).toMatchObject({accountId:'prop-1',symbol:'BTCUSDC',riskUsd:2,leverage:1,backtest:{from:'2026-11-01',provenance:'client-produced-research'}});
   const body={...requestBody,reviewId:reviewed.reviewId,expectedCodeHash:reviewed.codeHash,confirm:auth};
   await expect(svc.deploy('alice','bot-1',{body:{...body,accountId:'prop-2'}} as any)).rejects.toThrow(/changed since review/);
   await svc.deploy('alice','bot-1',{body} as any);
