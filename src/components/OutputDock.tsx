@@ -111,7 +111,8 @@ function TradesPanel({ props }: { props: Props }) {
   };
 
   if(props.liveMode){
-    const positions:any[]=Array.isArray(props.propLive?.positions)?props.propLive.positions:[];
+    const exposureVerified=props.propLive?.brokerExposureVerified===true;
+    const positions:any[]=exposureVerified&&Array.isArray(props.propLive?.positions)?props.propLive.positions:[];
     const closed:any[]=Array.isArray(props.propLive?.closedTrades)?props.propLive.closedTrades:[];
     const selectedLive=liveSelection?.kind==='position'?positions.find(t=>t.id===liveSelection.id):liveSelection?.kind==='closed'?closed.find(t=>t.id===liveSelection.id):null;
     const money=(value:unknown)=>typeof value==='number'&&Number.isFinite(value)?new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(value):'—';
@@ -127,8 +128,8 @@ function TradesPanel({ props }: { props: Props }) {
     ]:[];
     return <>
       <div className="prop-live-trades" role="list" aria-label="PropDAO live account trades">
-        <div className="prop-live-trades-head"><div><strong>Account activity</strong><small>Provider-reported positions and completed trades · refreshes automatically</small></div><span>{positions.length} open · {closed.length} closed</span></div>
-        {props.propLive?.accountError&&<p className="output-disclaimer red" role="alert">Provider activity unavailable: {props.propLive.accountError}</p>}
+        <div className="prop-live-trades-head"><div><strong>Account activity</strong><small>Provider-reported positions and completed trades · refreshes automatically</small></div><span>{exposureVerified?`${positions.length} open · ${closed.length} closed`:'Exposure unknown'}</span></div>
+        {!exposureVerified&&<p className="output-disclaimer red" role="alert">Broker exposure unknown. Positions and orders have not been independently verified. {props.propLive?.accountError||'Check the broker connection before relying on this status.'}</p>}
         {positions.length>0&&<div className="prop-live-trades-section">OPEN POSITIONS</div>}
         {positions.map((p:any)=><button type="button" role="listitem" className="prop-live-trade-row" key={'pos-'+p.id} onClick={()=>setLiveSelection({kind:'position',id:p.id})} aria-label={`Inspect open ${p.symbol} position ${p.id}`}>
           <span className={`prop-live-trade-direction ${side(p.side)==='BUY'?'long':'short'}`}>{side(p.side)==='BUY'?'↗':'↘'}</span>
@@ -141,7 +142,7 @@ function TradesPanel({ props }: { props: Props }) {
           <span className="prop-live-trade-main"><strong>{t.symbol} <span className="prop-live-trade-pill closed">CLOSED</span></strong><small>{side(t.side)} · {price(t.qty)} units · {moment(t.closedAt)}</small></span>
           <span className="prop-live-trade-pnl"><b className={t.pnl>=0?'green':'red'}>{money(t.pnl)}</b><small>Realized</small></span><ChevronRight size={15}/>
         </button>)}
-        {!positions.length&&!closed.length&&<div className="output-empty"><ListChecks size={18}/><strong>No PropDAO trades yet</strong><span>Open positions and completed trades will appear here when reported by PropDAO.</span></div>}
+        {exposureVerified&&!positions.length&&!closed.length&&<div className="output-empty"><ListChecks size={18}/><strong>No PropDAO trades yet</strong><span>Open positions and completed trades will appear here when reported by PropDAO.</span></div>}
       </div>
       {selectedLive&&createPortal(<div className="trade-modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)setLiveSelection(null)}}>
         <section className="trade-modal prop-live-trade-detail" role="dialog" aria-modal="true" aria-label={`${isOpen?'Open position':'Closed trade'} metadata`}>
@@ -237,7 +238,7 @@ export function OutputDock(props: Props) {
     { id: 'terminal', label: 'Terminal', count: props.liveMode?(props.propLive?.events?.length||0):props.logs.length, icon: TerminalIcon },
     ...(!props.liveMode||props.result?[{ id: 'results' as const, label: 'Results', count: props.result ? 1 : 0, icon: Activity }]:[]),
     ...(props.isPropDAO ? [...(!props.liveMode||props.propEvaluation?[{id:'prop-results' as const,label:'Prop Results',count:props.propEvaluation?1:0,icon:Activity}]:[]),{id:'live-trading' as const,label:'Live Trading',icon:Activity}] : []),
-    { id: 'trades', label: props.liveMode?'LIVE Trades':'Trades', count: props.liveMode?(props.propLive?.positions?.length||0)+(props.propLive?.closedTrades?.length||0):(props.propEvaluation?.trades.length ?? props.monetary?.trades.length ?? props.result?.trades.length ?? 0), icon: ListChecks },
+    { id: 'trades', label: props.liveMode?'LIVE Trades':'Trades', count: props.liveMode?(props.propLive?.brokerExposureVerified===true?(props.propLive?.positions?.length||0)+(props.propLive?.closedTrades?.length||0):undefined):(props.propEvaluation?.trades.length ?? props.monetary?.trades.length ?? props.result?.trades.length ?? 0), icon: ListChecks },
     ...(props.liveMode&&props.result?[{ id: 'backtest-trades' as const, label: 'Backtest Trades', count: props.propEvaluation?.trades.length ?? props.monetary?.trades.length ?? props.result.trades.length, icon: ListChecks }]:[]),
     { id: 'versions', label: 'Versions', count: props.versions.length, icon: History },
   ];
