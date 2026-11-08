@@ -23,7 +23,7 @@ it('returns the actual provider 429 with a recoverable explanation',()=>fixture(
  request.mockResolvedValueOnce(Response.json({error:{message:'rate exceeded'}},{status:429}));
  const r=await fetch(base+'/api/chat/plan',{method:'POST',headers:{'Content-Type':'application/json',authorization:'alice'},body:JSON.stringify({message:'Create a Gold strategy on PropDAO'})});
  expect(r.status).toBe(429);
- const body=await r.json();
+ const body=await r.json() as {error:string};
  expect(body.error).toMatch(/rate-limit/i);
  expect(body.error).toMatch(/not executed/i);
 }));
