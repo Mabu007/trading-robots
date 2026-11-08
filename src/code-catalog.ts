@@ -8,14 +8,19 @@ export function resolveCodeReference(message:string,bots:CloudBot[]):CodeMatch|n
  const text=simplified(message);
  if(!text)return null;
  const quotes=quotedNames(message);
+ // A quoted full name is an explicit target. Do not let its shorter
+ // substring (e.g. "Gold Sweep") make "Gold Sweep v2" ambiguous.
+ if(quotes.length){
+  const exact=bots.filter(bot=>quotes.includes(simplified(bot.name||'')));
+  if(exact.length!==1)return null;
+  return {bot:exact[0],confidence:'exact'};
+ }
  const matches=bots.filter(bot=>{
   const key=simplified(bot.name||'');
-  if(key.length<3)return false;
-  if(quotes.includes(key))return true;
-  return (' '+text+' ').includes(' '+key+' ');
+  return key.length>=3&&(' '+text+' ').includes(' '+key+' ');
  });
  if(matches.length!==1)return null;
- return {bot:matches[0],confidence:quotes.includes(simplified(matches[0].name))?'exact':'unique'};
+ return {bot:matches[0],confidence:'unique'};
 }
 export function codeSuggestions(message:string,bots:CloudBot[]):CloudBot[]{
  const tokens=new Set(simplified(message).split(/\s+/).filter(w=>w.length>3&&!['robot','code','strategy','running','backtest','trade','from','last','week','that','this'].includes(w)));
