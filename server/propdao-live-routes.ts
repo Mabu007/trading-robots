@@ -282,7 +282,8 @@ export class PropDAOLiveService{
   if(bot)await this.recordAgent(uid,botId,bot,{state:'unknown',action:'stop_requested',grantId:g.id,expiresAt:g.expiresAt,authorized:false},true);
   try{
    const state=await this.runtime(g,'stop',{}),final=await this.runtime(g,'status');
-   if(final.pendingIntent){if(bot)await this.recordAgent(uid,botId,bot,{state:'unknown',action:'stop_requires_reconciliation',grantId:g.id,expiresAt:g.expiresAt,authorized:false,error:'Stopped with an unresolved order requiring reconciliation.'},true);return {...final,running:false,deployed:false,stopped:true,needsReconciliation:true,authorizationRevoked:true,runtimeStopped:true,exposure:'unverified'}}
+   if(final.running!==false||final.paused===true){if(bot)await this.recordAgent(uid,botId,bot,{state:'unknown',action:'stop_response_unverified',grantId:g.id,expiresAt:g.expiresAt,authorized:false,error:'Worker did not verify that execution stopped.'},true);return {...final,stopped:false,uncertain:true,authorizationRevoked:true,runtimeStopped:false,exposure:'unverified',needsReconciliation:Boolean(final.pendingIntent),error:'New-order permission revoked but Worker stop not verified. Check broker exposure.'}}
+   if(final.pendingIntent){if(bot)await this.recordAgent(uid,botId,bot,{state:'unknown',action:'stop_requires_reconciliation',grantId:g.id,expiresAt:g.expiresAt,authorized:false,error:'Worker stopped but an unresolved order needs reconciliation.'},true);return {...final,running:false,deployed:false,stopped:true,needsReconciliation:true,authorizationRevoked:true,runtimeStopped:true,exposure:'unverified'}}
    if(this.deps.remove)await this.deps.remove(this.key(uid,botId));
    if(bot)await this.recordAgent(uid,botId,bot,{state:'stopped',action:'stop_confirmed',grantId:g.id,expiresAt:g.expiresAt,authorized:false},true);
    return {...state,running:false,paused:false,deployed:false,stopped:true,authorizationRevoked:true,runtimeStopped:true,exposure:'unverified'};
