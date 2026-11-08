@@ -5,7 +5,7 @@ const workflow = [
  {title:'Explore a market',description:'Ask VIBES what changed. Open the chart, check the timeframe and follow the sources.',Icon:MessageSquare},
  {title:'Build a strategy',description:'Describe the setup, entry, exit and risk rules. Review the editable strategy that VIBES prepares.',Icon:Code2},
  {title:'Backtest your rules',description:'Choose a historical window and see trades, drawdown and the inputs behind the result.',Icon:History},
- {title:'Review a deployment',description:'Choose a PropDAO account and confirm the settings yourself. Track the runtime from Strategy.',Icon:ShieldCheck},
+ {title:'Review a deployment',description:'Choose a PropDAO account and confirm the settings yourself. Track the runtime from Robots.',Icon:ShieldCheck},
 ];
 
 const questions = [
@@ -36,7 +36,7 @@ export function LandingPage(){
  return <main className="vl-landing" id="top">
   <header className="vl-nav"><div className="vl-wrap vl-nav-row">
    <a href="#top" className="vl-brand"><img src="/logo.png" alt=""/><span>Trading Vibes</span></a>
-   <nav aria-label="Product navigation"><a href="#research">VIBES</a><a href="#workflow">Workflow</a><a href="#strategy">Strategy</a><a href="#faq">FAQ</a></nav>
+   <nav aria-label="Product navigation"><a href="#research">VIBES</a><a href="#workflow">Workflow</a><a href="#strategy">Robots</a><a href="#faq">FAQ</a></nav>
    <SignIn className="vl-nav-signin"/>
   </div></header>
 
@@ -70,7 +70,7 @@ export function LandingPage(){
   </div></section>
 
   <section className="vl-section vl-strategy" id="strategy" aria-labelledby="vl-strategy-title"><div className="vl-wrap vl-split">
-   <div><div className="vl-kicker"><Code2 size={15}/> Strategy and backtesting</div><h2 id="vl-strategy-title">See what the test actually did.</h2><p>Keep your code, rules and saved results together. Inspect trades and metrics, revise the strategy and replay it over a specific date range.</p><p className="vl-note">Backtests simulate execution on the available data. Historical results carry no promise of future returns.</p></div>
+   <div><div className="vl-kicker"><Code2 size={15}/> Robots and backtesting</div><h2 id="vl-strategy-title">See what the test actually did.</h2><p>Keep your code, rules and saved results together. Inspect trades and metrics, revise the strategy and replay it over a specific date range.</p><p className="vl-note">Backtests simulate execution on the available data. Historical results carry no promise of future returns.</p></div>
    <div className="vl-result"><div className="vl-result-head"><Activity size={19}/><div><strong>Gold strategy replay</strong><small>Illustrative WAIT-only test</small></div><span>Simulation</span></div>
     <dl><div><dt>Candles replayed</dt><dd>576</dd></div><div><dt>Trades opened</dt><dd>0</dd></div><div><dt>Execution chart</dt><dd>M5</dd></div></dl>
     <div className="vl-result-foot"><Check size={15}/> A run can finish without a trade. That outcome belongs in the report.</div>
@@ -99,6 +99,6 @@ export function LandingPage(){
   <section className="vl-section vl-invite" aria-labelledby="vl-invite-title"><div className="vl-wrap vl-invite-inner">
    <div><div className="vl-kicker"><LockKeyhole size={15}/> Private workspace</div><h2 id="vl-invite-title">Got an invitation?</h2><p>Sign in with the email and password provided by Trading Vibes.</p></div><SignIn/>
   </div></section>
-  <footer className="vl-footer"><div className="vl-wrap"><a href="#top" className="vl-brand"><img src="/logo.png" alt=""/><span>Trading Vibes</span></a><span>Market research · Strategy development · PropDAO</span><a href="/sign-in">Sign in</a></div></footer>
+  <footer className="vl-footer"><div className="vl-wrap"><a href="#top" className="vl-brand"><img src="/logo.png" alt=""/><span>Trading Vibes</span></a><span>Market research · Robot development · PropDAO</span><a href="/sign-in">Sign in</a></div></footer>
  </main>;
 }
