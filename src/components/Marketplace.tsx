@@ -47,7 +47,7 @@ function PropDAOAccount({client,onClose}:{client:CloudClient;onClose:()=>void}){
 }
 export function PropDAODeployDialog({client,botId,expectedCodeHash,onClose,onLog,onConnect}:{client:CloudClient;botId:string;expectedCodeHash?:string;onClose:()=>void;onLog:(line:string)=>void;onConnect?:()=>void}){
  const [accounts,setAccounts]=useState<{accountId:string;status:string}[]>([]);
- const [accountId,setAccountId]=useState(''),[riskUsd,setRiskUsd]=useState('2'),[leverage,setLeverage]=useState('1'),[confirmed,setConfirmed]=useState(false),[reconcileConfirmed,setReconcileConfirmed]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[status,setStatus]=useState<any>(null);
+ const [accountId,setAccountId]=useState(''),[riskUsd,setRiskUsd]=useState('2'),[leverage,setLeverage]=useState('1'),[confirmed,setConfirmed]=useState(false),[reconcileConfirmed,setReconcileConfirmed]=useState(false),[stopPriorConfirmed,setStopPriorConfirmed]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[status,setStatus]=useState<any>(null);
  const [review,setReview]=useState<{reviewId:string;codeHash:string;accountId:string;symbol:string;riskUsd:number;leverage:number;executionTimeframe:string;strategyRiskPercent:number;expiresAt:number;environment:string;evidence:string;backtest:{from:string;to:string;source:string;savedAt:string;provenance:string;replayHash?:string|null;verifiedCandles?:number|null;browserObservedCandles?:number;calendarIntervals?:number}}|null>(null);
  const invalidateReview=()=>{setReview(null);setConfirmed(false)};
  const load=async(accountOverride?:string)=>{invalidateReview();setBusy(true);setError('');try{
@@ -72,6 +72,7 @@ export function PropDAODeployDialog({client,botId,expectedCodeHash,onClose,onLog
    statusUnavailable:Boolean(status?.statusUnavailable),uncertain:Boolean(status?.uncertain),
    pendingIntent:status?.pendingIntent,accountOccupied:Boolean(status?.accountOccupied),
    running:Boolean(status?.running),paused:Boolean(status?.paused)});
+  if(status?.activeAuthorization){setError('The server still has a previous authorization for this robot. Revoke it with the controls below before requesting another review.');return;}
   if(reason){setError(reason);return;}
   setBusy(true);setError('');invalidateReview();
   try{
@@ -114,7 +115,8 @@ export function PropDAODeployDialog({client,botId,expectedCodeHash,onClose,onLog
    setStatus(next);invalidateReview();
    if(next.authorizationRevoked===true&&next.runtimeStopped===true){
     onLog('PropDAO live · permanently stopped; authorization revoked. Existing broker positions and orders require independent verification.');
-    onClose();
+    setStopPriorConfirmed(false);
+    await load();
    }else if(next.authorizationRevoked===true){
     onLog('PropDAO live · new orders revoked; Worker stop unverified. Check open positions and orders before retrying.');
     setError(next.error||'Order authorization was revoked, but the Worker has not confirmed it stopped. Existing exposure is unknown.');
@@ -146,9 +148,15 @@ export function PropDAODeployDialog({client,botId,expectedCodeHash,onClose,onLog
    </details>}</div>
   {status?.pendingIntent&&<div className="market-status" role="alert"><strong>Reconciliation required</strong><span>Intent: {status.pendingIntent.intentId||'Unknown'} · {status.pendingIntent.symbol||'Unknown symbol'}</span><span>Open your PropDAO terminal first and verify that no positions or resting orders remain. Reconciliation checks account history and two fresh snapshots; it never submits a new order or cancels an existing one.</span><label className="warning-remember"><input type="checkbox" checked={reconcileConfirmed} disabled={busy} onChange={e=>setReconcileConfirmed(e.target.checked)}/>I have checked the selected PropDAO account and it has no open positions or orders.</label><div className="market-buttons"><button type="button" className="ghost" disabled={busy||!reconcileConfirmed} onClick={()=>void reconcile()}>{busy?'Verifying…':'Reconcile pending order'}</button></div></div>}
   {status?.authorizationRevoked&&<p role="status">New-order permission was revoked. The Worker and remaining exposure may still require verification.</p>}
+  {status?.activeAuthorization&&<div className="tv-deploy-prior" role="group" aria-label="Existing robot authorization">
+   <strong><ShieldCheck size={15}/> Previous robot authorization found</strong>
+   <p>A server-side authorization is still present even if this robot is missing from your Deployed Robots list. Verify the broker account before replacing it. Stopping revokes permission for new entries; it does not close positions or resting orders.</p>
+   <label className="warning-remember"><input type="checkbox" checked={stopPriorConfirmed} disabled={busy} onChange={event=>setStopPriorConfirmed(event.target.checked)}/>I understand this action revokes new-entry permission, not broker exposure.</label>
+   <button type="button" className="tv-deploy-prior-stop" disabled={busy||!stopPriorConfirmed} onClick={()=>void control()}>Stop prior authorization</button>
+  </div>}
   {status?.blockingBotId&&<p className="output-disclaimer">This account was previously deployed from bot {status.blockingBotId}. Its stored order intent is account-scoped.</p>}
    <div className="tv-deploy-fields">
-   {accounts.length?<label>PropDAO account<select disabled={busy||Boolean(status?.running||status?.paused)} value={accountId} onChange={e=>{invalidateReview();setReconcileConfirmed(false);setAccountId(e.target.value);void load(e.target.value)}}><option value="">Choose account</option>{accounts.map(a=><option key={a.accountId} value={a.accountId}>{a.accountId} · {a.status}</option>)}</select></label>:<div className="market-status"><span>Connect a PropDAO demo account to authorize this robot. No order can start without a verified connection.</span>{onConnect&&<button type="button" className="ghost" disabled={busy} onClick={onConnect}>Connect PropDAO account</button>}</div>}
+   {accounts.length?<label>PropDAO account<select disabled={busy||Boolean(status?.running||status?.paused)} value={accountId} onChange={e=>{invalidateReview();setReconcileConfirmed(false);setStopPriorConfirmed(false);setAccountId(e.target.value);void load(e.target.value)}}><option value="">Choose account</option>{accounts.map(a=><option key={a.accountId} value={a.accountId}>{a.accountId} · {a.status}</option>)}</select></label>:<div className="market-status"><span>Connect a PropDAO demo account to authorize this robot. No order can start without a verified connection.</span>{onConnect&&<button type="button" className="ghost" disabled={busy} onClick={onConnect}>Connect PropDAO account</button>}</div>}
   <div className="field-row"><label>Risk per trade (USDC)<select disabled={busy||Boolean(status?.running||status?.paused)} value={riskUsd} onChange={e=>{invalidateReview();setRiskUsd(e.target.value)}}>{['0.5','1','2','3','5'].map(x=><option key={x} value={x}>${x}</option>)}</select></label><label>Leverage<select disabled={busy||Boolean(status?.running||status?.paused)} value={leverage} onChange={e=>{invalidateReview();setLeverage(e.target.value)}}><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label></div>
    </div>
    {!review&&reviewBlocker&&<p className="tv-deploy-preflight" role="status"><ShieldCheck size={14}/>{reviewBlocker}</p>}
@@ -156,8 +164,8 @@ export function PropDAODeployDialog({client,botId,expectedCodeHash,onClose,onLog
   {review&&<div className="market-status" role="group" aria-label="Exact deployment review"><strong>Reviewed source · {review.symbol} · {review.environment}</strong><span>Account: {review.accountId} · Risk per entry: ${review.riskUsd} USDC · Leverage: {review.leverage}×</span><span>Execution: {review.executionTimeframe.toUpperCase()} · Strategy riskPercent: {review.strategyRiskPercent}% (separate from live USDC risk)</span><span>Source SHA-256: <code>{review.codeHash}</code></span><span>Matching saved backtest: {review.backtest.from} to {review.backtest.to} · {review.backtest.source}</span><span>Browser candle coverage: {review.backtest.browserObservedCandles??'unknown'} / {review.backtest.calendarIntervals??'unknown'} calendar intervals (gaps may include market closures)</span><span>Test evidence: {review.backtest.provenance==='server-replayed-reference'?'Server-replayed reference data; not broker fills':'Validated browser research; independent replay unavailable'}</span><span>Review expires: {new Date(review.expiresAt).toLocaleString()}</span><span>{review.evidence}</span></div>}
   {!status?.running&&!status?.paused&&review&&<label className="warning-remember"><input type="checkbox" disabled={busy||!status?.configured||review.expiresAt<=Date.now()} checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>I authorize automated orders on my selected simulated-capital PropDAO evaluation or funded account.</label>}
   <div className="market-buttons">
-   {status?.deployed||status?.running||status?.paused?<button type="button" className="ghost" disabled={busy} onClick={()=>void control()}>{busy?'Stopping…':'Stop new entries'}</button>:null}
-   {!status?.deployed&&!status?.running&&!status?.paused&&(!review?<button type="button" className="primary" disabled={busy} onClick={()=>void requestReview()}>{busy?'Checking…':'Deploy'}</button>:<button type="button" className="primary" disabled={busy||review.expiresAt<=Date.now()||!confirmed} onClick={()=>void deploy()}>{busy?'Authorizing…':'Confirm deployment'}</button>)}
+   {!status?.activeAuthorization&&(status?.deployed||status?.running||status?.paused)?<button type="button" className="ghost" disabled={busy} onClick={()=>void control()}>{busy?'Stopping…':'Stop new entries'}</button>:null}
+   {!status?.activeAuthorization&&!status?.running&&!status?.paused&&(!review?<button type="button" className="primary" disabled={busy} onClick={()=>void requestReview()}>{busy?'Checking…':'Deploy'}</button>:<button type="button" className="primary" disabled={busy||review.expiresAt<=Date.now()||!confirmed} onClick={()=>void deploy()}>{busy?'Authorizing…':'Confirm deployment'}</button>)}
    <button type="button" className="ghost" disabled={busy} onClick={()=>void load()}><RefreshCw size={14}/>{busy?'Refreshing…':'Refresh status'}</button><button type="button" className="ghost" disabled={busy} onClick={onClose}>Close</button>
   </div>
  </Dialog>;

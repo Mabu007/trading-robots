@@ -27,7 +27,7 @@ export class PropDAOLiveService{
   const accountId=req.body?.accountId,riskUsd=Number(req.body?.riskUsd),leverage=Number(req.body?.leverage??1);
   if(!safeId(accountId)||!Number.isFinite(riskUsd)||riskUsd<=0||riskUsd>5)throw Error('Choose an owned account and risk from $0.01 to $5.');
   const currentGrant=await this.grant(uid,botId);
-  if(currentGrant&&!currentGrant.revokedAt&&Date.now()<currentGrant.expiresAt)throw Error('A deployment authorization already exists. Stop new entries and verify the account before reviewing a replacement.');
+  if(currentGrant&&!currentGrant.revokedAt&&Date.now()<currentGrant.expiresAt)throw Error('A prior server authorization still exists for this robot even if Deployed Robots is empty. Use Deploy to stop the prior authorization, inspect Worker and broker exposure, then start a fresh review.');
   const bot=await this.deps.bot(uid,botId,req);
   if(!bot||bot.venue!=='propdao')throw Error('Save a PropDAO strategy before reviewing live deployment.');
   const codeHash=hash(bot.code);
@@ -125,7 +125,7 @@ export class PropDAOLiveService{
    }
    return {configured,connected:health.connected,deployed:false,running:false,accountId:null,events:[],error:configured?'Connect a PropDAO account and authorize a deployment.':health.error||'Live runtime is not available.'};
   }
-  if(!health.connected)return {configured:false,connected:false,deployed:true,running:false,uncertain:true,authorizationRevoked:Boolean(grant.revokedAt),accountId:grant.accountId,events:[],error:health.error};
+  if(!health.connected)return {configured:false,connected:false,deployed:true,activeAuthorization:!grant.revokedAt&&Date.now()<grant.expiresAt,running:false,uncertain:true,authorizationRevoked:Boolean(grant.revokedAt),accountId:grant.accountId,events:[],error:health.error};
   try{
    const state=await this.runtime(grant,'status');
    const matched=state.grant?.id===grant.id;
@@ -157,14 +157,14 @@ export class PropDAOLiveService{
     accountOccupied:state.running===true&&!matched,
     blockingBotId:!matched&&state.grant?.botId||null,
     uncertain:state.running===true&&(!configured||!matched||Boolean(grant.revokedAt)||Date.now()>=grant.expiresAt),
-    deployed:matched,running:state.running===true&&configured&&matched&&!grant.revokedAt&&Date.now()<grant.expiresAt,
+    deployed:matched,activeAuthorization:!grant.revokedAt&&Date.now()<grant.expiresAt,running:state.running===true&&configured&&matched&&!grant.revokedAt&&Date.now()<grant.expiresAt,
      paused:state.paused===true&&matched&&!grant.revokedAt&&Date.now()<grant.expiresAt,
      canResume:state.paused===true&&matched&&configured&&!state.pendingIntent&&!grant.revokedAt&&Date.now()<grant.expiresAt,
     accountId:grant.accountId,authorizationRevoked:Boolean(grant.revokedAt),grantExpiresAt:grant.expiresAt,codeHash:grant.codeHash,positions,pendingOrders,closedTrades,risk,accountError,
     brokerExposureVerified,brokerExposure:brokerExposureVerified?(positions?.length?'open':pendingOrders?.length?'pending':'flat'):'unknown',
     error:!matched&&state.pendingIntent?'This account has an unresolved order from another bot. Reconcile it before deploying.':health.error};
 
-  }catch(e){return {configured:true,deployed:true,running:false,uncertain:true,authorizationRevoked:Boolean(grant.revokedAt),accountId:grant.accountId,events:[],error:e instanceof Error?e.message:'Worker unavailable. Order status is unknown.'}}
+  }catch(e){return {configured:true,deployed:true,activeAuthorization:!grant.revokedAt&&Date.now()<grant.expiresAt,running:false,uncertain:true,authorizationRevoked:Boolean(grant.revokedAt),accountId:grant.accountId,events:[],error:e instanceof Error?e.message:'Worker unavailable. Order status is unknown.'}}
  }
  async assertDeletable(uid:string,botId:string){
   const grant=await this.grant(uid,botId);

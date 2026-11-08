@@ -28,7 +28,7 @@ export function createBacktestTradeAudit(run:StrategyRun,tradeId:number):TradeAu
  const duringTrade=entryIndex>=0&&exitIndex>=entryIndex?candles.slice(entryIndex,Math.min(exitIndex+1,entryIndex+181)):[];
  const afterExit=exitIndex>=0?candles.slice(exitIndex+1,exitIndex+21):[];
  const totalDuring=entryIndex>=0&&exitIndex>=entryIndex?exitIndex-entryIndex+1:0;
- const sourceLimit=60_000,completeSource=run.strategyCode.length<=sourceLimit;
+ const sourceLimit=200_000,completeSource=run.strategyCode.length<=sourceLimit;
  const stopDistance=Math.abs(trade.entry-trade.stop);
  const riskRatio=stopDistance>0?Math.abs(trade.target-trade.entry)/stopDistance:null;
  const stopTouched=duringTrade.length?duringTrade.some(c=>trade.side==='LONG'?c.low<=trade.stop:c.high>=trade.stop):null;
@@ -48,10 +48,10 @@ export function createBacktestTradeAudit(run:StrategyRun,tradeId:number):TradeAu
   'OHLC candles cannot establish the sequence of prices within each candle.',
   (entryIndex<0||exitIndex<0)?'Entry or exit candles are unavailable in the saved history.':null,
   totalDuring>duringTrade.length?'Only the first 180 in-trade candles are attached; do not infer omitted price movement.':null,
-  !completeSource?'Strategy source exceeds 60,000 characters. Full code is NOT attached; do not claim to reconstruct hidden entry rules.':null,
+  !completeSource?'Strategy source exceeds 200,000 characters. Full source NOT attached: ONLY the first 200,000 characters are available in this AI turn. Clearly report the truncation and do not claim to reconstruct hidden rules.':null,
  ].filter(Boolean).join(' ');
  return {
-  source:'Saved robot backtest and exact saved strategy source',
+  source:completeSource?'Saved robot backtest and exact saved strategy source':'Saved robot backtest and truncated strategy source',
   asset:run.asset,venue:run.venue,timeframe:String(run.result.timeframe||'m1'),
   tradeId:String(trade.id),trade,entryTime:new Date(trade.entryTime*1000).toISOString(),
   exitTime:new Date(trade.exitTime*1000).toISOString(),

@@ -20,7 +20,7 @@ export type CloudClient = {
   listConversations: () => Promise<{id:string;title:string;model?:string|null}[]>;
   loadConversation: (id:string) => Promise<any[]|null>;
   loadConversationRecord: (id:string) => Promise<{messages:any[];model:string|null;title:string}|null>;
-  saveConversation: (id:string, messages:any[]) => Promise<void>;
+  saveConversation: (id:string, messages:any[],semanticTitle?:string) => Promise<void>;
   renameConversation: (id:string,title:string) => Promise<void>;
   deleteConversation: (id:string) => Promise<void>;
   selectConversationModel: (id:string,model:string|null) => Promise<void>;
@@ -172,7 +172,7 @@ export function connectFirebase(): Promise<CloudClient | null> {
       async loadConversation(id:string){
         return (await this.loadConversationRecord(id))?.messages??null;
       },
-      async saveConversation(id:string,chat:any[]){
+      async saveConversation(id:string,chat:any[],semanticTitle?:string){
         const uid=await currentUserId(),key=uid+':'+id;
         if(deletedConversationIds.has(key))return;
         let messages=chat.slice(-60).map(item=>{
@@ -186,7 +186,15 @@ export function connectFirebase(): Promise<CloudClient | null> {
         const previous=pendingConversationWrites.get(key);
         const task=(previous||Promise.resolve()).catch(()=>undefined).then(async()=>{
           if(deletedConversationIds.has(key))return;
-          await storeSdk.setDoc(storeSdk.doc(db,'users',uid,'conversations',id),{messages:payload,updatedAt:storeSdk.serverTimestamp()},{merge:true});
+          const ref=storeSdk.doc(db,'users',uid,'conversations',id);
+          // Respect a user's manual chat title. Only auto-label conversations
+          // that have never been explicitly renamed.
+          const prior=semanticTitle?await storeSdk.getDoc(ref):null;
+          const manuallyNamed=prior?.exists()&&prior.data()?.titleEdited===true;
+          await storeSdk.setDoc(ref,{
+            messages:payload,updatedAt:storeSdk.serverTimestamp(),
+            ...(!manuallyNamed&&semanticTitle?{title:semanticTitle.slice(0,80)}:{})
+          },{merge:true});
         });
         pendingConversationWrites.set(key,task);
         try{await task}finally{if(pendingConversationWrites.get(key)===task)pendingConversationWrites.delete(key)}

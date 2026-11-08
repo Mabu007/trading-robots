@@ -1,4 +1,5 @@
 import {vibesPersona,vibesResearchStyle} from '../shared/vibes-persona.ts';
+import {validateAIMessageBudget} from './ai-message-limits.ts';
 import {intervalMs} from './market-data.ts';
 import {watchOutputs} from './watch-outputs.ts';
 import {ChatToolReceipt,chatIdPattern,receiptIdPattern} from './chat-tool-receipts.ts';
@@ -608,11 +609,8 @@ app.post('/api/ai', async (req, res) => {
   const apiKey = selectOpenRouterApiKey(personalAI?.apiKey,process.env.OPENROUTER_API_KEY,process.env.ALLOW_SHARED_OPENROUTER_KEY==='true');
   if (!apiKey) return res.status(503).json({ error: 'Connect your OpenRouter API key to enable AI.' });
   const messages = req.body?.messages;
-  if (!Array.isArray(messages) || messages.length < 1 || messages.length > 24
-    || messages.some((m: any) => !m || !['system', 'user', 'assistant'].includes(m.role)
-      || typeof m.content !== 'string' || m.content.length > 80_000)) {
-    return res.status(400).json({ error: 'Send 1–24 chat messages with supported roles and text content under 80 KB each.' });
-  }
+  const contextBudgetError=validateAIMessageBudget(messages,req.body?.auditMode===true);
+  if(contextBudgetError)return res.status(400).json({error:contextBudgetError});
   const selectedAsset = req.body?.asset;
   if (selectedAsset !== undefined && (typeof selectedAsset !== 'string' || !/^[a-zA-Z0-9_:.@-]{1,64}$/.test(selectedAsset))) return res.status(400).json({ error: 'Choose a supported instrument for AI context.' });
   const requestedTokens = Number(req.body?.maxTokens);
@@ -791,11 +789,8 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
   if(conversationId!==undefined&&(typeof conversationId!=='string'||!chatIdPattern.test(conversationId)))return res.status(400).json({error:'Invalid conversation identifier.'});
   const receipt=conversationId&&FirestoreStore.configured()?new ChatToolReceipt(uid,conversationId,randomUUID()):null;
   const messages = req.body?.messages;
-  if (!Array.isArray(messages) || messages.length < 1 || messages.length > 24
-    || messages.some((m: any) => !m || !['system', 'user', 'assistant'].includes(m.role)
-      || typeof m.content !== 'string' || m.content.length > 80_000)) {
-    return res.status(400).json({ error: 'Send 1–24 chat messages with supported roles and text content under 80 KB each.' });
-  }
+  const contextBudgetError=validateAIMessageBudget(messages,req.body?.auditMode===true);
+  if(contextBudgetError)return res.status(400).json({error:contextBudgetError});
   const selectedAsset = req.body?.asset;
   if (selectedAsset !== undefined && (typeof selectedAsset !== 'string' || !/^[a-zA-Z0-9_:.@-]{1,64}$/.test(selectedAsset))) return res.status(400).json({ error: 'Choose a supported instrument for AI context.' });
   const requestedTokens = Number(req.body?.maxTokens);
