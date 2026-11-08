@@ -25,11 +25,12 @@ function Trade({record}:{record:Evidence}){
  const side=str(first(r,'side','direction','orderSide')).toUpperCase(),entry=first(r,'entry','entryPrice','avgEntryPrice','averageEntryPrice'),exit=first(r,'exit','exitPrice','avgExitPrice','averageExitPrice'),q=first(r,'quantity','qty','size','volume'),pnl=first(r,'pnl','realizedPnl','realizedPnL','profit'),fee=first(r,'fee','fees');
  const canCheck=['SELL','BUY'].includes(side)&&[entry,exit,q].every(v=>Number.isFinite(Number(v)))&&Number(q)>0;
  const change=canCheck?(side==='SELL'?Number(entry)-Number(exit):Number(exit)-Number(entry))*Number(q):null;
- return <Section title="Verified trade inspection" source={str(record.source)}><div className="tv-viz-caption">{str(record.venue).toUpperCase()} · {str(record.asset)} · {str(record.tradeKind)}</div>
- <Metrics items={[{label:'Reported PnL',value:num(pnl),hint:'Currency/gross-net definition unverified'},{label:'Side',value:side},{label:'Quantity',value:num(q,7)},{label:'Reported fee',value:num(fee)}]}/>
- <div className="tv-viz-fields"><span>Entry<strong>{num(entry,7)}</strong></span><span>Exit<strong>{num(exit,7)}</strong></span><span>Exit reason<strong>{str(first(r,'reason','closeReason','exitReason'))}</strong></span><span>Closed<strong>{date(first(r,'closedAt','closeTime','closeTimestamp'))}</strong></span></div>
+ const simulated=/saved|backtest|simulation/i.test(str(record.source))||record.backtest===true;
+ return <Section title={simulated?'Backtest trade inspection':'Trade evidence inspection'} source={str(record.source)}><div className="tv-viz-caption">{str(record.venue).toUpperCase()} · {str(record.asset)} · {str(record.tradeKind)}</div>
+ <Metrics items={[{label:'Reported PnL',value:num(pnl),hint:simulated?'Simulated R multiple, not account currency':'Currency/gross-net definition unverified'},{label:'Side',value:side},{label:'Quantity',value:num(q,7)},{label:'Reported fee',value:num(fee)}]}/>
+ <div className="tv-viz-fields"><span>Entry<strong>{num(entry,7)}</strong></span><span>Exit<strong>{num(exit,7)}</strong></span><span>Exit reason<strong>{str(first(r,'reason','closeReason','exitReason'))}</strong></span><span>Closed<strong>{date(first(r,'closedAt','closeTime','closeTimestamp','exitTime'))}</strong></span></div>
  {canCheck&&<p className="tv-viz-foot">Price × quantity calculation: {num(change,7)} before fees. Provider PnL may use contract multipliers, currency conversions, funding or fee conventions not supplied here.</p>}
- <details><summary>Provider evidence</summary><p>Record ID: {str(first(r,'id','recordId','orderId','tradeId'))}</p><p>Opened: {date(first(r,'openedAt','openTime','entryTime'))}. Closed: {date(first(r,'closedAt','closeTime','exitTime'))}.</p><p>{str(record.limitations)}</p></details></Section>;
+ <details><summary>{simulated?'Research provenance':'Provider evidence'}</summary><p>Record ID: {str(first(r,'id','recordId','orderId','tradeId'))}</p><p>Opened: {date(first(r,'openedAt','openTime','entryTime'))}. Closed: {date(first(r,'closedAt','closeTime','exitTime'))}.</p><p>{str(record.limitations)}</p></details></Section>;
 }
 type Bar={time:number;open:number;high:number;low:number;close:number};
 function checkedBars(input:unknown):Bar[]{

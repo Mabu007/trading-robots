@@ -283,7 +283,9 @@ describe('revision- and account-bound PropDAO deployment review',()=>{
   await expect(svc.deploy('alice','bot-1',{body:{...body,accountId:'prop-2'}} as any)).rejects.toThrow(/changed since review/);
   await svc.deploy('alice','bot-1',{body} as any);
   await expect(svc.deploy('alice','bot-1',{body} as any)).rejects.toThrow(/Existing deployment authorization/);
-  await expect(svc.review('alice','bot-1',{body:requestBody} as any)).rejects.toThrow(/already exists/);
+  const lingering=await svc.status('alice','bot-1');
+  expect(lingering.activeAuthorization).toBe(true);
+  await expect(svc.review('alice','bot-1',{body:requestBody} as any)).rejects.toThrow(/prior server authorization/i);
   await svc.stop('alice','bot-1');
   await expect(svc.deploy('alice','bot-1',{body} as any)).rejects.toThrow(/already used/);
  });
@@ -309,6 +311,8 @@ describe('revision- and account-bound PropDAO deployment review',()=>{
   const result=await svc.deploy('alice','bot-1',{body} as any);
   expect(result).toMatchObject({running:matched,uncertain:!matched,grant:matched?{id:activeGrant}:null});
   await expect(svc.deploy('alice','bot-1',{body} as any)).rejects.toThrow(/Existing deployment authorization/);
+  const lingering=await svc.status('alice','bot-1');
+  expect(lingering.activeAuthorization).toBe(true);
   expect(accounts.executeOrder).not.toHaveBeenCalled();
  });
  it('rejects modified risk, stale source hashes, and expired reviews',async()=>{

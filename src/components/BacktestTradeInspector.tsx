@@ -113,6 +113,7 @@ export function BacktestTradeInspector({run,tradeId,onClose,onAskAI,theme='light
    <div><small>Result</small><strong className={trade.pnl>=0?'positive':'negative'}>{fmt(trade.pnl)}R</strong></div>
    <div><small>Exit reason</small><strong>{trade.reason}</strong></div>
   </div>
+  {!audit.strategySourceComplete&&<p className="tv-trade-inspector-cap" role="status"><AlertTriangle size={15}/> Strategy code is {audit.codeLength.toLocaleString()} characters. The AI context includes only the first 200,000; its code-level explanation may be incomplete. Open the full robot source to review the remaining logic.</p>}
   <p className="tv-trade-inspector-note"><Activity size={14}/> {audit.historySource}. Historical OHLC cannot prove the intrabar price sequence or broker fills.</p>
   <footer className="tv-trade-inspector-actions">
    <button type="button" className="tv-inspect-ai" disabled={!onAskAI} onClick={()=>onAskAI?.(trade)}><Sparkles size={16}/> Ask VIBES to analyse this trade</button>

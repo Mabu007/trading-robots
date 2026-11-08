@@ -31,7 +31,8 @@ describe('Skills, chat model and mobile shell',()=>{
   expect(firebase).toContain('selectConversationModel:');
  });
  it('preserves custom titles across auto-saves and tombstones deleted chats per user',()=>{
-  expect(firebase).toContain('{messages:payload,updatedAt:storeSdk.serverTimestamp()},{merge:true}');
+  expect(firebase).toContain('const manuallyNamed=prior?.exists()&&prior.data()?.titleEdited===true');
+  expect(firebase).toContain('...(!manuallyNamed&&semanticTitle?{title:semanticTitle.slice(0,80)}:{})');
   expect(firebase).toContain('uid+\':\'+id');
   expect(firebase).toContain("titleEdited:true");
  });

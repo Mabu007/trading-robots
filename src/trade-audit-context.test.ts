@@ -46,11 +46,24 @@ it('uses the saved candles and complete strategy source for an 18K+ strategy wit
 });
 
 it('does not turn a long source or insufficient saved OHLC into invented independent proof',()=>{
- const run=make();run.strategyCode='x'.repeat(61000);
+ const run=make();run.strategyCode='x'.repeat(201000);
  run.result.candles=[];
  const evidence=createBacktestTradeAudit(run,1);
  expect(evidence.strategySourceComplete).toBe(false);
  expect(evidence.evidence.savedCandles).toBe(0);
  expect(evidence.evidence.touchSequence).toBe('not-evaluable');
  expect(evidence.contextLimit).toContain('NOT attached');
+});
+
+it('fully includes a 200,000-character source and explicitly warns at 200,001',()=>{
+ const run=make();run.strategyCode='x'.repeat(200000);
+ let data=createBacktestTradeAudit(run,1);
+ expect(data.strategy.length).toBe(200000);
+ expect(data.strategySourceComplete).toBe(true);
+ run.strategyCode+='y';
+ data=createBacktestTradeAudit(run,1);
+ expect(data.strategy.length).toBe(200000);
+ expect(data.strategySourceComplete).toBe(false);
+ expect(data.codeLength).toBe(200001);
+ expect(data.contextLimit).toContain('200,000');
 });
