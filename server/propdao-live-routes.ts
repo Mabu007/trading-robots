@@ -11,7 +11,7 @@ import {venueOf} from '../shared/venues.ts';
 
 type Storage={read:(key:string)=>Promise<string|null>;write:(key:string,value:string)=>Promise<void>;remove?:(key:string)=>Promise<void>;list?:(prefix:string,limit:number)=>Promise<string[]>};
 type Dependencies=Storage&{/** Legacy unit fixtures only; never pass from HTTP routes. */unsafeLegacyDeployForTests?:boolean;uid:(req:Request,res:Response)=>Promise<string|null>;bot:(uid:string,id:string,req:Request)=>Promise<{asset:string;code:string;venue?:string;name?:string}|null>;accounts:PropDAOAccounts;agents?:AgentRegistry;request?:typeof fetch;exclusive?:<T>(uid:string,id:string,work:()=>Promise<T>)=>Promise<T>;history?:Pick<DwellirHistory,'candles'>};
-export type PropGrant={id:string;uid:string;botId:string;agentId?:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;leverage:number;issuedAt:number;expiresAt:number;revokedAt?:number;runtimeScope?:'bot'|'lock'};
+export type PropGrant={autoPolicy?:{demoOnly:true;taskId:string;policyFingerprint:string;maxDailyLossPct:number;maxDrawdownPct:number;startingEquity:number};id:string;uid:string;botId:string;agentId?:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;leverage:number;issuedAt:number;expiresAt:number;revokedAt?:number;runtimeScope?:'bot'|'lock'};
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 const safeId=(value:string)=>/^[A-Za-z0-9_-]{1,128}$/.test(value);
 export class PropDAOLiveService{
@@ -64,6 +64,47 @@ export class PropDAOLiveService{
   await this.deps.write(this.reviewKey(uid,botId,id),JSON.stringify(data));
   return {...data,reviewId:id,environment:process.env.VERCEL_ENV||'development',evidence:verificationNote};
  }
+ /**
+  * Internal-only autonomous demo review. The independently created server
+  * evaluation proof replaces browser-authored backtest metrics.
+  */
+ async reviewAutonomous(uid:string,botId:string,input:{
+  taskId:string;accountId:string;riskUsd:number;leverage:number;codeHash:string;proofKey:string;policyFingerprint:string
+ },req:Request){
+  if(!/^[A-Za-z0-9_-]{8,100}$/.test(input.taskId)||!safeId(input.accountId)||!/^[a-f0-9]{64}$/.test(input.codeHash)||
+   !input.proofKey.startsWith('agent-autonomy-proof/v1/'+Buffer.from(uid).toString('base64url')+'/'+input.taskId+'/')||
+   !/^[a-f0-9]{64}$/.test(input.policyFingerprint)||!Number.isFinite(input.riskUsd)||input.riskUsd<.01||input.riskUsd>1||input.leverage!==1)
+    throw Error('Invalid autonomous demo review scope');
+  const bot=await this.deps.bot(uid,botId,req);
+  if(!bot||bot.venue!=='propdao'||hash(bot.code)!==input.codeHash)throw Error('Autonomous revision is not a saved owned PropDAO strategy');
+  const record=await this.deps.read(input.proofKey);
+  if(!record||record.length>20000)throw Error('Verified server-run autonomous evaluation is unavailable');
+  const proof=JSON.parse(record);
+  if(proof.version!==1||proof.uid!==uid||proof.botId!==botId||proof.taskId!==input.taskId||
+   proof.codeHash!==input.codeHash||proof.accountId!==input.accountId||proof.riskUsd!==input.riskUsd||
+   proof.policyFingerprint!==input.policyFingerprint||proof.accepted!==true||
+   !Number.isFinite(proof.verifiedAt)||Math.abs(Date.now()-proof.verifiedAt)>300000||
+   !Array.isArray(proof.reportIds)||proof.reportIds.length<2||
+   !proof.challenge||proof.challenge.maxObservedDailyLoss>20||proof.challenge.maxObservedDrawdown>50||
+   ['failed-daily','failed-total'].includes(proof.challenge.status)||
+   !Number.isFinite(proof.maxDailyLossPct)||proof.maxDailyLossPct<=0||proof.maxDailyLossPct>2||
+   !Number.isFinite(proof.maxDrawdownPct)||proof.maxDrawdownPct<=0||proof.maxDrawdownPct>5)
+    throw Error('Broker challenge proof is incomplete, outdated, or failed');
+  const account=await this.deps.accounts.accountRisk(uid,input.accountId);
+  if(account.account.status!=='active'||account.risk.breached||!Number.isFinite(account.risk.roomUsd)||
+   account.risk.roomUsd<input.riskUsd*4||account.positions.length||account.orders.length)
+    throw Error('Autonomous PropDAO account is not active, flat, or inside risk room');
+  const prior=await this.grant(uid,botId);
+  if(prior&&!prior.revokedAt&&Date.now()<prior.expiresAt)throw Error('A robot grant already exists; inspect and reconcile instead of repeating');
+  const reviewId=randomBytes(24).toString('hex'),createdAt=Date.now();
+  const payload={version:1,kind:'server-evaluated-demo' as const,id:reviewId,uid,botId,accountId:input.accountId,
+   symbol:bot.asset,codeHash:input.codeHash,riskUsd:input.riskUsd,leverage:input.leverage,
+   proofKey:input.proofKey,proofHash:hash(record),policyFingerprint:input.policyFingerprint,
+   maxDailyLossPct:proof.maxDailyLossPct,maxDrawdownPct:proof.maxDrawdownPct,
+   createdAt,expiresAt:createdAt+120_000,consumedAt:null as number|null};
+  await this.deps.write(this.reviewKey(uid,botId,reviewId),JSON.stringify(payload));
+  return {reviewId,expectedCodeHash:input.codeHash,expiresAt:payload.expiresAt};
+ }
  private async consumeReview(uid:string,botId:string,input:any,bot:{asset:string;code:string},leverage:number){
   if(this.deps.unsafeLegacyDeployForTests)return;
   if(!safeId(input?.reviewId)||typeof input?.expectedCodeHash!=='string'||!/^[a-f0-9]{64}$/.test(input.expectedCodeHash))throw Error('A fresh deployment review is required.');
@@ -72,9 +113,20 @@ export class PropDAOLiveService{
   const r=JSON.parse(raw);
   if(r.version!==1||r.uid!==uid||r.botId!==botId||r.id!==input.reviewId||r.consumedAt!==null||!Number.isFinite(r.expiresAt)||Date.now()>=r.expiresAt)throw Error('Deployment review expired or already used.');
   if(r.accountId!==input.accountId||r.symbol!==bot.asset||r.codeHash!==hash(bot.code)||r.codeHash!==input.expectedCodeHash||r.riskUsd!==Number(input.riskUsd)||r.leverage!==leverage)throw Error('Strategy revision, account or risk changed since review. Request a fresh review.');
-  const latest=await this.deps.read(this.backtestKey(uid,botId));
-  if(!latest||hash(latest)!==r.evidenceHash)throw Error('Saved backtest changed since authorization review. Request a new review.');
+  if(r.kind==='server-evaluated-demo'){
+   const raw=await this.deps.read(r.proofKey);
+   if(!raw||hash(raw)!==r.proofHash)throw Error('Autonomous evaluation proof changed after review.');
+   const p=JSON.parse(raw);
+   if(p.version!==1||p.uid!==uid||p.botId!==botId||p.codeHash!==r.codeHash||p.accountId!==r.accountId||
+    p.accepted!==true||p.policyFingerprint!==r.policyFingerprint||
+    !Number.isFinite(p.verifiedAt)||Math.abs(Date.now()-p.verifiedAt)>300000)
+    throw Error('Autonomous proof is not valid for this revision and account');
+  }else{
+   const latest=await this.deps.read(this.backtestKey(uid,botId));
+   if(!latest||hash(latest)!==r.evidenceHash)throw Error('Saved backtest changed since authorization review. Request a new review.');
+  }
   await this.deps.write(reviewKey,JSON.stringify({...r,consumedAt:Date.now()}));
+  return r;
  }
  private async grant(uid:string,botId:string):Promise<PropGrant|null>{const raw=await this.deps.read(this.key(uid,botId));if(!raw)return null;const g=JSON.parse(raw) as PropGrant;if(g.uid!==uid||g.botId!==botId)throw Error('Live authorization ownership mismatch');return g}
  private configured(){return Boolean(process.env.PROPDAO_LIVE_ENABLED==='true'&&process.env.PROPDAO_LIVE_RUNTIME_URL&&process.env.PROPDAO_LIVE_INTERNAL_SECRET&&process.env.PROPDAO_LIVE_INTERNAL_SECRET.length>=32)}
@@ -219,9 +271,12 @@ export class PropDAOLiveService{
   if(config.timeframes.some((tf:string)=>!['m1','m5','m15','m30','h1','h4'].includes(tf)))throw Error('Live timeframe is unsupported');
   const leverage=Number(input.leverage??1);
   if(!Number.isFinite(leverage)||leverage<1||leverage>Number(market.maxLeverage))throw Error('Selected leverage exceeds allowed market limit');
-  await this.consumeReview(uid,botId,input,bot,leverage);
+  const acceptedReview=await this.consumeReview(uid,botId,input,bot,leverage);
   const now=Date.now();
-  const grant:PropGrant={id:randomBytes(24).toString('hex'),uid,botId,...(this.deps.agents?{agentId:this.deps.agents.idFor(uid,botId)}:{}),accountId:input.accountId,symbol:bot.asset,coin:market.dex?`${market.dex}:${market.coin}`:market.coin,code:bot.code,codeHash:hash(bot.code),riskUsd:Number(input.riskUsd),leverage,issuedAt:now,expiresAt:now+7*24*3600_000,runtimeScope:'bot'};
+  const grant:PropGrant={id:randomBytes(24).toString('hex'),uid,botId,...(this.deps.agents?{agentId:this.deps.agents.idFor(uid,botId)}:{}),accountId:input.accountId,symbol:bot.asset,coin:market.dex?`${market.dex}:${market.coin}`:market.coin,code:bot.code,codeHash:hash(bot.code),riskUsd:Number(input.riskUsd),leverage,issuedAt:now,expiresAt:now+7*24*3600_000,runtimeScope:'bot',
+   ...(acceptedReview?.kind==='server-evaluated-demo'?{autoPolicy:{demoOnly:true as const,
+    taskId:acceptedReview.proofKey.split('/').at(-2),policyFingerprint:acceptedReview.policyFingerprint,
+    maxDailyLossPct:acceptedReview.maxDailyLossPct,maxDrawdownPct:acceptedReview.maxDrawdownPct,startingEquity:1000}}:{})};
   // Each new bot gets its own Durable Object; an unresolved order from the
   // legacy account-scoped runtime must still be reconciled before new entries.
   const legacy={...grant,runtimeScope:undefined};

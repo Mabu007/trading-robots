@@ -40,7 +40,7 @@ export function AgentTaskCard({client,taskId,onOpenScheduled}:{client:CloudClien
   <header><div><Activity size={16}/><strong>VIBES is working on this objective</strong></div><span>{task?.status.replaceAll('_',' ')||'Checking task...'}</span></header>
   <p>{task?.memory.lastResult||task?.memory.summary||'Loading checkpointed task progress…'}</p>
   {task&&<div className="tv-task-meta"><span><Clock3 size={13}/> {task.phase} · checkpoint {task.iteration}/{task.maxIterations}</span>
-   <span>Deadline {new Date(task.deadlineAt).toLocaleString()}</span></div>}
+   <span>{task.autonomy?.enabled?'Until stopped · broker grants renew separately':new Date(task.deadlineAt).toLocaleString()}</span></div>}
   {events.length>0&&<details className="tv-task-events"><summary>Verified task milestones ({events.length})</summary>
    <ol>{events.map(event=><li key={event.iteration}><span>{new Date(event.at).toLocaleString()+' · '+event.phase}</span>
     <p>{event.summary}</p></li>)}</ol></details>}
@@ -51,9 +51,9 @@ export function AgentTaskCard({client,taskId,onOpenScheduled}:{client:CloudClien
   {error&&<p role="alert">{error}</p>}
   <div className="tv-task-controls">
    <button onClick={onOpenScheduled} type="button">Open Scheduled</button>
-   {task&&!terminal.has(task.status)&&task.status!=='paused'&&<button type="button" disabled={working} onClick={()=>void control('pause')}><Pause size={14}/> Pause</button>}
-   {task?.status==='paused'&&<button type="button" disabled={working} onClick={()=>void control('resume')}><Play size={14}/> Resume</button>}
-   {task&&!terminal.has(task.status)&&<button type="button" disabled={working} onClick={()=>void control('cancel')}><Square size={14}/> Cancel</button>}
+   {task&&!task.autonomy?.enabled&&!terminal.has(task.status)&&task.status!=='paused'&&<button type="button" disabled={working} onClick={()=>void control('pause')}><Pause size={14}/> Pause</button>}
+   {task?.status==='paused'&&!task.autonomy?.enabled&&<button type="button" disabled={working} onClick={()=>void control('resume')}><Play size={14}/> Resume</button>}
+   {task&&!terminal.has(task.status)&&<button type="button" disabled={working} onClick={()=>void control('cancel')}><Square size={14}/> {task.autonomy?.enabled?'STOP AGENT':'Cancel'}</button>}
   </div>
   <small><CheckCircle2 size={13}/> Research tasks do not authorize order execution.</small>
  </section>;

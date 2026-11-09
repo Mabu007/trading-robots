@@ -6,19 +6,29 @@ import {runDurableTaskStep} from './agent-task-engine.ts';
 import type {OpenRouterAccounts} from './openrouter-account.ts';
 import type {PropDAOAccounts} from './propdao-account.ts';
 import type {VenueMarketData} from './venue-market-data.ts';
-import type {RecordStore} from './firestore-store.ts';
+import {FirestoreStore,type RecordStore} from './firestore-store.ts';
 import {DemoPolicyStore} from './agent-demo-policy.ts';
+import {activateDemoRobot} from './agent-autonomy-activation.ts';
+import {superviseDemoTask} from './agent-autonomy-supervisor.ts';
+import type {PropDAOLiveService} from './propdao-live-routes.ts';
 
 const safeId=z.string().regex(/^[A-Za-z0-9_-]{8,100}$/);
 const uidSchema=z.string().min(1).max(128).regex(/^[\w:-]+$/);
 const taskSchema=z.object({
  schemaVersion:z.literal(1),stateVersion:z.number().int().min(1),id:safeId,ownerUid:uidSchema,objective:z.string().min(1).max(1200),
- status:z.enum(['queued','running','retrying','paused','waiting_for_review','completed','blocked','failed','cancelled']),
+ status:z.enum(['queued','running','retrying','paused','activating','monitoring','stopping','cooldown','waiting_for_review','completed','blocked','failed','cancelled']),
  phase:z.enum(['discovery','research','authoring','validation','backtesting','evaluation','review']),
  createdAt:z.number().int(),updatedAt:z.number().int(),deadlineAt:z.number().int(),
  iteration:z.number().int().nonnegative().max(80),maxIterations:z.number().int().min(1).max(80),
  failureCount:z.number().int().nonnegative().max(100),nextRunAt:z.number().int(),
  leaseId:z.string().optional(),lastError:z.string().optional(),
+ autonomy:z.object({
+  enabled:z.literal(true),stage:z.enum(['researching','activating','monitoring','stopping','cooldown']),
+  stopRequested:z.boolean(),botId:safeId.optional(),codeHash:z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  lastMonitorAt:z.number().int().optional(),nextResearchAt:z.number().int().optional(),
+  completedCycles:z.number().int().nonnegative(),policyRequired:z.literal(true),
+  lastBrokerExposure:z.enum(['open','pending','flat','unknown']).optional(),lastDeploymentOutcome:z.string().max(400).optional()
+ }).strict().optional(),
  policy:z.object({
   policyId:safeId,fingerprint:z.string().regex(/^[a-f0-9]{64}$/),accountId:safeId,
   expiresAt:z.number().int(),mode:z.enum(['bounded-demo','full-demo']),linkedAt:z.number().int()
@@ -41,6 +51,7 @@ type Dependencies={
  write:(key:string,value:string)=>Promise<void>;
  owned:(uid:string,id:string)=>Promise<{id?:string;userId?:string;ownerUid?:string;asset?:string;venue?:string}|null>;
  tasks:RecordStore;
+ live?:()=>Pick<PropDAOLiveService,'status'|'stop'|'deploy'|'reviewAutonomous'>;
 };
 export function taskRuntimeConfigured(env:NodeJS.ProcessEnv=process.env){
  try{
@@ -73,15 +84,26 @@ export function registerAgentTaskRoutes(app:Express,deps:Dependencies){
  app.post('/api/agent-tasks',async(req,res)=>{
   const uid=await deps.uidOrReply(req,res);if(!uid)return;
   if(!taskRuntimeConfigured())return res.status(503).json({error:'Durable task runtime has not been connected.'});
-  const input=z.object({objective:z.string().min(12).max(1200),maxIterations:z.number().int().min(1).max(80).optional(),runtimeMinutes:z.number().int().min(5).max(10080).optional()}).strict().safeParse(req.body);
+  const input=z.object({objective:z.string().min(12).max(1200),maxIterations:z.number().int().min(1).max(80).optional(),runtimeMinutes:z.number().int().min(5).max(10080).optional(),continuous:z.boolean().optional(),policyId:z.string().uuid().optional()}).strict().safeParse(req.body);
   if(!input.success)return res.status(400).json({error:'Describe a specific task objective (12–1,200 characters).'});
   const id=randomUUID(),path='users/'+uid+'/agent-tasks/'+id;
   try{
+   let policy:null|import('./agent-demo-policy.ts').DemoPolicy=null;
+   if(input.data.continuous===true){
+    if(!input.data.policyId)return res.status(400).json({error:'Choose an authorized DEMO policy before starting a run-until-stopped agent.'});
+    policy=await new DemoPolicyStore(deps.tasks).owned(uid,input.data.policyId);
+    if(!policy.demoOnly||policy.mode!=='full-demo'||policy.revokedAt!==null||policy.expiresAt<=Date.now())
+     return res.status(409).json({error:'A full-demo active policy is required for continuous autonomous operation.'});
+   }
    const existing=await deps.tasks.query('users/'+uid+'/agent-tasks');
    if(existing.filter(item=>item.ownerUid===uid&&typeof item.createdAt==='number'&&item.createdAt>Date.now()-86_400_000).length>=8)
     return res.status(429).json({error:'Daily agent task limit reached. Use or review existing tasks before starting more.'});
    await deps.tasks.put(path,{id,ownerUid:uid,objective:input.data.objective,createdAt:Date.now(),status:'starting'});
-   const task=await callWorker(uid,id,'start',input.data);
+   let task=await callWorker(uid,id,'start',input.data);
+   if(policy){
+    task=await callWorker(uid,id,'policy',{policyId:policy.id,fingerprint:policy.fingerprint,
+     accountId:policy.accountId,mode:policy.mode,expiresAt:policy.expiresAt});
+   }
    await deps.tasks.put(path,{id,ownerUid:uid,objective:task.objective,createdAt:task.createdAt,status:task.status});
    return res.status(201).json({task});
   }catch(error){return res.status(503).json({error:error instanceof Error?error.message:'Could not create durable task'});}
@@ -170,6 +192,52 @@ export function registerAgentTaskRoutes(app:Express,deps:Dependencies){
     typeof saved.source!=='string'||createHash('sha256').update(saved.source).digest('hex')!==saved.codeHash)throw Error('Draft integrity mismatch');
    return res.json({draftId:draft.data,codeHash:saved.codeHash,venue:saved.venue,asset:saved.asset,source:saved.source});
   }catch{return res.status(503).json({error:'Could not verify the saved draft'});}
+ });
+ const internalLease=z.object({task:taskSchema,leaseId:z.string().min(15).max(160)}).strict();
+ const leaseCurrent=async(task:TaskRecord,leaseId:string)=>{
+  try{
+   const actual=await callWorker(task.ownerUid,task.id,'status');
+   return actual.leaseId===leaseId&&actual.stateVersion===task.stateVersion&&
+    actual.status===task.status&&actual.autonomy?.stopRequested===task.autonomy?.stopRequested;
+  }catch{return false}
+ };
+ for(const op of ['activate','supervise'] as const)app.post('/api/internal/agent-tasks/'+op,async(req,res)=>{
+  if(!validSecret(req.header('authorization'),process.env.VIBES_TASK_INTERNAL_SECRET))
+   return res.status(401).json({error:'Internal agent authorization required'});
+  const parsed=internalLease.safeParse(req.body);
+  if(!parsed.success)return res.status(400).json({error:'Invalid autonomous task lease'});
+  const {task,leaseId}=parsed.data;
+  if(!task.autonomy?.enabled||task.leaseId!==leaseId||
+   !['activating','monitoring','stopping'].includes(task.status)||Date.now()-task.updatedAt>90_000||
+   (op==='activate'&&task.status!=='activating')||
+   (op==='supervise'&&task.status==='activating'))
+   return res.status(409).json({error:'Task stage or lease is not authorized'});
+  if(!(await leaseCurrent(task,leaseId)))return res.status(409).json({error:'Task was stopped, superseded or its lease changed'});
+  if(!deps.live||!deps.propdao)return res.status(503).json({error:'Existing PropDAO broker adapter is not connected'});
+  try{
+   let result;
+   if(op==='activate'){
+    if(!FirestoreStore.configured())return res.status(503).json({error:'Server account and policy storage is not configured'});
+    result=await activateDemoRobot(task,{store:deps.tasks,objects:{read:deps.read,write:deps.write},
+     market:deps.market,accounts:deps.propdao as any,live:deps.live(),
+     verifyLease:async()=>leaseCurrent(task,leaseId)});
+   }else{
+    const live=deps.live();
+    result=await superviseDemoTask(task,{
+     policy:(uid,id)=>new DemoPolicyStore(deps.tasks).owned(uid,id),
+     snapshot:(uid,accountId)=>(deps.propdao as any).accountRisk(uid,accountId),
+     status:(uid,botId)=>live.status(uid,botId),
+     stop:(uid,botId)=>live.stop(uid,botId)});
+   }
+   const key='users/'+task.ownerUid+'/agentAutonomyEvents/'+task.id+'_'+task.stateVersion;
+   await deps.tasks.put(key,{taskId:task.id,ownerUid:task.ownerUid,iteration:task.iteration,
+    at:Date.now(),phase:task.status,outcome:result.outcome,botId:result.botId||null,
+    codeHash:result.codeHash||null,exposure:result.exposure,message:result.message?.slice(0,380)});
+   return res.json(result);
+  }catch(error){
+   console.error('Agent autonomy step failed',{task:task.id,action:op,type:error instanceof Error?error.name:'unknown'});
+   return res.status(503).json({error:'Autonomous broker supervisor unavailable; robot status must be reconciled before retry'});
+  }
  });
  app.post('/api/internal/agent-tasks/tick',async(req,res)=>{
   if(!validSecret(req.header('authorization'),process.env.VIBES_TASK_INTERNAL_SECRET))return res.status(401).json({error:'Internal task authorization required'});

@@ -13,7 +13,7 @@ export function AgentDemoPolicyPanel({client}:{client:CloudClient}){
  const [accountId,setAccountId]=useState('');
  const [risk,setRisk]=useState(.25),[maxDailyLoss,setMaxDailyLoss]=useState(1);
  const [maxDrawdown,setMaxDrawdown]=useState(3),[maxPositions,setMaxPositions]=useState(1);
- const [expires,setExpires]=useState(24),[allowReplace,setAllowReplace]=useState(false);
+ const [expires,setExpires]=useState(24),[untilStopped,setUntilStopped]=useState(true),[allowReplace,setAllowReplace]=useState(true);
  const [mode,setMode]=useState<'bounded-demo'|'full-demo'>('bounded-demo');
  const [consent,setConsent]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[note,setNote]=useState('');
  const refresh=async()=>{
@@ -35,11 +35,11 @@ export function AgentDemoPolicyPanel({client}:{client:CloudClient}){
   try{
    await sharingRequest(client,'/api/agent-policies','POST',{
     mode,accountId,instruments:['GOLDUSDC'],maxRiskUsd:risk,maxDailyLossPct:maxDailyLoss,
-    maxDrawdownPct:maxDrawdown,maxOpenPositions:maxPositions,expiresInHours:expires,allowReplace,
+    maxDrawdownPct:maxDrawdown,maxOpenPositions:maxPositions,expiresInHours:expires,untilStopped,allowReplace,acceptEvaluationDemo:true,
     confirmation:CONFIRM
    });
    await refresh();setConsent(false);
-   setNote('Demo-only limits recorded. Autonomous deployment and trading remain disabled.');
+   setNote('Demo-only policy recorded. To run, start a continuous agent; broker execution must also pass the backend activation gate.');
   }catch(e){setError(e instanceof Error?e.message:'The policy was not confirmed')}
   finally{setBusy(false)}
  };
@@ -52,7 +52,7 @@ export function AgentDemoPolicyPanel({client}:{client:CloudClient}){
   finally{setBusy(false)}
  };
  return <section className="tv-agent-policy-panel" aria-label="PropDAO demo authorization policy">
-  <header><ShieldCheck size={18}/><div><strong>PropDAO demo operating policy</strong><p>Define future automation boundaries. Only provider-attested demo accounts are eligible; unclassified accounts cannot be authorized.</p></div></header>
+  <header><ShieldCheck size={18}/><div><strong>PropDAO demo operating policy</strong><p>Define the PropDAO Evaluation demo account and risk envelope. Explicit confirmation permits free evaluation trading; funded and real-money accounts are excluded.</p></div></header>
   {policies.filter(p=>p.revokedAt===null&&p.expiresAt>Date.now()).map(p=><div className="tv-agent-policy-active" key={p.id}>
    <div><strong>{p.accountId+' · '+p.mode}</strong>
     <p>{'GOLDUSDC · $'+p.maxRiskUsd.toFixed(2)+' risk/order · expires '+new Date(p.expiresAt).toLocaleString()}</p>
@@ -61,7 +61,7 @@ export function AgentDemoPolicyPanel({client}:{client:CloudClient}){
   </div>)}
   <div className="tv-agent-policy-fields">
    <label>Demo evaluation account<select value={accountId} onChange={e=>setAccountId(e.target.value)}>
-    {accounts.length===0&&<option value="">No provider-attested demo account</option>}
+    {accounts.length===0&&<option value="">No owned active evaluation demo account</option>}
     {accounts.map(a=><option key={a.accountId} value={a.accountId}>{a.accountId+' · '+(a.challenge?.name||'Evaluation')}</option>)}
    </select></label>
    <label>Operating mode<select value={mode} onChange={e=>setMode(e.target.value as 'bounded-demo'|'full-demo')}>
@@ -72,13 +72,14 @@ export function AgentDemoPolicyPanel({client}:{client:CloudClient}){
    <label>Maximum daily loss (%)<input type="number" min=".1" max="2" step=".1" value={maxDailyLoss} onChange={e=>setMaxDailyLoss(Number(e.target.value))}/></label>
    <label>Maximum drawdown (%)<input type="number" min=".5" max="5" step=".5" value={maxDrawdown} onChange={e=>setMaxDrawdown(Number(e.target.value))}/></label>
    <label>Maximum open positions<select value={maxPositions} onChange={e=>setMaxPositions(Number(e.target.value))}><option value={1}>1</option><option value={2}>2</option></select></label>
-   <label>Policy expiry<select value={expires} onChange={e=>setExpires(Number(e.target.value))}>
+   <label className="tv-agent-policy-checkbox"><input type="checkbox" checked={untilStopped} onChange={e=>setUntilStopped(e.target.checked)}/> Continue running until I stop it (demo account only). Each broker robot remains subject to separate seven-day grants and risk checks.</label>
+   {!untilStopped&&<label>Policy expiry<select value={expires} onChange={e=>setExpires(Number(e.target.value))}>
     <option value={24}>24 hours</option><option value={72}>3 days</option><option value={120}>5 days</option><option value={168}>7 days</option>
-   </select></label>
+   </select></label>}
    <label className="tv-agent-policy-checkbox"><input type="checkbox" checked={allowReplace} onChange={e=>setAllowReplace(e.target.checked)}/> Permit replacing an independently approved strategy within the same limits</label>
   </div>
   <label className="tv-agent-policy-checkbox"><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)}/>
-   I explicitly approve a time-limited DEMO-account policy for the limits shown. Recording this scope does not enable autonomous trading; it remains disabled until broker-specific verification.</label>
+   I explicitly approve a time-limited DEMO-account policy for the limits shown. Recording the policy authorizes only the Evaluation demo within these limits; deployment is separately gated by risk and independent strategy verification.</label>
   <button type="button" className="tv-hub-primary" disabled={!consent||!accountId||busy} onClick={()=>void create()}>
    <ShieldCheck size={14}/> Record demo operating policy
   </button>
