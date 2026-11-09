@@ -4,14 +4,15 @@ import {z} from 'zod';
 import type {TaskRecord,TaskStepResult} from '../shared/agent-task-state.ts';
 import {runDurableTaskStep} from './agent-task-engine.ts';
 import type {OpenRouterAccounts} from './openrouter-account.ts';
+import type {PropDAOAccounts} from './propdao-account.ts';
 import type {VenueMarketData} from './venue-market-data.ts';
 import type {RecordStore} from './firestore-store.ts';
 
 const safeId=z.string().regex(/^[A-Za-z0-9_-]{8,100}$/);
 const uidSchema=z.string().min(1).max(128).regex(/^[\w:-]+$/);
 const taskSchema=z.object({
- schemaVersion:z.literal(1),id:safeId,ownerUid:uidSchema,objective:z.string().min(1).max(1200),
- status:z.enum(['queued','running','retrying','waiting_for_review','completed','blocked','failed','cancelled']),
+ schemaVersion:z.literal(1),stateVersion:z.number().int().min(1),id:safeId,ownerUid:uidSchema,objective:z.string().min(1).max(1200),
+ status:z.enum(['queued','running','retrying','paused','waiting_for_review','completed','blocked','failed','cancelled']),
  phase:z.enum(['discovery','research','authoring','validation','backtesting','evaluation','review']),
  createdAt:z.number().int(),updatedAt:z.number().int(),deadlineAt:z.number().int(),
  iteration:z.number().int().nonnegative().max(80),maxIterations:z.number().int().min(1).max(80),
@@ -20,15 +21,15 @@ const taskSchema=z.object({
   summary:z.string().max(2500),plan:z.array(z.string().max(180)).max(12),
   facts:z.array(z.string().max(250)).max(16),
   artifacts:z.array(z.object({
-   kind:z.enum(['draft','backtest','market-evidence']),id:safeId,codeHash:z.string().regex(/^[a-f0-9]{64}$/).optional(),
-   venue:z.string().optional(),asset:z.string().optional(),quality:z.enum(['reference','verified']).optional(),
+   kind:z.enum(['draft','backtest','evaluation','market-evidence']),id:safeId,codeHash:z.string().regex(/^[a-f0-9]{64}$/).optional(),
+   venue:z.string().optional(),asset:z.string().optional(),quality:z.enum(['reference','verified']).optional(),reviewEligible:z.boolean().optional(),
    updatedAt:z.string()
   })).max(20),lastResult:z.string().max(1400)
  })
 }).strict();
 type Dependencies={
  uidOrReply:(req:Request,res:Response)=>Promise<string|null>;
- accounts:OpenRouterAccounts;market:VenueMarketData;
+ accounts:OpenRouterAccounts;market:VenueMarketData;propdao?:Pick<PropDAOAccounts,'list'|'accountRisk'>;
  read:(key:string)=>Promise<string|null>;
  write:(key:string,value:string)=>Promise<void>;
  owned:(uid:string,id:string)=>Promise<{id?:string;userId?:string;ownerUid?:string;asset?:string;venue?:string}|null>;
@@ -46,7 +47,7 @@ const validSecret=(presented:unknown,actual:string|undefined)=>{
  const a=createHash('sha256').update(presented).digest(),b=createHash('sha256').update('Bearer '+actual).digest();
  return timingSafeEqual(a,b);
 };
-async function callWorker(uid:string,id:string,action:'start'|'status'|'cancel'|'resume',body?:unknown,request:typeof fetch=fetch){
+async function callWorker(uid:string,id:string,action:'start'|'status'|'cancel'|'pause'|'resume',body?:unknown,request:typeof fetch=fetch){
  const target=process.env.VIBES_TASK_WORKER_URL,secret=process.env.VIBES_TASK_INTERNAL_SECRET;
  if(!taskRuntimeConfigured())throw Error('Durable agent task runtime is not configured');
  const uri=new URL('/tasks/'+id+'/'+action,target);
@@ -65,7 +66,7 @@ export function registerAgentTaskRoutes(app:Express,deps:Dependencies){
  app.post('/api/agent-tasks',async(req,res)=>{
   const uid=await deps.uidOrReply(req,res);if(!uid)return;
   if(!taskRuntimeConfigured())return res.status(503).json({error:'Durable task runtime has not been connected.'});
-  const input=z.object({objective:z.string().min(12).max(1200),maxIterations:z.number().int().min(1).max(80).optional()}).strict().safeParse(req.body);
+  const input=z.object({objective:z.string().min(12).max(1200),maxIterations:z.number().int().min(1).max(80).optional(),runtimeMinutes:z.number().int().min(5).max(10080).optional()}).strict().safeParse(req.body);
   if(!input.success)return res.status(400).json({error:'Describe a specific task objective (12–1,200 characters).'});
   const id=randomUUID(),path='users/'+uid+'/agent-tasks/'+id;
   try{
@@ -100,7 +101,7 @@ export function registerAgentTaskRoutes(app:Express,deps:Dependencies){
   try{return res.json({task:await callWorker(uid,parsed.data,'status')})}
   catch(error){return res.status(503).json({error:error instanceof Error?error.message:'Task temporarily unavailable'});}
  });
- for(const action of ['cancel','resume'] as const)app.post('/api/agent-tasks/:id/'+action,async(req,res)=>{
+ for(const action of ['cancel','pause','resume'] as const)app.post('/api/agent-tasks/:id/'+action,async(req,res)=>{
   const uid=await deps.uidOrReply(req,res);if(!uid)return;
   const parsed=safeId.safeParse(req.params.id);
   if(!parsed.success)return res.status(400).json({error:'Invalid task ID'});

@@ -16,6 +16,7 @@ import {selectOpenRouterApiKey} from './openrouter-credentials.ts';
 import {chatToolRoutes} from './chat-tools.ts';
 import {registerAIPlatformRoutes} from './ai-platform.ts';
 import {registerAgentTaskRoutes} from './agent-task-routes.ts';
+import {agentDemoPolicyRoutes} from './agent-demo-policy-routes.ts';
 import {phase2FeatureEnabled,phase2SharedModelTestEnabled} from './phase2-feature-gates.ts';
 import {createAgentBacktestTool,agentBacktestInputSchema} from './agent-backtest-tools.ts';
 import {createBrokerConnectionReadTool} from './agent-broker-read.ts';
@@ -178,9 +179,10 @@ registerGdeltNews(app,{uid:firebaseUidOrReply,news:gdeltNews});
 codeWatchRoutes(app,{uid:firebaseUidOrReply,store:marketplace.store,outputs:watchOutputs(app,marketplace.store,openRouterAccounts)});
 const economy=new BotEconomy(marketplace.store,{read:readR2Object,write:writeR2Object,root:userBotRoot},marketplace);
 const agentRegistry=new AgentRegistry(marketplace.store);
+agentDemoPolicyRoutes(app,{uid:firebaseUidOrReply,store:marketplace.store,accounts:propdaoAccounts,configured:()=>FirestoreStore.configured()});
 registerAgentTaskRoutes(app,{
  uidOrReply:firebaseUidOrReply,accounts:openRouterAccounts,market:venueMarketData,
- read:readR2Object,write:writeR2Object,tasks:marketplace.store,
+ read:readR2Object,write:writeR2Object,tasks:marketplace.store,propdao:propdaoAccounts,
  owned:async(uid,id)=>{
   if(!FirestoreStore.configured())return null;
   const record=await marketplace.store.get('users/'+uid+'/bots/'+id);

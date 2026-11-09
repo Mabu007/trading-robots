@@ -19,7 +19,7 @@ const terminal=new Set(['waiting_for_review','completed','blocked','failed','can
 export function AgentTaskPanel({client}:{client:CloudClient}){
  const [objective,setObjective]=useState('Research and validate a PropDAO GOLDUSDC robot for a demo evaluation. Investigate unrealistic stop losses, run isolated reference backtests, report risks and prepare a candidate for review.');
  const [task,setTask]=useState<TaskRecord|null>(null);
- const [budget,setBudget]=useState(12);
+ const [budget,setBudget]=useState(12),[runtimeMinutes,setRuntimeMinutes]=useState(60);
  const [busy,setBusy]=useState(false),[error,setError]=useState('');
  const [draft,setDraft]=useState('');
  const [recent,setRecent]=useState<{id:string;objective:string;createdAt:number;status:string}[]>([]);
@@ -52,7 +52,7 @@ export function AgentTaskPanel({client}:{client:CloudClient}){
   if(busy||!objective.trim())return;
   setBusy(true);setError('');setDraft('');
   try{
-   const result=await taskRequest<{task:TaskRecord}>(client,'/api/agent-tasks','POST',{objective:objective.trim(),maxIterations:budget});
+   const result=await taskRequest<{task:TaskRecord}>(client,'/api/agent-tasks','POST',{objective:objective.trim(),maxIterations:budget,runtimeMinutes});
    setTask(result.task);
    setRecent(items=>[{id:result.task.id,objective:result.task.objective,createdAt:result.task.createdAt,status:result.task.status},...items]);
   }catch(cause){setError(cause instanceof Error?cause.message:'Could not create task')}
@@ -88,7 +88,14 @@ export function AgentTaskPanel({client}:{client:CloudClient}){
     <option value={12}>Standard · up to 12 checkpoints</option>
     <option value={60}>Deep research · up to 60 checkpoints (higher AI cost)</option>
    </select>
-   <small>Tasks can resume across interruptions for up to one hour. AI model usage is billed to your connected OpenRouter key. No live orders are placed.</small>
+   <label htmlFor="tv-agent-task-runtime">Task deadline</label>
+   <select id="tv-agent-task-runtime" value={runtimeMinutes} onChange={event=>setRuntimeMinutes(Number(event.target.value))}>
+    <option value={60}>1 hour research</option>
+    <option value={360}>6 hours (research with breaks)</option>
+    <option value={1440}>1 day (limited iterations)</option>
+    <option value={7200}>5 days (limited iterations)</option>
+   </select>
+   <small>Tasks checkpoint between requests; the deadline is not continuous AI execution. Usage is billed to your connected OpenRouter key. No live orders are placed by research tasks.</small>
    <button type="button" className="tv-hub-primary" disabled={busy||objective.trim().length<12} onClick={()=>void create()}>Start research task <ArrowRight size={15}/></button>
   </div>:<div className="tv-agent-task-progress">
    <div className="tv-agent-task-status"><strong>{task.phase.toUpperCase()} · {task.status.replaceAll('_',' ')}</strong><span>Step {task.iteration} / {task.maxIterations}</span></div>

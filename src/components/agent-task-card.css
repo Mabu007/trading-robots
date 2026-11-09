@@ -1,0 +1,10 @@
+.tv-durable-task-card{display:grid;gap:10px;padding:14px;border:1px solid var(--border,#d4dcdc);border-radius:12px;max-width:650px}
+.tv-durable-task-card>header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px}
+.tv-durable-task-card>header>div,.tv-task-meta span,.tv-durable-task-card small{display:flex;align-items:center;gap:6px}
+.tv-durable-task-card>header>span{font-size:.78rem;text-transform:capitalize;color:var(--text-muted,#68777c)}
+.tv-durable-task-card p{margin:0;font-size:.86rem;line-height:1.5}
+.tv-task-meta{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;font-size:.74rem;color:var(--text-muted,#68777c)}
+.tv-task-controls{display:flex;flex-wrap:wrap;gap:8px}
+.tv-task-controls button{background:transparent;color:inherit;display:inline-flex;align-items:center;gap:5px;border:1px solid var(--border,#d4dcdc);border-radius:8px;padding:6px 10px;cursor:pointer;font-size:.82rem}
+.tv-durable-task-card small{color:var(--text-muted,#68777c);font-size:.72rem}
+.tv-task-review{display:flex;align-items:flex-start;gap:6px}

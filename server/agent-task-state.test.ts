@@ -13,13 +13,18 @@ describe('durable task memory and completion gating',()=>{
   const result=applyTaskStep(state,{phase:'review',summary:'It works',plan:[],facts:[],artifacts:[],next:'completed',message:'done'},t+10);
   expect(result.status).toBe('queued');
  });
- it('requires matching revision between draft and reference backtest before review',()=>{
+ it('requires deterministic evaluation receipt before review',()=>{
   const state=initialTask('u','task_12345678','Build a PropDAO strategy',t);
   const step=(hash:string)=>({phase:'evaluation' as const,summary:'tested',plan:[],facts:[],artifacts:[
    {kind:'draft' as const,id:'draft_aabbcc11',codeHash:'aabb',updatedAt:'2026-11-09T10:00:00Z'},
    {kind:'backtest' as const,id:'backtest_aaccff11',codeHash:hash,quality:'reference' as const,updatedAt:'2026-11-09T10:00:00Z'}],next:'completed' as const,message:'done'});
   expect(applyTaskStep(state,step('mismatch'),t+10).status).toBe('queued');
-  expect(applyTaskStep(state,step('aabb'),t+10).status).toBe('waiting_for_review');
+  expect(applyTaskStep(state,step('aabb'),t+10).status).toBe('queued');
+  const certified={...step('aabb'),artifacts:[...step('aabb').artifacts,{
+   kind:'evaluation' as const,id:'evaluation_11223344',codeHash:'aabb',quality:'reference' as const,
+   reviewEligible:true,updatedAt:'2026-11-09T10:00:00Z'
+  }]};
+  expect(applyTaskStep(state,certified,t+10).status).toBe('waiting_for_review');
  });
  it('caps summary and structured evidence, does not store raw chain of thought',()=>{
   const state=initialTask('u','task_12345678','How is gold doing?',t);

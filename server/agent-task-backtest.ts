@@ -8,15 +8,17 @@ import type {VenueMarketData} from './venue-market-data.ts';
 const digest=(text:string)=>createHash('sha256').update(text).digest('hex');
 /** No broker orders, no host-bound code execution, no simulated account balances. */
 export async function evaluateAgentDraft(input:{
- source:string;coin:string;lookbackCandles:number;market:Pick<VenueMarketData,'hyperliquidCandles'>;now?:number
+ source:string;coin:string;lookbackCandles:number;market:Pick<VenueMarketData,'hyperliquidCandles'>;now?:number;windowIndex?:number
 }){
- const {source,coin,lookbackCandles,market}=input,now=input.now??Date.now();
- if(!/^[A-Za-z0-9:@._-]{1,64}$/.test(coin)||!Number.isInteger(lookbackCandles)||lookbackCandles<120||lookbackCandles>600)throw Error('Invalid reference backtest request');
+ const {source,coin,lookbackCandles,market}=input,now=input.now??Date.now(),windowIndex=input.windowIndex??0;
+ if(!/^[A-Za-z0-9:@._-]{1,64}$/.test(coin)||!Number.isInteger(lookbackCandles)||lookbackCandles<120||lookbackCandles>600||!Number.isInteger(windowIndex)||windowIndex<0||windowIndex>3)throw Error('Invalid reference backtest request');
  const config=parseStrategyConfig(source);
  if(config.timeframes.length>4||config.timeframes.some((tf:string)=>!isTimeframe(tf))||!config.timeframes.includes(config.executionTimeframe))throw Error('Unsupported strategy timeframe set');
  const datasets:Record<string,ReturnType<typeof validateCandles>>={},coverage=[];
+ const longest=Math.max(...config.timeframes.map((tf:string)=>intervalMs[tf as keyof typeof intervalMs]));
+ const asOf=now-windowIndex*lookbackCandles*longest;
  for(const timeframe of config.timeframes as string[]){
-  const period=intervalMs[timeframe as keyof typeof intervalMs],end=Math.floor(now/period)*period;
+  const period=intervalMs[timeframe as keyof typeof intervalMs],end=Math.floor(asOf/period)*period;
   const from=end-lookbackCandles*period;
   const bars=await market.hyperliquidCandles({asset:coin,timeframe,from:new Date(from).toISOString(),to:new Date(end).toISOString()});
   if(bars.source!=='Hyperliquid'||bars.asset!==coin||bars.timeframe!==timeframe||bars.missingCandles>0||bars.observedGaps>0)throw Error('Missing or mismatched public '+timeframe+' candle coverage');
@@ -34,7 +36,7 @@ export async function evaluateAgentDraft(input:{
  },config.riskReward);
  const tradeSample=simulated.trades.slice(-15).map(t=>({id:t.id,time:t.exitTime,pnlR:t.pnl,reason:t.reason}));
  const worstLossR=Math.min(0,...simulated.trades.map(t=>t.pnl));
- return {codeHash:digest(source),venue:'hyperliquid-reference',coin,coverage,
+ return {codeHash:digest(source),venue:'hyperliquid-reference',source:'Hyperliquid public completed candles',coin,coverage,windowIndex,dataGaps:0,
   tradeCount:simulated.trades.length,worstLossR,metrics:simulated.metrics,tradeSample,
   assumptions:{spread:config.backtestSpread||0,slippage:config.backtestSlippage||0,commissionR:config.backtestCommissionR||0},
   quality:'reference' as const,

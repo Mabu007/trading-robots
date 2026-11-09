@@ -21,10 +21,10 @@ export class DurableAgentTask extends DurableObject<Env>{
   if(path==='/start'&&req.method==='POST'){
    if(state)return Response.json({task:state});
    if(Number(req.headers.get('content-length')||0)>4000)return Response.json({error:'Task request too large'},{status:413});
-   const body=await req.json<{objective?:string;maxIterations?:number}>().catch(()=>null);
+   const body=await req.json<{objective?:string;maxIterations?:number;runtimeMinutes?:number}>().catch(()=>null);
    if(!body||typeof body.objective!=='string')return Response.json({error:'Task objective required'},{status:400});
    try{
-    const created=initialTask(uid,id,body.objective,Date.now(),body.maxIterations);
+    const created=initialTask(uid,id,body.objective,Date.now(),body.maxIterations,body.runtimeMinutes);
     await this.ctx.storage.put('task',created);
     await this.ctx.storage.setAlarm(Date.now()+1000);
     return Response.json({task:created},{status:201});
@@ -33,14 +33,20 @@ export class DurableAgentTask extends DurableObject<Env>{
   if(!state)return Response.json({error:'Unknown task'},{status:404});
   if(path==='/status'&&req.method==='GET')return Response.json({task:state});
   if(path==='/cancel'&&req.method==='POST'){
-   const updated={...state,status:'cancelled' as const,leaseId:undefined,updatedAt:Date.now()};
+   const updated={...state,status:'cancelled' as const,leaseId:undefined,stateVersion:state.stateVersion+1,updatedAt:Date.now()};
    await this.ctx.storage.put('task',updated);
    await this.ctx.storage.deleteAlarm();
    return Response.json({task:updated});
   }
+  if(path==='/pause'&&req.method==='POST'){
+   if(['completed','cancelled','failed'].includes(state.status))return Response.json({error:'Task is already terminal'},{status:409});
+   const updated={...state,status:'paused' as const,leaseId:undefined,stateVersion:state.stateVersion+1,updatedAt:Date.now()};
+   await this.ctx.storage.put('task',updated);await this.ctx.storage.deleteAlarm();
+   return Response.json({task:updated});
+  }
   if(path==='/resume'&&req.method==='POST'){
-   if(!['blocked','retrying'].includes(state.status)||state.iteration>=state.maxIterations||Date.now()>state.deadlineAt)return Response.json({error:'Task cannot resume. Create a new task with revised scope.'},{status:409});
-   const updated={...state,status:'queued' as const,failureCount:0,nextRunAt:Date.now(),updatedAt:Date.now()};
+   if(!['blocked','retrying','paused'].includes(state.status)||state.iteration>=state.maxIterations||Date.now()>state.deadlineAt)return Response.json({error:'Task cannot resume. Create a new task with revised scope.'},{status:409});
+   const updated={...state,status:'queued' as const,failureCount:0,nextRunAt:Date.now(),updatedAt:Date.now(),stateVersion:state.stateVersion+1};
    await this.ctx.storage.put('task',updated);await this.ctx.storage.setAlarm(Date.now()+1000);
    return Response.json({task:updated});
   }
@@ -51,12 +57,12 @@ export class DurableAgentTask extends DurableObject<Env>{
   if(!task||!['queued','retrying','running'].includes(task.status))return;
   const now=Date.now();
   if(now>task.deadlineAt||task.iteration>=task.maxIterations){
-   await this.ctx.storage.put('task',{...task,status:'blocked',lastError:'Task time or model-call budget exhausted',updatedAt:now,leaseId:undefined});return;
+   await this.ctx.storage.put('task',{...task,status:'blocked',lastError:'Task time or model-call budget exhausted',updatedAt:now,stateVersion:task.stateVersion+1,leaseId:undefined});return;
   }
   if(task.nextRunAt>now){await this.ctx.storage.setAlarm(task.nextRunAt);return;}
   // The lease identifies the callback. A crashed isolate re-runs the same idempotent iteration.
   const leaseId=task.id+':'+task.iteration;
-  const current={...task,status:'running' as const,leaseId,updatedAt:now};
+  const current={...task,status:'running' as const,leaseId,updatedAt:now,stateVersion:task.stateVersion+1};
   await this.ctx.storage.put('task',current);
   await this.ctx.storage.setAlarm(now+90_000);
   try{
@@ -69,17 +75,17 @@ export class DurableAgentTask extends DurableObject<Env>{
    const result=await reply.json<TaskStepResult>();
    if(!result||!['continue','completed','waiting_for_review','blocked'].includes(result.next)||!Array.isArray(result.artifacts)||!Array.isArray(result.facts)||!Array.isArray(result.plan))throw Error('Invalid task step receipt');
    const latest=await this.ctx.storage.get<TaskRecord>('task');
-   if(!latest||latest.status==='cancelled'||latest.leaseId!==leaseId)return;
+   if(!latest||latest.status==='cancelled'||latest.status==='paused'||latest.leaseId!==leaseId)return;
    const next=applyTaskStep(latest,result,Date.now());
    await this.ctx.storage.put('task',next);
    if(next.status==='queued')await this.ctx.storage.setAlarm(next.nextRunAt);
    else await this.ctx.storage.deleteAlarm();
   }catch(error){
    const latest=await this.ctx.storage.get<TaskRecord>('task');
-   if(!latest||latest.status==='cancelled'||latest.leaseId!==leaseId)return;
+   if(!latest||latest.status==='cancelled'||latest.status==='paused'||latest.leaseId!==leaseId)return;
    const failures=latest.failureCount+1,paused=failures>=4||Date.now()>latest.deadlineAt;
    const retryAt=Date.now()+Math.min(90_000,2000*2**failures);
-   await this.ctx.storage.put('task',{...latest,status:paused?'blocked':'retrying',lastError:error instanceof Error?error.message.slice(0,180):'Task step failed',failureCount:failures,nextRunAt:retryAt,updatedAt:Date.now(),leaseId:undefined});
+   await this.ctx.storage.put('task',{...latest,status:paused?'blocked':'retrying',lastError:error instanceof Error?error.message.slice(0,180):'Task step failed',failureCount:failures,nextRunAt:retryAt,updatedAt:Date.now(),stateVersion:latest.stateVersion+1,leaseId:undefined});
    if(!paused)await this.ctx.storage.setAlarm(retryAt);
   }
  }
@@ -88,7 +94,7 @@ export default {async fetch(req:Request,env:Env){
  if(!(await authorized(req.headers.get('authorization')||'',env.VIBES_TASK_INTERNAL_SECRET)))return Response.json({error:'Internal authorization required'},{status:401});
  const path=new URL(req.url).pathname.split('/').filter(Boolean);
  if(path.length===1&&path[0]==='health')return Response.json({ready:true,runtime:'durable-task-memory'});
- if(path.length!==3||path[0]!=='tasks'||!idPattern.test(path[1])||!['start','status','cancel','resume'].includes(path[2]))return Response.json({error:'Unknown task route'},{status:404});
+ if(path.length!==3||path[0]!=='tasks'||!idPattern.test(path[1])||!['start','status','cancel','pause','resume'].includes(path[2]))return Response.json({error:'Unknown task route'},{status:404});
  const uid=req.headers.get('X-TV-UID')||'';
  if(!uidPattern.test(uid))return Response.json({error:'Invalid owner'},{status:403});
  const key=new TextEncoder().encode(uid+':'+path[1]);const digest=await crypto.subtle.digest('SHA-256',key);
