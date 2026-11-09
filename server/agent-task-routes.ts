@@ -7,6 +7,7 @@ import type {OpenRouterAccounts} from './openrouter-account.ts';
 import type {PropDAOAccounts} from './propdao-account.ts';
 import type {VenueMarketData} from './venue-market-data.ts';
 import {FirestoreStore,type RecordStore} from './firestore-store.ts';
+import {validateSkill,skillPrompt,type UserSkill} from '../src/skills.ts';
 import {DemoPolicyStore} from './agent-demo-policy.ts';
 import {activateDemoRobot} from './agent-autonomy-activation.ts';
 import {superviseDemoTask} from './agent-autonomy-supervisor.ts';
@@ -14,14 +15,16 @@ import type {PropDAOLiveService} from './propdao-live-routes.ts';
 
 const safeId=z.string().regex(/^[A-Za-z0-9_-]{8,100}$/);
 const uidSchema=z.string().min(1).max(128).regex(/^[\w:-]+$/);
+const questionSchema=z.object({id:safeId,prompt:z.string().min(10).max(440),options:z.tuple([z.string().min(5).max(185),z.string().min(5).max(185)]),context:z.string().max(310),createdAt:z.number().int()}).strict();
 const taskSchema=z.object({
  schemaVersion:z.literal(1),stateVersion:z.number().int().min(1),id:safeId,ownerUid:uidSchema,objective:z.string().min(1).max(1200),
- status:z.enum(['queued','running','retrying','paused','activating','monitoring','stopping','cooldown','waiting_for_review','completed','blocked','failed','cancelled']),
+ status:z.enum(['queued','running','retrying','paused','activating','monitoring','stopping','cooldown','waiting_for_review','waiting_for_input','completed','blocked','failed','cancelled']),
  phase:z.enum(['discovery','research','authoring','validation','backtesting','evaluation','review']),
  createdAt:z.number().int(),updatedAt:z.number().int(),deadlineAt:z.number().int(),
  iteration:z.number().int().nonnegative().max(80),maxIterations:z.number().int().min(1).max(80),
  failureCount:z.number().int().nonnegative().max(100),nextRunAt:z.number().int(),
- leaseId:z.string().optional(),lastError:z.string().optional(),
+ leaseId:z.string().optional(),lastError:z.string().optional(),question:questionSchema.optional(),
+ usage:z.object({inputTokens:z.number().nonnegative(),outputTokens:z.number().nonnegative(),estimatedModelUsd:z.number().nonnegative(),steps:z.number().int().nonnegative()}).strict().optional(),
  autonomy:z.object({
   enabled:z.literal(true),stage:z.enum(['researching','activating','monitoring','stopping','cooldown']),
   stopRequested:z.boolean(),botId:safeId.optional(),codeHash:z.string().regex(/^[a-f0-9]{64}$/).optional(),
@@ -65,7 +68,7 @@ const validSecret=(presented:unknown,actual:string|undefined)=>{
  const a=createHash('sha256').update(presented).digest(),b=createHash('sha256').update('Bearer '+actual).digest();
  return timingSafeEqual(a,b);
 };
-async function callWorker(uid:string,id:string,action:'start'|'status'|'cancel'|'pause'|'resume'|'policy',body?:unknown,request:typeof fetch=fetch){
+async function callWorker(uid:string,id:string,action:'start'|'status'|'cancel'|'pause'|'resume'|'policy'|'answer',body?:unknown,request:typeof fetch=fetch){
  const target=process.env.VIBES_TASK_WORKER_URL,secret=process.env.VIBES_TASK_INTERNAL_SECRET;
  if(!taskRuntimeConfigured())throw Error('Durable agent task runtime is not configured');
  const uri=new URL('/tasks/'+id+'/'+action,target);
@@ -140,6 +143,20 @@ export function registerAgentTaskRoutes(app:Express,deps:Dependencies){
     return res.json({task});
    }
   catch(error){return res.status(409).json({error:error instanceof Error?error.message:'Task could not be updated'});}
+ });
+ app.post('/api/agent-tasks/:id/answer',async(req,res)=>{
+  const uid=await deps.uidOrReply(req,res);if(!uid)return;
+  const id=safeId.safeParse(req.params.id),response=z.object({
+   questionId:safeId,answer:z.string().trim().min(1).max(600)
+  }).strict().safeParse(req.body);
+  if(!id.success||!response.success)return res.status(400).json({error:'Invalid question response'});
+  try{
+   const task=await callWorker(uid,id.data,'answer',response.data);
+   await deps.tasks.put('users/'+uid+'/agent-tasks/'+id.data,{
+    id:id.data,ownerUid:uid,objective:task.objective,createdAt:task.createdAt,status:task.status
+   });
+   return res.json({task,notice:'Clarification recorded. No new broker authorization was granted.'});
+  }catch(error){return res.status(409).json({error:error instanceof Error?error.message:'The question could not be answered'});}
  });
  app.post('/api/agent-tasks/:id/policy',async(req,res)=>{
   const uid=await deps.uidOrReply(req,res);if(!uid)return;
@@ -251,7 +268,22 @@ export function registerAgentTaskRoutes(app:Express,deps:Dependencies){
    const prior=await deps.tasks.get(receiptPath);
    if(prior?.taskId===task.id&&prior.ownerUid===task.ownerUid&&prior.iteration===task.iteration&&prior.result)
     return res.json(prior.result);
-   const receipt=sanitizeTaskStepResult(await runDurableTaskStep(task,deps));
+   const receipt=sanitizeTaskStepResult(await runDurableTaskStep(task,{
+    ...deps,
+    loadSkills:async(owner,objective)=>{
+     if(!FirestoreStore.configured())return '';
+     const rows=await deps.tasks.query('users/'+owner+'/skills');
+     const valid:UserSkill[]=[];
+     for(const row of rows.slice(0,30)){
+      try{valid.push(validateSkill({id:String(row.id||''),name:String(row.name||''),
+       description:String(row.description||''),instructions:String(row.instructions||''),
+       triggers:Array.isArray(row.triggers)?row.triggers:[],
+       enabled:row.enabled===true,alwaysOn:row.alwaysOn===true}));}catch{}
+     }
+     return skillPrompt(objective,valid).replace(/sk-or-v1-[a-z0-9]{16,}/gi,'[REDACTED]')
+      .replace(/Bearer\s+[a-z0-9._-]{24,}/gi,'Bearer [REDACTED]');
+    }
+   }));
    await deps.tasks.put(receiptPath,{taskId:task.id,ownerUid:task.ownerUid,iteration:task.iteration,result:receipt,savedAt:Date.now()});
    return res.json(receipt satisfies TaskStepResult);
   }catch(error){

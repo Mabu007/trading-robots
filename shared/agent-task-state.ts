@@ -1,6 +1,7 @@
 /** User-scoped durable task contract. Stores decisions and evidence, never chain-of-thought or credentials. */
+import type {TaskQuestion} from './agent-task-question.ts';
 export type TaskPhase='discovery'|'research'|'authoring'|'validation'|'backtesting'|'evaluation'|'review';
-export type TaskStatus='queued'|'running'|'retrying'|'paused'|'activating'|'monitoring'|'stopping'|'cooldown'|'waiting_for_review'|'completed'|'blocked'|'failed'|'cancelled';
+export type TaskStatus='queued'|'running'|'retrying'|'paused'|'activating'|'monitoring'|'stopping'|'cooldown'|'waiting_for_review'|'waiting_for_input'|'completed'|'blocked'|'failed'|'cancelled';
 export type TaskArtifact={kind:'draft'|'draft-fragment'|'backtest'|'evaluation'|'market-evidence';id:string;codeHash?:string;venue?:string;asset?:string;quality?:'reference'|'verified';reviewEligible?:boolean;updatedAt:string};
 export type TaskMemory={summary:string;plan:string[];facts:string[];artifacts:TaskArtifact[];lastResult:string};
 export type TaskRecord={
@@ -9,11 +10,14 @@ export type TaskRecord={
  failureCount:number;nextRunAt:number;lastError?:string;leaseId?:string;
  autonomy?:{enabled:true;stage:'researching'|'activating'|'monitoring'|'stopping'|'cooldown';stopRequested:boolean;botId?:string;codeHash?:string;lastMonitorAt?:number;nextResearchAt?:number;completedCycles:number;policyRequired:true;lastBrokerExposure?:'open'|'pending'|'flat'|'unknown';lastDeploymentOutcome?:string};
  policy?:{policyId:string;fingerprint:string;accountId:string;expiresAt:number;mode:'bounded-demo'|'full-demo';linkedAt:number};
+ question?:TaskQuestion;
+ usage?:{inputTokens:number;outputTokens:number;estimatedModelUsd:number;steps:number};
  memory:TaskMemory;
 };
 export type TaskStepResult={
  phase:TaskPhase;summary:string;plan:string[];facts:string[];artifacts:TaskArtifact[];
- next:'continue'|'completed'|'waiting_for_review'|'blocked';message:string;
+ next:'continue'|'completed'|'waiting_for_review'|'waiting_for_input'|'blocked';message:string;question?:TaskQuestion;
+ usage?:{inputTokens:number;outputTokens:number;estimatedModelUsd:number};
 };
 export const emptyTaskMemory=():TaskMemory=>({summary:'',plan:[],facts:[],artifacts:[],lastResult:''});
 const compact=(s:unknown,n:number)=>typeof s==='string'?s
@@ -29,7 +33,13 @@ export function sanitizeTaskStepResult(r:TaskStepResult):TaskStepResult{
   summary:compact(r.summary,2500),message:compact(r.message,1400),
   plan:(r.plan||[]).slice(0,12).map(x=>compact(x,180)),
   facts:(r.facts||[]).slice(-16).map(x=>compact(x,250)),
-  artifacts:(r.artifacts||[]).filter(x=>x&&/^[a-z0-9_-]{8,100}$/i.test(x.id)).slice(0,12)
+  artifacts:(r.artifacts||[]).filter(x=>x&&/^[a-z0-9_-]{8,100}$/i.test(x.id)).slice(0,12),
+  ...(r.usage&&Number.isFinite(r.usage.inputTokens)&&Number.isFinite(r.usage.outputTokens)&&Number.isFinite(r.usage.estimatedModelUsd)?{usage:r.usage}:{}),
+  ...(r.next==='waiting_for_input'&&r.question?{question:{
+   id:compact(r.question.id,90),prompt:compact(r.question.prompt,420),
+   options:[compact(r.question.options[0],180),compact(r.question.options[1],180)] as [string,string],
+   context:compact(r.question.context,300),createdAt:r.question.createdAt
+  }}:{})
  };
 }
 export function applyTaskStep(task:TaskRecord,result:TaskStepResult,now:number):TaskRecord{
@@ -48,13 +58,18 @@ export function applyTaskStep(task:TaskRecord,result:TaskStepResult,now:number):
   memory.artifacts.some(c=>c.kind==='backtest'&&c.codeHash===a.codeHash));
  // Research-only tasks may complete without a draft; strategy tasks must have a validated simulation and stop for review.
  const isStrategy=/\b(strategy|strategies|robot|bot|backtest|propdao|pass.*firm)\b/i.test(task.objective);
- let status:TaskStatus=result.next==='blocked'?'blocked':result.next==='waiting_for_review'?'waiting_for_review':result.next==='completed'?'completed':'queued';
+ let status:TaskStatus=result.next==='waiting_for_input'?'waiting_for_input':result.next==='blocked'?'blocked':result.next==='waiting_for_review'?'waiting_for_review':result.next==='completed'?'completed':'queued';
  if(isStrategy&&['completed','waiting_for_review'].includes(status))status=hasReviewableEvidence?'waiting_for_review':'queued';
  if(task.autonomy?.enabled&&status==='waiting_for_review')status=task.policy&&Date.now()<task.policy.expiresAt?'activating':'waiting_for_review';
  const iteration=task.iteration+1;
  if(status==='queued'&&(iteration>=task.maxIterations||now>=task.deadlineAt))status='blocked';
  return {...task,phase:result.phase,status,iteration,updatedAt:now,stateVersion:task.stateVersion+1,leaseId:undefined,failureCount:0,nextRunAt:now+1200,
-  lastError:status==='blocked'&&result.next!=='blocked'?'Task work budget was exhausted before the completion gate passed.':undefined,memory};
+  lastError:status==='blocked'&&result.next!=='blocked'?'Task work budget was exhausted before the completion gate passed.':undefined,
+  question:status==='waiting_for_input'?result.question:undefined,
+  ...(result.usage?{usage:{inputTokens:(task.usage?.inputTokens||0)+result.usage.inputTokens,
+   outputTokens:(task.usage?.outputTokens||0)+result.usage.outputTokens,
+   estimatedModelUsd:(task.usage?.estimatedModelUsd||0)+result.usage.estimatedModelUsd,
+   steps:(task.usage?.steps||0)+1}}:{}),memory};
 }
 export function initialTask(ownerUid:string,id:string,objective:string,now=Date.now(),maxIterations=12,runtimeMinutes=60,continuous=false):TaskRecord{
  if(!/^[a-zA-Z0-9_-]{8,100}$/.test(id)||!ownerUid||ownerUid.length>128||!objective.trim()||objective.length>1200||!Number.isInteger(runtimeMinutes)||runtimeMinutes<5||runtimeMinutes>10080)throw Error('Invalid task identity, deadline or objective');

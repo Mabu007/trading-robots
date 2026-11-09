@@ -1,5 +1,6 @@
 import {DurableObject} from 'cloudflare:workers';
 import {applyTaskStep,initialTask,type TaskRecord,type TaskStepResult} from '../shared/agent-task-state.ts';
+import {substantialReturnQuestion,validTaskAnswer} from '../shared/agent-task-question.ts';
 
 type Env={TASKS:DurableObjectNamespace;VIBES_TASK_INTERNAL_SECRET:string;VIBES_CONTROL_URL:string};
 async function authorized(header:string,secret:string){
@@ -26,13 +27,30 @@ export class DurableAgentTask extends DurableObject<Env>{
    if(!body||typeof body.objective!=='string')return Response.json({error:'Task objective required'},{status:400});
    try{
     const created=initialTask(uid,id,body.objective,Date.now(),body.maxIterations,body.runtimeMinutes,body.continuous===true);
-    await this.ctx.storage.put('task',created);
-    await this.ctx.storage.setAlarm(Date.now()+1000);
-    return Response.json({task:created},{status:201});
+    const question=substantialReturnQuestion(created.objective,created.createdAt);
+    const pending:TaskRecord=question?{...created,status:'waiting_for_input',question}:created;
+    await this.ctx.storage.put('task',pending);
+    if(!question)await this.ctx.storage.setAlarm(Date.now()+1000);
+    return Response.json({task:pending},{status:201});
    }catch{return Response.json({error:'Invalid objective'},{status:400})}
   }
   if(!state)return Response.json({error:'Unknown task'},{status:404});
   if(path==='/status'&&req.method==='GET')return Response.json({task:state});
+  if(path==='/answer'&&req.method==='POST'){
+   if(state.status!=='waiting_for_input'||!state.question)return Response.json({error:'No unanswered user question'},{status:409});
+   const body=await req.json<{questionId?:string;answer?:string}>().catch(()=>null);
+   if(body?.questionId!==state.question.id)return Response.json({error:'The question has changed; reload task status'},{status:409});
+   try{
+    const answer=validTaskAnswer(state.question,body.answer);
+    const updated:TaskRecord={...state,status:'queued',question:undefined,leaseId:undefined,
+     nextRunAt:Date.now(),updatedAt:Date.now(),stateVersion:state.stateVersion+1,
+     memory:{...state.memory,facts:[...state.memory.facts,'User clarified '+state.question.id+': '+answer].slice(-16),
+      lastResult:'User clarification received. Resuming task with the updated constraints.'}};
+    await this.ctx.storage.put('task',updated);
+    await this.ctx.storage.setAlarm(Date.now()+1000);
+    return Response.json({task:updated});
+   }catch{return Response.json({error:'Choose one of the two options or write a valid Other answer'},{status:400})}
+  }
   if(path==='/policy'&&req.method==='POST'){
    if(['completed','cancelled','failed'].includes(state.status))return Response.json({error:'Cannot link a policy to a terminal task'},{status:409});
    const body=await req.json<Partial<NonNullable<TaskRecord['policy']>>>().catch(()=>null);
@@ -196,7 +214,7 @@ export default {async fetch(req:Request,env:Env){
  if(!(await authorized(req.headers.get('authorization')||'',env.VIBES_TASK_INTERNAL_SECRET)))return Response.json({error:'Internal authorization required'},{status:401});
  const path=new URL(req.url).pathname.split('/').filter(Boolean);
  if(path.length===1&&path[0]==='health')return Response.json({ready:true,runtime:'durable-task-memory'});
- if(path.length!==3||path[0]!=='tasks'||!idPattern.test(path[1])||!['start','status','cancel','pause','resume','policy'].includes(path[2]))return Response.json({error:'Unknown task route'},{status:404});
+ if(path.length!==3||path[0]!=='tasks'||!idPattern.test(path[1])||!['start','status','cancel','pause','resume','policy','answer'].includes(path[2]))return Response.json({error:'Unknown task route'},{status:404});
  const uid=req.headers.get('X-TV-UID')||'';
  if(!uidPattern.test(uid))return Response.json({error:'Invalid owner'},{status:403});
  const key=new TextEncoder().encode(uid+':'+path[1]);const digest=await crypto.subtle.digest('SHA-256',key);

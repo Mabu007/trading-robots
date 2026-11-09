@@ -1,8 +1,10 @@
+import {substantialReturnQuestion} from '../shared/agent-task-question.ts';
 /** Only high-confidence multi-step requests bypass ordinary chat. */
 export function durableTaskIntent(message:unknown):boolean {
  if(typeof message!=='string')return false;
  const text=message.trim().slice(0,1250);
  if(text.length<12||/^(what|why|how|explain|show|tell|is|are|can you explain|does|do)\b/i.test(text))return false;
+ if(substantialReturnQuestion(text,Date.now()))return true;
  const work=/\b(build|develop|research|investigate|find|create|generate|test|backtest|validate|improve|optimi[sz]e|manage|run|operate|monitor|trade|pass)\b/i.test(text);
  const target=/\b(propdao|challenge|evaluation|prop firm|funded account|strategy|strategies|robot|robots|bot|bots|gold scalping|trading strategy)\b/i.test(text);
  const sustained=/\b(and|then|until|after|over|for the next|for \d+ (?:hours|days)|end.to.end|automatically|autonomously|agent|work on|keep (?:trying|going|working)|while i)\b/i.test(text);

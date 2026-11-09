@@ -4,6 +4,7 @@ import type {CloudClient} from '../firebase';
 import {sharingRequest} from './BotSharing';
 import type {TaskRecord} from '../../shared/agent-task-state';
 import './agent-task-card.css';
+import {AgentQuestionCard} from './AgentQuestionCard';
 const terminal=new Set(['completed','blocked','failed','cancelled','waiting_for_review']);
 export function AgentTaskCard({client,taskId,onOpenScheduled}:{client:CloudClient;taskId:string;onOpenScheduled:()=>void}){
  const [task,setTask]=useState<TaskRecord|null>(null),[error,setError]=useState(''),[working,setWorking]=useState(false);
@@ -30,6 +31,15 @@ export function AgentTaskCard({client,taskId,onOpenScheduled}:{client:CloudClien
   void poll();const timer=window.setInterval(()=>void poll(),30000);
   return()=>{active=false;window.clearInterval(timer);};
  },[client,taskId]);
+ const replyQuestion=async(answer:string)=>{
+  if(!task?.question||working)return;
+  setWorking(true);setError('');
+  try{
+   const reply=await sharingRequest<{task:TaskRecord}>(client,'/api/agent-tasks/'+encodeURIComponent(taskId)+'/answer','POST',{questionId:task.question.id,answer});
+   setTask(reply.task);
+  }catch(e){setError(e instanceof Error?e.message:'Could not save your answer');throw e}
+  finally{setWorking(false)}
+ };
  const control=async(action:'cancel'|'pause'|'resume')=>{
   if(working)return;setWorking(true);setError('');
   try{const result=await sharingRequest<{task:TaskRecord}>(client,'/api/agent-tasks/'+encodeURIComponent(taskId)+'/'+action,'POST');setTask(result.task);}
@@ -45,6 +55,8 @@ export function AgentTaskCard({client,taskId,onOpenScheduled}:{client:CloudClien
    <ol>{events.map(event=><li key={event.iteration}><span>{new Date(event.at).toLocaleString()+' · '+event.phase}</span>
     <p>{event.summary}</p></li>)}</ol></details>}
   {task?.policy&&<p>{'Linked demo-only policy · '+task.policy.accountId+' · '+task.policy.mode+' · expires '+new Date(task.policy.expiresAt).toLocaleString()}. Automatic deployment remains disabled.</p>}
+  {task?.status==='waiting_for_input'&&task.question&&<AgentQuestionCard key={task.question.id} question={task.question} onAnswer={replyQuestion} disabled={working}/>}
+  {task?.usage&&<p>{'AI spend so far (estimate): $'+task.usage.estimatedModelUsd.toFixed(4)+' · '+(task.usage.inputTokens+task.usage.outputTokens).toLocaleString()+' tokens in '+task.usage.steps+' model iterations. Cloudflare, broker costs and fees are separate.'}</p>}
   {task?.memory.artifacts.length?<p>{task.memory.artifacts.filter(a=>a.kind==='draft').length} drafts · {task.memory.artifacts.filter(a=>a.kind==='backtest').length} reference backtests · {task.memory.artifacts.filter(a=>a.kind==='evaluation').length} evaluations</p>:null}
   {task?.status==='waiting_for_review'&&<p className="tv-task-review"><ShieldCheck size={15}/> Research candidate produced; demo deployment requires separate broker-specific validation and approval.</p>}
   {task?.lastError&&<p role="status">{task.lastError}</p>}
