@@ -162,7 +162,7 @@ export class DurableAgentTask extends DurableObject<Env>{
    if(!['running','stopped','retry','research','halted'].includes(result?.outcome))throw Error('Invalid supervisor decision');
    const latest=await this.ctx.storage.get<TaskRecord>('task');
    if(!latest||latest.leaseId!==leaseId||latest.status==='cancelled')return;
-   const stop=latest.autonomy!.stopRequested;
+   const stop=latest.autonomy!.stopRequested||(task.status!=='activating'&&result.outcome==='halted');
    const status=stop?(result.outcome==='stopped'?'cancelled':'stopping'):
     result.outcome==='running'?'monitoring':
     result.outcome==='research'?'cooldown':
@@ -171,7 +171,7 @@ export class DurableAgentTask extends DurableObject<Env>{
    const retryAt=Date.now()+(status==='monitoring'?MONITOR_INTERVAL:status==='cooldown'?RESEARCH_COOLDOWN:RETRY_DELAY);
    const updated:TaskRecord={...latest,status,nextRunAt:retryAt,leaseId:undefined,updatedAt:Date.now(),stateVersion:latest.stateVersion+1,
     ...(result.message?{lastError:result.outcome==='halted'?result.message:undefined}:{}),
-    autonomy:{...latest.autonomy!,stage:status==='monitoring'?'monitoring':status==='stopping'?'stopping':
+    autonomy:{...latest.autonomy!,stopRequested:stop,stage:status==='monitoring'?'monitoring':status==='stopping'?'stopping':
       status==='cancelled'?'stopping':status==='cooldown'?'cooldown':'activating',
      botId:result.outcome==='research'?undefined:(result.botId||latest.autonomy!.botId),
      codeHash:result.outcome==='research'?undefined:(result.codeHash||latest.autonomy!.codeHash),

@@ -119,8 +119,9 @@ export function AgentTaskPanel({client}:{client:CloudClient}){
    <small>Tasks checkpoint between requests; the deadline is not continuous AI execution. Usage is billed to your connected OpenRouter key. No live orders are placed by research tasks.</small>
    <button type="button" className="tv-hub-primary" disabled={busy||objective.trim().length<12||(continuous&&(!policyId||!policies.some(p=>p.id===policyId&&p.mode==='full-demo')))} onClick={()=>void create()}>{continuous?'Start autonomous demo agent':'Start research task'} <ArrowRight size={15}/></button>
   </div>:<div className="tv-agent-task-progress">
-   <div className="tv-agent-task-status"><strong>{task.phase.toUpperCase()} · {task.status.replaceAll('_',' ')}</strong><span>Step {task.iteration} / {task.maxIterations}</span></div>
+   <div className="tv-agent-task-status"><strong>{task.autonomy?.enabled?'AUTONOMOUS DEMO AGENT':'RESEARCH TASK'} · {task.status.replaceAll('_',' ')}</strong><span>{task.autonomy?.enabled?'Run-until-stopped · cycle '+task.autonomy.completedCycles:'Step '+task.iteration+' / '+task.maxIterations}</span></div>
    <p>{task.memory.lastResult||task.memory.summary||'Task accepted. Preparing the first evidence-gathering step.'}</p>
+   {task.autonomy?.enabled&&<p role="status">Broker robot: {task.autonomy.botId||'awaiting validated candidate'} · Exposure: {task.autonomy.lastBrokerExposure||'unknown'} · {task.autonomy.lastDeploymentOutcome||'no broker action yet'}. Last check: {task.autonomy.lastMonitorAt?new Date(task.autonomy.lastMonitorAt).toLocaleString():'not verified yet'}</p>}
    <div className="tv-agent-task-policy-link">
     <strong>Demo policy for this task</strong>
     {task.policy?<p>{'Linked policy: '+task.policy.accountId+' · '+task.policy.mode+' · expires '+new Date(task.policy.expiresAt).toLocaleString()}</p>:
@@ -144,7 +145,7 @@ export function AgentTaskPanel({client}:{client:CloudClient}){
    {task.status==='waiting_for_review'&&<p className="tv-agent-task-guard"><ShieldCheck size={16}/> Reference backtest candidate ready for review; NOT certified for PropDAO fills or auto-deployed.</p>}
    {task.lastError&&<p role="alert">{task.lastError}</p>}
    <div className="tv-agent-task-actions">
-    {!terminal.has(task.status)&&<button type="button" disabled={busy} onClick={()=>void cancel()}><XCircle size={15}/> Cancel task</button>}
+    {(!terminal.has(task.status)||(task.autonomy?.enabled&&task.autonomy.botId&&task.status!=='cancelled'))&&<button type="button" disabled={busy||task.status==='stopping'} onClick={()=>void cancel()}><XCircle size={15}/> {task.autonomy?.enabled?'STOP AGENT — disable new entries':'Cancel task'}</button>}
     <button type="button" onClick={()=>{setTask(null);setDraft('');setError('')}}>New task</button>
    </div>
   </div>}

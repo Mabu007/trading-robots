@@ -53,7 +53,7 @@ export function AgentTaskCard({client,taskId,onOpenScheduled}:{client:CloudClien
    <button onClick={onOpenScheduled} type="button">Open Scheduled</button>
    {task&&!task.autonomy?.enabled&&!terminal.has(task.status)&&task.status!=='paused'&&<button type="button" disabled={working} onClick={()=>void control('pause')}><Pause size={14}/> Pause</button>}
    {task?.status==='paused'&&!task.autonomy?.enabled&&<button type="button" disabled={working} onClick={()=>void control('resume')}><Play size={14}/> Resume</button>}
-   {task&&!terminal.has(task.status)&&<button type="button" disabled={working} onClick={()=>void control('cancel')}><Square size={14}/> {task.autonomy?.enabled?'STOP AGENT':'Cancel'}</button>}
+   {task&&(!terminal.has(task.status)||(task.autonomy?.enabled&&task.autonomy.botId&&task.status!=='cancelled'))&&<button type="button" disabled={working} onClick={()=>void control('cancel')}><Square size={14}/> {task.autonomy?.enabled?'STOP AGENT':'Cancel'}</button>}
   </div>
   <small><CheckCircle2 size={13}/> Research tasks do not authorize order execution.</small>
  </section>;
