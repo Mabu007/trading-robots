@@ -1,0 +1,16 @@
+.tv-agent-task-panel{margin:18px 0 22px;padding:20px;border:1px solid var(--border,rgba(130,140,150,.3));border-radius:16px;display:grid;gap:14px;background:var(--panel,#fff);color:var(--text,#17202a)}
+.tv-agent-task-panel header h2{margin:5px 0;font-size:1.18rem}.tv-agent-task-panel header p{margin:0;font-size:.9rem;color:var(--text-muted,#657381)}
+.tv-agent-task-setup{display:grid;gap:9px}.tv-agent-task-setup label{font-weight:600;font-size:.85rem}
+.tv-agent-task-setup textarea{width:100%;padding:12px;resize:vertical;border-radius:9px;border:1px solid var(--border,#ccd4dc);background:var(--surface,#fff);color:inherit;font:inherit;line-height:1.45}
+.tv-agent-task-setup>button{justify-self:start}.tv-agent-task-status{display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;font-size:.85rem}
+.tv-agent-task-progress{display:grid;gap:12px}.tv-agent-task-progress p,.tv-agent-task-progress ol{margin:0}
+.tv-agent-task-artifacts{display:grid;gap:9px}.tv-agent-task-artifacts>div{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.82rem}
+.tv-agent-task-artifacts button,.tv-agent-task-actions button{background:transparent;border:1px solid var(--border,#ccd4dc);border-radius:8px;padding:8px;display:inline-flex;align-items:center;gap:6px;color:inherit;cursor:pointer}
+.tv-agent-task-panel pre{overflow:auto;max-height:340px;padding:12px;background:var(--surface-secondary,#f3f4f6);font-size:.75rem}
+.tv-agent-task-guard{display:flex;align-items:flex-start;gap:8px}.tv-agent-task-error{color:#c82b42}.tv-agent-task-actions{display:flex;gap:10px;flex-wrap:wrap}
+
+.tv-agent-task-recent{display:grid;gap:6px;margin-bottom:12px}.tv-agent-task-recent strong{font-size:.86rem}.tv-agent-task-recent button{text-align:left;background:transparent;color:inherit;border:1px solid var(--border,#ccd4dc);border-radius:8px;padding:9px;cursor:pointer}.tv-agent-task-recent button:hover{background:var(--surface-secondary,#f3f4f6)}
+
+.tv-agent-task-setup select{padding:10px;border-radius:9px;border:1px solid var(--border,#ccd4dc);background:var(--surface,#fff);color:inherit;font:inherit}.tv-agent-task-setup small{font-size:.78rem;color:var(--text-muted,#657381)}
+
+.tv-agent-task-policy-link{padding:12px;border:1px solid var(--border,#d2d9d7);border-radius:10px;display:grid;gap:8px}.tv-agent-task-policy-link strong{font-size:.82rem}.tv-agent-task-policy-link div{display:flex;flex-wrap:wrap;gap:8px}.tv-agent-task-policy-link select,.tv-agent-task-policy-link button{border:1px solid var(--border,#d2d9d7);border-radius:7px;padding:7px;background:transparent;color:inherit;font:inherit;font-size:.82rem}.tv-agent-task-policy-link p,.tv-agent-task-policy-link small{margin:0;font-size:.77rem;opacity:.8}

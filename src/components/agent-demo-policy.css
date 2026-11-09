@@ -1,0 +1,12 @@
+.tv-agent-policy-panel{margin:18px 0;padding:18px;border:1px solid var(--border,#d2d9d7);border-radius:15px;display:grid;gap:14px;color:inherit}
+.tv-agent-policy-panel header{display:flex;gap:10px;align-items:flex-start}.tv-agent-policy-panel header p{font-size:.85rem;color:var(--text-muted,#758086);margin:4px 0 0}
+.tv-agent-policy-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:12px}
+.tv-agent-policy-fields label{display:grid;gap:6px;font-size:.82rem}
+.tv-agent-policy-fields input:not([type=checkbox]),.tv-agent-policy-fields select{width:100%;border:1px solid var(--border,#d2d9d7);background:var(--surface,#fff);color:inherit;border-radius:8px;padding:8px;font:inherit}
+.tv-agent-policy-checkbox{display:flex!important;align-items:flex-start;gap:9px;font-size:.82rem;line-height:1.45;grid-column:1/-1}
+.tv-agent-policy-panel>.tv-hub-primary{justify-self:start}
+.tv-agent-policy-active{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:12px;border:1px solid var(--border,#d2d9d7);border-radius:10px}
+.tv-agent-policy-active p{font-size:.8rem;margin:4px 0}.tv-agent-policy-active small{opacity:.75}
+.tv-agent-policy-active button{border:1px solid var(--border,#d2d9d7);padding:8px;border-radius:7px;color:inherit;background:transparent;display:flex;align-items:center;gap:6px;cursor:pointer}
+.tv-agent-policy-warning{display:flex;align-items:flex-start;gap:8px;font-size:.78rem;color:var(--text-muted,#758086)}
+.tv-agent-policy-error{color:#d33}

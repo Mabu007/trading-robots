@@ -15,6 +15,9 @@ import {ctraderRoutes,CTraderService} from './ctrader.ts';
 import {selectOpenRouterApiKey} from './openrouter-credentials.ts';
 import {chatToolRoutes} from './chat-tools.ts';
 import {registerAIPlatformRoutes} from './ai-platform.ts';
+import {registerAgentTaskRoutes} from './agent-task-routes.ts';
+import {agentDemoPolicyRoutes} from './agent-demo-policy-routes.ts';
+import {DemoPolicyStore} from './agent-demo-policy.ts';
 import {phase2FeatureEnabled,phase2SharedModelTestEnabled} from './phase2-feature-gates.ts';
 import {createAgentBacktestTool,agentBacktestInputSchema} from './agent-backtest-tools.ts';
 import {createBrokerConnectionReadTool} from './agent-broker-read.ts';
@@ -177,6 +180,19 @@ registerGdeltNews(app,{uid:firebaseUidOrReply,news:gdeltNews});
 codeWatchRoutes(app,{uid:firebaseUidOrReply,store:marketplace.store,outputs:watchOutputs(app,marketplace.store,openRouterAccounts)});
 const economy=new BotEconomy(marketplace.store,{read:readR2Object,write:writeR2Object,root:userBotRoot},marketplace);
 const agentRegistry=new AgentRegistry(marketplace.store);
+agentDemoPolicyRoutes(app,{uid:firebaseUidOrReply,store:marketplace.store,accounts:propdaoAccounts,configured:()=>FirestoreStore.configured()});
+registerAgentTaskRoutes(app,{
+ uidOrReply:firebaseUidOrReply,accounts:openRouterAccounts,market:venueMarketData,
+ read:readR2Object,write:writeR2Object,tasks:marketplace.store,propdao:propdaoAccounts,
+ deploymentStatus:async(uid,botId)=>propdaoLiveService.status(uid,botId),
+ policyStatus:async(uid,policyId)=>new DemoPolicyStore(marketplace.store).owned(uid,policyId),
+ owned:async(uid,id)=>{
+  if(!FirestoreStore.configured())return null;
+  const record=await marketplace.store.get('users/'+uid+'/bots/'+id);
+  return record ? {id:record.id,asset:record.asset,venue:record.venue,userId:record.userId,ownerUid:record.ownerUid}:null;
+ }
+});
+
 const ownedValrBot=async(uid:string,id:string,req:express.Request)=>{
  const [bot,raw]=await Promise.all([FirestoreStore.configured()?marketplace.store.get(`users/${uid}/bots/${id}`):readOwnedBotAsset(uid,id,req.header('authorization')),readR2Object(`${userBotRoot(uid,id)}/current.json`)]);
  if(!bot||!raw)return null;if('venue' in bot && bot.venue!==undefined && bot.venue!=='valr')return null;const saved=JSON.parse(raw);if(saved.userId!==uid||saved.botId!==id||typeof saved.code!=='string'||typeof bot.asset!=='string')return null;return {asset:bot.asset,code:saved.code};
