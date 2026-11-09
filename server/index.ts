@@ -186,6 +186,7 @@ registerAgentTaskRoutes(app,{
  read:readR2Object,write:writeR2Object,tasks:marketplace.store,propdao:propdaoAccounts,
  deploymentStatus:async(uid,botId)=>propdaoLiveService.status(uid,botId),
  policyStatus:async(uid,policyId)=>new DemoPolicyStore(marketplace.store).owned(uid,policyId),
+ live:()=>propdaoLiveService,
  owned:async(uid,id)=>{
   if(!FirestoreStore.configured())return null;
   const record=await marketplace.store.get('users/'+uid+'/bots/'+id);

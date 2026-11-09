@@ -1,5 +1,5 @@
 import type { Candle, Side, Trade } from './types';
-import {nextOpenRewardGuard} from './entry-fill-guard';
+import {nextOpenRewardGuard} from './entry-fill-guard.ts';
 
 /** Evaluation assumptions are fixed to the user's Iron $1K Pro terms, not live account data. */
 export const IRON_1K = Object.freeze({ startingBalance:1000, targetProfit:100, maxStaticLoss:50, maxDailyLoss:20 });

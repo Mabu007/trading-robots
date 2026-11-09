@@ -317,7 +317,7 @@ export async function runDurableTaskStep(task:TaskRecord,deps:Dependencies):Prom
   }),
   backtestDraft:tool({
    description:'Execute task-scratch draft in an isolated deterministic QuickJS VM over exact validated Hyperliquid public history. For PropDAO GOLDUSDC only xyz:GOLD REFERENCE is available and is NOT challenge fill verification.',
-   inputSchema:z.object({draftId:z.string().regex(/^draft_[a-f0-9]{32}$/),lookbackCandles:z.number().int().min(120).max(600).default(240),windowIndex:z.number().int().min(0).max(3).default(0)}).strict(),
+   inputSchema:z.object({draftId:z.string().regex(/^draft_[a-f0-9]{32}$/),lookbackCandles:z.number().int().min(120).max(3000).default(1200),windowIndex:z.number().int().min(0).max(3).default(0)}).strict(),
    execute:async({draftId,lookbackCandles,windowIndex})=>{
     boundedCall();phase='backtesting';
     try{

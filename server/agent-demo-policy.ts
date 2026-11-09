@@ -11,7 +11,8 @@ export const demoPolicyInput=z.object({
  maxDailyLossPct:z.number().min(.1).max(2),
  maxDrawdownPct:z.number().min(.5).max(5),
  maxOpenPositions:z.number().int().min(1).max(2),
- expiresInHours:z.number().int().min(1).max(168),
+ expiresInHours:z.number().int().min(1).max(168).optional(),
+ untilStopped:z.boolean().default(false),acceptEvaluationDemo:z.boolean().default(false),
  allowReplace:z.boolean().default(false),
  confirmation:z.literal('I AUTHORIZE VIBES PROPDAO DEMO AUTONOMY')
 }).strict();
@@ -19,23 +20,25 @@ export type DemoPolicy={
  version:1;id:string;ownerUid:string;mode:'bounded-demo'|'full-demo';
  venue:'propdao';demoOnly:true;accountId:string;instruments:string[];
  maxRiskUsd:number;maxDailyLossPct:number;maxDrawdownPct:number;maxOpenPositions:number;
- allowReplace:boolean;createdAt:number;expiresAt:number;revokedAt:null|number;
+ allowReplace:boolean;createdAt:number;expiresAt:number;untilStopped:boolean;revokedAt:null|number;
  fingerprint:string;stateVersion:number;
 };
 const key=(uid:string,id:string)=>'users/'+uid+'/agent-policies/'+id;
 const strongId=/^[A-Za-z0-9_-]{8,100}$/;
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 /** A challenge name or generic "simulated" connector mode is NOT a broker demo attestation. */
-export function verifyPropDAODemoAccount(account:unknown,operatorAllowlist:string|undefined=process.env.PROPDAO_AUTONOMY_DEMO_ACCOUNT_IDS):boolean{
+export function verifyPropDAODemoAccount(account:unknown,operatorAllowlist:string|undefined=process.env.PROPDAO_AUTONOMY_DEMO_ACCOUNT_IDS,consentedEvaluation=false,brokerSimulated=false):boolean{
  if(!account||typeof account!=='object')return false;
  const a=account as Record<string,unknown>;
  const challenge=a.challenge&&typeof a.challenge==='object'?a.challenge as Record<string,unknown>:{};
  const providerDemo=a.demo===true||a.isDemo===true||a.environment==='demo'||
   challenge.demo===true||challenge.isDemo===true||challenge.environment==='demo';
+ const optedEvaluation=consentedEvaluation&&brokerSimulated&&a.status==='active'&&
+  typeof challenge.name==='string'&&/\bevaluation\b/i.test(challenge.name);
  const listed=typeof a.accountId==='string'&&(operatorAllowlist||'').split(',').map(v=>v.trim()).filter(Boolean).includes(a.accountId);
  const explicitlyLive=a.realMoney===true||a.isLive===true||a.environment==='live'||a.accountType==='live'||
   challenge.live===true||challenge.realMoney===true;
- return Boolean((providerDemo||listed)&&!explicitlyLive&&a.status==='active'&&challenge&&Object.keys(challenge).length>0);
+ return Boolean((providerDemo||listed||optedEvaluation)&&!explicitlyLive&&a.status==='active'&&challenge&&Object.keys(challenge).length>0);
 }
 export function evaluateDemoPolicy(policy:DemoPolicy,action:{
  uid:string;accountId:string;instrument:string;riskUsd:number;action:'deploy'|'replace'|'monitor';now:number;
@@ -56,9 +59,10 @@ export class DemoPolicyStore{
  private readonly store:Pick<RecordStore,'get'|'create'|'put'|'query'|'transaction'>;
  private readonly clock:()=>number;
  constructor(store:Pick<RecordStore,'get'|'create'|'put'|'query'|'transaction'>,clock:()=>number=Date.now){this.store=store;this.clock=clock;}
- async create(uid:string,data:z.infer<typeof demoPolicyInput>,broker:{simulated:boolean;owned:boolean;evaluation:boolean;realMoney:boolean;status:string;breached:boolean;roomUsd:number}):Promise<DemoPolicy>{
+ async create(uid:string,data:z.input<typeof demoPolicyInput>,broker:{simulated:boolean;owned:boolean;evaluation:boolean;realMoney:boolean;status:string;breached:boolean;roomUsd:number}):Promise<DemoPolicy>{
   const input=demoPolicyInput.parse(data);
   if(!uid||uid.length>128||!broker.simulated||!broker.owned||!broker.evaluation||broker.realMoney||broker.status!=='active'||broker.breached||!Number.isFinite(broker.roomUsd)||broker.roomUsd<=input.maxRiskUsd*4)throw Error('A verified active evaluation-only demo account and safe risk room are required. Funded or unclassified accounts are excluded.');
+  if(!input.untilStopped&&!input.expiresInHours)throw Error('Choose a finite expiry or explicitly authorize until stopped.');
   if(new Set(input.instruments).size!==input.instruments.length)throw Error('Duplicate instruments are not permitted.');
   const existing=await this.store.query('users/'+uid+'/agent-policies');
   if(existing.some(x=>x.ownerUid===uid&&x.accountId===input.accountId&&x.revokedAt===null&&x.expiresAt>this.clock()))throw Error('An active standing policy already exists on this account. Revoke it before replacing the scope.');
@@ -67,7 +71,7 @@ export class DemoPolicyStore{
    accountId:input.accountId,instruments:input.instruments,maxRiskUsd:input.maxRiskUsd,
    maxDailyLossPct:input.maxDailyLossPct,maxDrawdownPct:input.maxDrawdownPct,
    maxOpenPositions:input.maxOpenPositions,allowReplace:input.allowReplace,
-   createdAt,expiresAt:createdAt+input.expiresInHours*3_600_000};
+   createdAt,expiresAt:input.untilStopped?253402300799000:createdAt+input.expiresInHours!*3_600_000,untilStopped:input.untilStopped};
   const policy:DemoPolicy={version:1,id,ownerUid:uid,...scoped,
    fingerprint:hash(JSON.stringify(scoped)),revokedAt:null,stateVersion:1};
   if(!(await this.store.create(key(uid,id),policy)))throw Error('Policy ID conflict; retry the request.');

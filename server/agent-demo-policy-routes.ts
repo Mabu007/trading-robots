@@ -21,7 +21,7 @@ export function agentDemoPolicyRoutes(app:Express,deps:Dependencies){
    let eligibleAccounts:{accountId:string;status:string;challenge:unknown}[]=[];
    try{
     const listing=await deps.accounts.list(uid);
-    eligibleAccounts=(listing.accounts||[]).filter((a:any)=>verifyPropDAODemoAccount(a)).slice(0,25)
+    eligibleAccounts=(listing.accounts||[]).filter((a:any)=>verifyPropDAODemoAccount(a,undefined,true,listing.simulated===true)).slice(0,25)
      .map((a:any)=>({accountId:a.accountId,status:a.status,challenge:a.challenge}));
    }catch{}
    return res.json({policies:records,eligibleAccounts,demoOnly:true,automaticExecutionEnabled:false});
@@ -37,8 +37,8 @@ export function agentDemoPolicyRoutes(app:Express,deps:Dependencies){
   try{
    const snapshot=await deps.accounts.snapshot(uid,input.data.accountId);
    const broker={simulated:snapshot.simulated===true,owned:true,
-    evaluation:verifyPropDAODemoAccount(snapshot.account),
-    realMoney:!verifyPropDAODemoAccount(snapshot.account),status:String(snapshot.account?.status||''),
+    evaluation:verifyPropDAODemoAccount(snapshot.account,undefined,input.data.acceptEvaluationDemo,snapshot.simulated===true),
+    realMoney:!verifyPropDAODemoAccount(snapshot.account,undefined,input.data.acceptEvaluationDemo,snapshot.simulated===true),status:String(snapshot.account?.status||''),
     breached:snapshot.risk?.breached===true,roomUsd:Number(snapshot.risk?.roomUsd)};
    const policy=await policies.create(uid,input.data,broker);
    return res.status(201).json({policy,executionEnabled:false,
