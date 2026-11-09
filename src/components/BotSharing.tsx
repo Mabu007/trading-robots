@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { Activity, Check, Copy, ImagePlus, Link2, Play, Unplug, X } from 'lucide-react';
+import { Check, Copy, ImagePlus, Link2, Play, X } from 'lucide-react';
 import type { CloudBot, CloudClient } from '../firebase';
 import { readApiJson } from '../api';
 
-export type PublicBot = { id: string; name: string; asset: string; description: string; coverImage: string; access: 'free'|'paid';priceMinor?:number;currency?:string;creator?:string;timeframe?:string;performance?:{kind:'backtest';verification:'creator_reported';from:string;to:string;source:string;trades:number;netReturnR:number;maxDrawdownR:number;winRate:number}; publishedAt: string };
+export type PublicBot = { id: string; name: string; asset: string; description: string; coverImage: string; access: 'free'|'paid';venue?:string;revisionId?:string;priceMinor?:number;currency?:string;creator?:string;timeframe?:string;performance?:{kind:'backtest';verification:'creator_reported';from:string;to:string;source:string;trades:number;netReturnR:number;maxDrawdownR:number;winRate:number}; publishedAt: string };
 type Publication = PublicBot & { published: boolean };
 export function sharedIdFromPath(path: string) {
   const match = path.match(/^\/bot\/([A-Za-z0-9_-]+)\/?$/);
@@ -55,10 +55,11 @@ async function coverForShare(cover: string): Promise<string> {
 export function ShareBotDialog({ bot, client, prepare, makePublic, coverUrl, onCoverChanged, coverLoadError, creator, onClose }: { bot: CloudBot; client: CloudClient; prepare: () => Promise<void>; makePublic:(description:string|undefined,coverImage?:string)=>Promise<string>; coverUrl:string; onCoverChanged:(cover:string)=>void; coverLoadError:string; creator:string; onClose: () => void }) {
   const [publication, setPublication] = useState<Publication | null>(null);
   const [description, setDescription] = useState(bot.prompt.slice(0, 2000)), [descriptionDirty,setDescriptionDirty]=useState(false);
-  const [access,setAccess]=useState<'free'|'paid'>('free'),[price,setPrice]=useState('99.00');
   const [cover, setCover] = useState(coverUrl), [coverDirty, setCoverDirty] = useState(false), [publicUrl, setPublicUrl] = useState('');
   const [loading, setLoading] = useState(true), [loadError, setLoadError] = useState(false), [working, setWorking] = useState(false);
   const [error, setError] = useState(''), [copied, setCopied] = useState(false), [retry, setRetry] = useState(0);
+  const [requests,setRequests]=useState<Array<{id:string;requesterName:string;status:string;revision:string;createdAt:number}>>([]);
+  const [requestsError,setRequestsError]=useState(''),[requestsRevision,setRequestsRevision]=useState(0),[decisionBusy,setDecisionBusy]=useState('');
   const closeRef = useRef<HTMLButtonElement>(null);
   const path = `/api/user-bots/${encodeURIComponent(bot.id)}/publication`;
   const shareUrl = publication ? `${window.location.origin}/bot/${publication.id}` : '';
@@ -68,7 +69,7 @@ export function ShareBotDialog({ bot, client, prepare, makePublic, coverUrl, onC
     privateRequest<{ publication: Publication | null }>(client, path).then(({ publication: saved }) => {
       if (!active) return;
       setPublication(saved);
-      if (saved) { setDescription(saved.description); setCover(saved.coverImage || coverUrl);setAccess(saved.access);setPrice(((saved.priceMinor||9900)/100).toFixed(2)); }
+      if (saved) { setDescription(saved.description); setCover(saved.coverImage || coverUrl);}
     }).catch(cause => { if (active) { setError(cause instanceof Error ? cause.message : 'Could not load sharing settings.'); setLoadError(true); } })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
@@ -90,13 +91,30 @@ export function ShareBotDialog({ bot, client, prepare, makePublic, coverUrl, onC
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   }, [working, onClose]);
+  useEffect(()=>{
+    if(!publication?.published){setRequests([]);return}
+    let active=true;
+    privateRequest<{requests:typeof requests}>(client, '/api/user-bots/'+encodeURIComponent(bot.id)+'/access-requests')
+      .then(data=>{if(active){setRequests(data.requests);setRequestsError('')}})
+      .catch(cause=>{if(active)setRequestsError(cause instanceof Error?cause.message:'Could not load access requests.')});
+    return ()=>{active=false};
+  },[client,bot.id,publication?.id,publication?.published,requestsRevision]);
+  const decide=async(requestId:string,action:'approve'|'reject'|'revoke')=>{
+    if(decisionBusy)return;
+    setDecisionBusy(requestId);setRequestsError('');
+    try{
+      await privateRequest(client,'/api/user-bots/'+encodeURIComponent(bot.id)+'/access-requests/'+encodeURIComponent(requestId)+'/'+action,'POST',{});
+      setRequestsRevision(v=>v+1);
+    }catch(cause){setRequestsError(cause instanceof Error?cause.message:'Could not update access.')}
+    finally{setDecisionBusy('')}
+  };
   const publish = async (event: FormEvent) => {
     event.preventDefault(); if (working || loading || loadError) return;
     setWorking(true); setError(''); setCopied(false);
     try {
       await prepare();
       const coverImage = await coverForShare(cover);
-      const saved = await privateRequest<{ publication: Publication }>(client, path, 'PUT', { name: bot.name, asset: bot.asset, description, coverImage, access,priceMinor:Math.round(Number(price)*100),currency:'ZAR',creator });
+      const saved = await privateRequest<{ publication: Publication }>(client, path, 'PUT', { name: bot.name, asset: bot.asset, description, coverImage, access:'free',creator });
       setPublication(saved.publication);
       if (coverDirty) onCoverChanged(coverImage);
       setCoverDirty(false);
@@ -136,7 +154,7 @@ export function ShareBotDialog({ bot, client, prepare, makePublic, coverUrl, onC
             try { setCover(await resizeCover(file)); setCoverDirty(true); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not use this image.'); } finally { setWorking(false); }
           }}/></label>
           <label className="share-description">Description<textarea rows={3} maxLength={2000} value={description} onChange={event => {setDescription(event.target.value);setDescriptionDirty(true)}} required placeholder="Tell people what your robot does…"/></label>
-          <div className="market-form-grid"><label>Share-link access<select value={access} onChange={e=>setAccess(e.target.value as 'free'|'paid')}><option value="free">Free</option><option value="paid">Paid · checkout coming soon</option></select></label>{access==='paid'&&<label>Price (ZAR)<input type="number" min="1" max="1000000" step="0.01" required value={price} onChange={e=>setPrice(e.target.value)}/></label>}</div>
+          <p className="share-hint">Access is granted by your approval, not by payment. Recipients get their own private copy.</p>
           <p className="share-hint">Make public lists your bot in Explore and on your profile without sharing its code. A free share link allows others to make editable copies of your code.</p>
         </fieldset>
         {error && <p className="share-error" role="alert">{error}</p>}
@@ -145,6 +163,20 @@ export function ShareBotDialog({ bot, client, prepare, makePublic, coverUrl, onC
         {publicUrl && <p className="share-hint" role="status">Your bot is public in Explore and on your profile. <a href={publicUrl} target="_blank" rel="noreferrer">View bot ↗</a></p>}
         {publication?.published && <div className="share-link-row"><input aria-label="Shareable robot link" value={shareUrl} readOnly onFocus={event => event.target.select()}/><button type="button" className="icon-button" onClick={() => void copy()} aria-label={copied ? 'Link copied' : 'Copy bot link'}>{copied ? <Check size={16}/> : <Copy size={16}/>}</button><a href={shareUrl} target="_blank" rel="noreferrer" aria-label="Open bot page"><Link2 size={16}/></a></div>}
         {publication && !publication.published && <p className="share-hint">Link unpublished. Publish again to reactivate the same link.</p>}
+        {publication?.published && <section aria-label="Robot access requests" style={{margin:'16px 0'}}>
+          <h3>Access requests ({requests.filter(r=>r.status==='pending').length} pending)</h3>
+          {requestsError && <p role="alert">{requestsError}</p>}
+          {!requests.length && <p className="share-hint">Nobody has requested access yet.</p>}
+          {requests.map(item=><div key={item.id} style={{padding:'10px 0',borderTop:'1px solid var(--border, #ddd)'}}>
+            <strong>{item.requesterName}</strong> <small>{item.status} · Revision {item.revision}</small>
+            {item.status==='pending' && <div style={{display:'flex',gap:8,marginTop:8}}>
+              <button type="button" className="primary" disabled={!!decisionBusy} onClick={()=>void decide(item.id,'approve')}>{decisionBusy===item.id?'Processing…':'Approve'}</button>
+              <button type="button" className="ghost" disabled={!!decisionBusy} onClick={()=>void decide(item.id,'reject')}>Reject</button>
+            </div>}
+            {item.status==='approved' && <button type="button" className="text-button" disabled={!!decisionBusy} onClick={()=>void decide(item.id,'revoke')}>Revoke future access (existing personal copy remains)</button>}
+          </div>)}
+          <button type="button" className="ghost" onClick={()=>setRequestsRevision(v=>v+1)}>Refresh requests</button>
+        </section>}
         <footer className="share-dialog-foot">{publication?.published && <button type="button" className="text-button" onClick={() => void unpublish()} disabled={working}>Unpublish</button>}<button type="submit" className="ghost" disabled={loading || working || loadError || !description.trim()}>{publication?.published ? 'Update share link' : 'Create share link'}</button><button type="button" className="primary" disabled={loading || working || loadError} onClick={() => void publishListing()}>{loading ? 'Loading…' : working ? 'Saving…' : publicUrl ? 'Update public page' : 'Make public'}</button></footer>
       </form>
     </section>
@@ -153,6 +185,26 @@ export function ShareBotDialog({ bot, client, prepare, makePublic, coverUrl, onC
 
 export function SharedBotPage({ shareId, busy, error, onBacktest, onConnect, onStart, client, onSettings, onSignIn }: { shareId: string; busy: boolean; error: string; onBacktest: () => void; onConnect: () => void;onStart:()=>void;client?:CloudClient|null;onSettings?:()=>void;onSignIn?:()=>void;children?:React.ReactNode }) {
   const [bot, setBot] = useState<PublicBot | null>(null), [loadError, setLoadError] = useState(''), [loading, setLoading] = useState(true);
+  const [access,setAccess]=useState<'none'|'pending'|'approved'|'rejected'|'revoked'|'owner'|'signed-out'>('signed-out');
+  const [accessBusy,setAccessBusy]=useState(false),[accessError,setAccessError]=useState(''),[accessRefresh,setAccessRefresh]=useState(0);
+  useEffect(()=>{
+    if(!client){setAccess('signed-out');return}
+    let active=true;setAccessError('');
+    privateRequest<{status:typeof access}>(client,'/api/shared-bots/'+encodeURIComponent(shareId)+'/my-access')
+      .then(data=>{if(active)setAccess(data.status)})
+      .catch(cause=>{if(active)setAccessError(cause instanceof Error?cause.message:'Could not check robot access.')});
+    return ()=>{active=false};
+  },[shareId,client,accessRefresh]);
+  const requestAccess=async()=>{
+    if(!client){onSignIn?.();return}
+    if(accessBusy)return;
+    setAccessBusy(true);setAccessError('');
+    try{
+      const data=await privateRequest<{status:typeof access}>(client,'/api/shared-bots/'+encodeURIComponent(shareId)+'/requests','POST',{});
+      setAccess(data.status);setAccessRefresh(v=>v+1);
+    }catch(cause){setAccessError(cause instanceof Error?cause.message:'Could not request access.')}
+    finally{setAccessBusy(false)}
+  };
   useEffect(() => {
     let active = true; const controller = new AbortController();
     setLoading(true); setLoadError(''); setBot(null);
@@ -164,10 +216,17 @@ export function SharedBotPage({ shareId, busy, error, onBacktest, onConnect, onS
   }, [shareId]);
   return <main className="public-bot-shell"><header className="public-bot-brand"><a href="/"><img src="/logo.png" alt=""/> Trading Vibes</a><span>ROBOT BY ITS CREATOR</span><button className="ghost" onClick={client?onSettings:onSignIn} aria-label={client?"Open profile settings":"Sign in"}>{client?"Profile":"Sign in"}</button></header>
     {loading ? <div className="public-bot-state" role="status"><span className="spinner"/> Loading robot…</div> : !bot ? <div className="public-bot-state"><h1>Robot unavailable</h1><p role="alert">{loadError}</p><a href="/">Go to Trading Vibes</a></div> : <article className="public-bot-card">
-      <div className="public-bot-cover"><img src={bot.coverImage || '/robot-cover.svg'} alt={`${bot.name} cover`}/><span>{bot.asset} · {bot.timeframe?.toUpperCase()||'Strategy'} <i/> {bot.access==='free'?'FREE BOT':new Intl.NumberFormat(undefined,{style:'currency',currency:bot.currency||'ZAR'}).format((bot.priceMinor||0)/100)}</span></div>
+      <div className="public-bot-cover"><img src={bot.coverImage || '/robot-cover.svg'} alt={`${bot.name} cover`}/><span>{bot.asset} · {bot.timeframe?.toUpperCase()||'Strategy'} <i/> · {bot.venue?.toUpperCase()||'TRADING ROBOT'}</span></div>
       <div className="public-bot-copy"><h1>{bot.name}</h1><small>By {bot.creator||'Bot creator'}</small><p>{bot.description}</p></div>
-      {bot.performance&&<div className="public-bot-performance"><small>CREATOR’S BACKTEST · UNVERIFIED · {bot.performance.from} – {bot.performance.to}</small><p>{bot.performance.trades} trades · {bot.performance.netReturnR.toFixed(2)}R net · {bot.performance.maxDrawdownR.toFixed(2)}R drawdown · {(bot.performance.winRate*100).toFixed(1)}% win rate</p><small>{bot.performance.source} · Historical simulation; actual results can differ.</small></div>}<div className="public-bot-actions"><button type="button" className="public-side-action" onClick={onBacktest} disabled={busy||bot.access==='paid'}><Activity size={20}/><strong>{busy ? 'Opening…' : 'Backtest'}</strong></button><button type="button" className="public-start-action" onClick={onStart} disabled={busy||bot.access==='paid'} title={bot.access==='paid'?'Paid checkout coming soon':'Open paper trading options'}><Play size={25} fill="currentColor"/><strong>Start</strong><small>{bot.access==='paid'?'Checkout coming soon':'Paper trading'}</small></button><button type="button" className="public-side-action" onClick={onConnect} disabled={busy}><Unplug size={20}/><strong>Connect VALR</strong><small>VALR</small></button></div>
-      {bot.access==='paid'&&<p className="public-bot-notice">Paid checkout · Coming soon. Access is not available yet.</p>}{error && <p className="public-bot-notice" role="status">{error}</p>}
+      {bot.performance&&<div className="public-bot-performance"><small>CREATOR’S BACKTEST · UNVERIFIED · REVISION {bot.revisionId?.slice(0,12)||'unknown'} · {bot.performance.from} – {bot.performance.to}</small><p>{bot.performance.trades} trades · {bot.performance.netReturnR.toFixed(2)}R net · {bot.performance.maxDrawdownR.toFixed(2)}R drawdown · {(bot.performance.winRate*100).toFixed(1)}% win rate</p><small>{bot.performance.source} · Historical simulation. Fees, fills and slippage are not independently verified; actual results can differ.</small></div>}<div className="public-bot-actions">
+        {access==='approved'?<button type="button" className="public-start-action" onClick={onBacktest} disabled={busy||accessBusy}><Play size={22}/><strong>{busy?'Opening…':'Open Robot'}</strong><small>Backtest with your account</small></button>
+        :access==='owner'?<span>You own this robot. Open it from your Strategies library.</span>
+        :access==='pending'?<span>Pending approval · The creator has received your request.</span>
+        :access==='rejected'||access==='revoked'?<span>{access==='rejected'?'Request rejected':'Future access revoked'}</span>
+        :<button type="button" className="public-start-action" onClick={()=>void requestAccess()} disabled={accessBusy}><strong>{accessBusy?'Submitting…':client?'Request Access':'Sign In to Request Access'}</strong></button>}
+        {client&&<button type="button" className="public-side-action" onClick={()=>setAccessRefresh(v=>v+1)} disabled={accessBusy}>Refresh status</button>}
+      </div>
+      {accessError&&<p role="alert" className="public-bot-notice">{accessError}</p>}{error && <p className="public-bot-notice" role="status">{error}</p>}
     </article>}
   </main>;
 }

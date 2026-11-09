@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from 'express';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
+import { revisionPath } from './robot-access.ts';
 import { parseStrategyConfig } from '../src/strategy.ts';
 
 export type PublicBot = {
@@ -9,10 +10,12 @@ export type PublicBot = {
   description: string;
   coverImage: string;
   access: 'free'|'paid';
+  venue?:string;
+  revisionId?:string;
   priceMinor?:number;currency?:string;creator?:string;timeframe?:string;performance?:{kind:'backtest';verification:'creator_reported';from:string;to:string;source:string;trades:number;netReturnR:number;maxDrawdownR:number;winRate:number};
   publishedAt: string;
 };
-type PublishedBot = PublicBot & { ownerUid: string; botId: string; code: string; published: boolean };
+type PublishedBot = PublicBot & { ownerUid: string; botId: string; code: string; codeHash?:string; revisionId?:string; published: boolean };
 type Storage = {
   read: (key: string) => Promise<string | null>;
   write: (key: string, body: string) => Promise<void>;
@@ -29,7 +32,7 @@ export const validShareId = (id: string) => /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{
 const publicKey = (id: string) => `shared-bots/v1/${id}.json`;
 const pointerKey = (storage: Storage, uid: string, botId: string) => `${storage.root(uid, botId)}/publication.json`;
 function publicView(bot: PublishedBot): PublicBot {
-  return { id: bot.id, name: bot.name, asset: bot.asset, description: bot.description, coverImage: bot.coverImage, access: bot.access, publishedAt: bot.publishedAt, ...(bot.priceMinor!==undefined?{priceMinor:bot.priceMinor,currency:bot.currency}:{}),...(bot.creator?{creator:bot.creator}:{}),...(bot.timeframe?{timeframe:bot.timeframe}:{}),...(bot.performance?{performance:bot.performance}:{}) };
+  return { id: bot.id, name: bot.name, asset: bot.asset, description: bot.description, coverImage: bot.coverImage, access: bot.access, venue: bot.venue, revisionId:bot.revisionId, publishedAt: bot.publishedAt, ...(bot.priceMinor!==undefined?{priceMinor:bot.priceMinor,currency:bot.currency}:{}),...(bot.creator?{creator:bot.creator}:{}),...(bot.timeframe?{timeframe:bot.timeframe}:{}),...(bot.performance?{performance:bot.performance}:{}) };
 }
 export function validCover(value: unknown): value is string {
   if (value === '') return true;
@@ -86,7 +89,7 @@ export function sharedBotRoutes(app: Express, storage: Storage) {
     const { botId } = req.params;
     if (!validId(botId)) return res.status(400).json({ error: 'Robot ID is invalid.' });
     const { name, asset, description, coverImage = '', access = 'free',priceMinor=0,currency='ZAR',creator='' } = req.body ?? {};
-    if (!['free','paid'].includes(access)||access==='paid'&&(!storage.onPublish||!Number.isSafeInteger(priceMinor)||priceMinor<100||priceMinor>100_000_000||currency!=='ZAR')) return res.status(400).json({ error: 'Paid publishing requires marketplace configuration and a valid ZAR price. Checkout is coming soon.' });
+    if(access!=='free') return res.status(400).json({error:'Sharing is approval-based. Paid publishing is not available.'});
     if(typeof creator!=='string'||creator.length>80)return res.status(400).json({error:'Creator display name is invalid.'});
     if (typeof name !== 'string' || !name.trim() || name.length > 64 || typeof asset !== 'string' || !/^[A-Z0-9]{3,30}$/.test(asset)
       || typeof description !== 'string' || !description.trim() || description.length > 2000 || !validCover(coverImage)) {
@@ -95,19 +98,26 @@ export function sharedBotRoutes(app: Express, storage: Storage) {
     try {
       const current = await storage.read(`${storage.root(uid, botId)}/current.json`);
       const saved = current ? JSON.parse(current) : null;
-      if(saved?.venue && saved.venue!=='valr')return res.status(409).json({error:'Sharing for this venue is not available yet.'});
+      if(saved?.venue && !['valr','propdao','ctrader'].includes(saved.venue))return res.status(409).json({error:'Sharing for this venue is not available yet.'});
       if (!saved || saved.userId !== uid || saved.botId !== botId || typeof saved.code !== 'string' || !saved.code.trim()) {
         return res.status(409).json({ error: 'Save the robot’s strategy before sharing it.' });
       }
+      // Never embed common hard-coded credentials in an immutable distributable source snapshot.
+      if(/(?:api[_-]?key|password|private[_-]?key|secret|access[_-]?token|authorization)\s*[:=]\s*['\x22\x60][^'\x22\x60\n]{8,}['\x22\x60]/i.test(saved.code))return res.status(409).json({error:'This strategy appears to contain a hard-coded credential. Remove credentials before publishing.'});
       if(!storage.onPublish&&(/^(shared-|remix-)/.test(botId)))return res.status(503).json({error:'License checks need creator services before publishing this copy.'});
       const previous = await ownerPublication(uid, botId);
       const id = previous?.id || await readPointer(uid, botId) || randomUUID();
       const timeframe=access==='paid'?parseStrategyConfig(saved.code).executionTimeframe:(()=>{try{return parseStrategyConfig(saved.code).executionTimeframe}catch{return undefined}})();
       let performance:PublicBot['performance'];const backtest=await storage.read(`${storage.root(uid,botId)}/backtest.json`);if(backtest){const run=JSON.parse(backtest),m=run.result?.metrics;if(run.userId===uid&&run.botId===botId&&run.strategyCode===saved.code&&m&&[m.trades,m.netReturn,m.maxDrawdown,m.winRate].every(Number.isFinite))performance={kind:'backtest',verification:'creator_reported',from:String(run.from||''),to:String(run.to||''),source:String(run.result.source||'Historical data').slice(0,100),trades:m.trades,netReturnR:m.netReturn,maxDrawdownR:m.maxDrawdown,winRate:m.winRate};}
-      const bot: PublishedBot = { id, ownerUid: uid, botId, name: name.trim(), asset, description: description.trim(), coverImage, access,priceMinor:access==='paid'?priceMinor:0,currency:'ZAR',creator:creator.trim()||'Bot creator',timeframe,
+      const codeHash=createHash('sha256').update(saved.code).digest('hex');
+      const bot: PublishedBot = { id, ownerUid: uid, botId, codeHash, revisionId:codeHash, venue:saved.venue||'valr', name: name.trim(), asset, description: description.trim(), coverImage, access,priceMinor:access==='paid'?priceMinor:0,currency:'ZAR',creator:creator.trim()||'Bot creator',timeframe,
         code: saved.code,performance, published: true, publishedAt: new Date().toISOString() };
       // Store the stable pointer first; a failed public write can be retried without losing the link.
       await storage.write(pointerKey(storage, uid, botId), JSON.stringify({ id }));
+      const archiveKey=revisionPath(id,codeHash);
+      const archived=await storage.read(archiveKey);
+      if(archived){const data=JSON.parse(archived);if(data.ownerUid!==uid||data.publicationId!==id||data.code!==saved.code)throw new Error('Immutable revision conflict');}
+      else await storage.write(archiveKey,JSON.stringify({publicationId:id,ownerUid:uid,revision:codeHash,code:saved.code}));
       await storage.onPublish?.(bot);
       await storage.write(publicKey(id), JSON.stringify(bot));
       return res.json({ publication: { ...publicView(bot), published: true } });
@@ -128,25 +138,6 @@ export function sharedBotRoutes(app: Express, storage: Storage) {
       if(storage.onView){let visitor=req.header('cookie')?.split(';').map(s=>s.trim()).find(s=>s.startsWith('tv_viewer='))?.slice(10);if(!visitor||!/^[a-f0-9-]{36}$/.test(visitor)){visitor=randomUUID();res.cookie('tv_viewer',visitor,{httpOnly:true,sameSite:'lax',secure:Boolean(process.env.VERCEL),maxAge:86400000*365});}await storage.onView(bot,visitor).catch(()=>console.warn(JSON.stringify({event:"marketplace.view_record_failed",botId:bot.id})));}
       return res.json({ bot: publicView(bot) });
     } catch { return res.status(502).json({ error: 'Could not load this robot. Please try again.' }); }
-  });
-  app.post('/api/shared-bots/:shareId/copy', async (req, res) => {
-    const uid = await storage.uid(req, res); if (!uid) return;
-    if (!validShareId(req.params.shareId)) return res.status(404).json({ error: 'This robot link is unavailable.' });
-    res.setHeader('Cache-Control', 'private, no-store');
-    try {
-      const shared = await readPublished(req.params.shareId);
-      if (!shared?.published) return res.status(404).json({ error: 'This robot link is unavailable or has been unpublished.' });
-      if (shared.access !== 'free') return res.status(403).json({ error: 'This robot is not available for free.' });
-      await storage.onAcquire?.(uid,shared.id,shared);
-      const id = `shared-${shared.id}`;
-      const storageKey = `${storage.root(uid, id)}/current.json`;
-      const existing = await storage.read(storageKey);
-      const stored = existing ? JSON.parse(existing) : null;
-      if (stored && (stored.userId !== uid || stored.botId !== id)) throw new Error('Copy ownership mismatch');
-      const code = stored?.code ?? shared.code;
-      if (!existing) await storage.write(storageKey, JSON.stringify({ schemaVersion: 1, userId: uid, botId: id, code, updatedAt: new Date().toISOString() }));
-      return res.json({ bot: { id, name: shared.name, asset: shared.asset, prompt: shared.description, storageKey, code } });
-    } catch { return res.status(502).json({ error: 'Could not open a private copy of this robot. Please retry.' }); }
   });
   return { unpublish, removePublication };
 }
