@@ -9,6 +9,7 @@ import {streamText,tool,stepCountIs} from 'ai';
 import {createOpenAICompatible} from '@ai-sdk/openai-compatible';
 import {z} from 'zod';
 import {getHyperliquidBook,hyperliquidCoinSchema} from './hyperliquid-book.ts';
+import {getHyperliquidTradeSummary} from './hyperliquid-trades.ts';
 import {openRouterOAuthRoutes} from './openrouter-oauth.ts';
 import {ctraderRoutes,CTraderService} from './ctrader.ts';
 import {selectOpenRouterApiKey} from './openrouter-credentials.ts';
@@ -647,7 +648,7 @@ app.post('/api/ai', async (req, res) => {
   if(researchMode){
     const sanitizePublicQuestion=(value:string)=>value.replace(/https?:\/\/\S+|[\w.+-]+@[\w.-]+\.\w+|sk-[a-z0-9-]+|\b[a-f0-9]{40,}\b/gi,'').slice(0,950);
     const latestQuestion=(referentialFollowup&&earlierPublicQuestion?'Previous public research topic: '+sanitizePublicQuestion(String(earlierPublicQuestion.content))+'\nFollow-up: ':'')+sanitizePublicQuestion(String(lastUser.content));
-    const evidence=await researchBrief({query:latestQuestion,asset:selectedAsset},{market:venueMarketData,book:getHyperliquidBook});
+    const evidence=await researchBrief({query:latestQuestion,asset:selectedAsset},{market:venueMarketData,book:getHyperliquidBook,trades:getHyperliquidTradeSummary});
     publicEvidence=evidence;
     // Do not forward proprietary strategy source, broker data, previous
     // messages or personal account context to external web search.
@@ -829,8 +830,8 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
   if(researchMode){
     const sanitizePublicQuestion=(value:string)=>value.replace(/https?:\/\/\S+|[\w.+-]+@[\w.-]+\.\w+|sk-[a-z0-9-]+|\b[a-f0-9]{40,}\b/gi,'').slice(0,950);
     const latestQuestion=(referentialFollowup&&earlierPublicQuestion?'Previous public research topic: '+sanitizePublicQuestion(String(earlierPublicQuestion.content))+'\nFollow-up: ':'')+sanitizePublicQuestion(String(lastUser.content));
-    const evidence=officialResearch?{context:'Use the finance source directory and public page fetch. Cite exact period, units and source, and say when a dataset requires credentials or is inaccessible.',hasQuote:false,hasCandles:false,hasNews:false,snapshotOnly:false,chart:null,sources:[],quote:null}:await researchBrief({query:latestQuestion,asset:selectedAsset},{
-      market:venueMarketData,book:getHyperliquidBook,request:(input,init)=>fetch(input,{...init,signal:AbortSignal.any([clientAbort.signal,...(init?.signal?[init.signal]:[])])})
+    const evidence=officialResearch?{context:'Use the finance source directory and public page fetch. Cite exact period, units and source, and say when a dataset requires credentials or is inaccessible.',hasQuote:false,hasCandles:false,hasNews:false,hasVolume:false,hasTrades:false,snapshotOnly:false,chart:null,sources:[],quote:null,volume:null,trades:null}:await researchBrief({query:latestQuestion,asset:selectedAsset},{
+      market:venueMarketData,book:getHyperliquidBook,trades:getHyperliquidTradeSummary,request:(input,init)=>fetch(input,{...init,signal:AbortSignal.any([clientAbort.signal,...(init?.signal?[init.signal]:[])])})
     });
     publicEvidence=evidence;
     // Do not forward proprietary strategy source, broker data, previous
@@ -900,7 +901,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     }
     if(publicEvidence&&!officialResearch){
      const {context,...evidence}=publicEvidence;
-     const output={available:Boolean(evidence.hasQuote||evidence.hasCandles||evidence.hasNews),...evidence};
+     const output={available:Boolean(evidence.hasQuote||evidence.hasCandles||evidence.hasNews||evidence.hasVolume||evidence.hasTrades),...evidence};
      await runRead('getPublicMarketEvidence',{},async()=>output);
     }
     let requestedEvidence:unknown;

@@ -2,7 +2,8 @@ import {useEffect, useId, useRef, useState} from 'react';
 import {Activity,ArrowRight,Bot,CalendarDays,CheckCircle2,Code2,FileCode2,Play,ShieldCheck,Sparkles} from 'lucide-react';
 import './premium-workbench.css';
 import {venueLabel, venueOf, type Venue} from '../../shared/venues';
-import {AiOutputLimitError, chatStreamPath, postApiStream} from '../api';
+import {chatStreamPath, postApiStream} from '../api';
+import {generateStrategyWithRecovery} from '../strategy-ai-generation';
 import {compressBacktest, decompressBacktest, isCompressedBacktest} from '../backtest-storage';
 import type {CloudBot, CloudClient} from '../firebase';
 import {savedBacktestCard} from '../saved-backtest-card';
@@ -171,22 +172,18 @@ export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, 
     const market = identity();
     if (!rules.trim()) throw Error('Describe the strategy rules first.');
     setProgress('Generating strategy.js…');
-    const token = await client.getIdToken();
-    let response: string;
-    try {
-      response = await postApiStream(chatStreamPath(import.meta.env.VITE_AI_SDK_CHAT_ENABLED), {
-        asset: market.asset, maxTokens: 6000, includeMarketContext: false, researchMode: false,
-        messages: [
-          {role: 'system', content: 'Generate a complete deterministic Trading Vibes strategy.js in one JavaScript code fence. Export const config = {timeframes, executionTimeframe, riskPercent, riskReward}; use lowercase m1, m5, m15, m30, h1, h4 or d1. riskPercent must be greater than 0 and at most 10. Export function onCandle(ctx). Use completed candles from ctx.timeframes, return BUY or SELL with valid stopLoss and takeProfit, or WAIT. No imports, network calls, future prices or hard-coded market prices. Only output code.'},
-          {role: 'user', content: `Venue: ${venueLabel[market.venue]}. Instrument: ${market.asset}.\nRules: ${rules.trim()}`},
-        ],
-      }, 'OpenRouter', () => {}, AbortSignal.any([signal, AbortSignal.timeout(55_000)]), token);
-    } catch (cause) {
-      if (cause instanceof AiOutputLimitError) throw Error('AI stopped before completing the code. Try a shorter description or write the code manually.');
-      throw cause;
-    }
-    const source = (response.match(/```(?:js|javascript)\s*([\s\S]*?)```/i)?.[1] || response).trim();
-    validateWorkbenchSource(source);
+    const system = 'Generate a concise, complete deterministic Trading Vibes strategy.js in a single JavaScript code fence. Use a static export const config = {timeframes:["m1"],executionTimeframe:"m1",riskPercent:1,riskReward:2}; with a trailing semicolon. Allowed timeframe strings: m1,m5,m15,m30,h1,h4,d1. Export function onCandle(ctx). Only use COMPLETED candles in ctx.timeframes. Return BUY or SELL with positive stopLoss and takeProfit, or WAIT; include warmup and zero-volatility guards. Use short, clear functions and no dependencies. No imports, network, broker keys, future candles or hard-coded prices. No explanations, tests, comments or markdown outside the code fence. Keep under 350 lines.';
+    const user = 'Venue: '+venueLabel[market.venue]+'. Instrument: '+market.asset+'.\nStrategy rules: '+rules.trim();
+    const source = await generateStrategyWithRecovery({
+      system,user,signal,
+      progress:setProgress,
+      request:async(messages,requestSignal)=>{
+        const token=await client.getIdToken();
+        return postApiStream(chatStreamPath(import.meta.env.VITE_AI_SDK_CHAT_ENABLED),{
+          asset:market.asset,maxTokens:6000,includeMarketContext:false,researchMode:false,messages
+        },'OpenRouter',()=>{},AbortSignal.any([requestSignal,AbortSignal.timeout(55_000)]),token);
+      }
+    });
     setCode(source);
     setNotice('AI draft ready. Review the generated code before saving or running it.');
   });
