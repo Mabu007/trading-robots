@@ -36,6 +36,7 @@ import { deleteR2Object, getR2Config, listR2Objects, readR2Object, writeR2Object
 import {recordAIUsage} from './usage.ts';
 import { BotEconomy, economyRoutes } from './bot-economy.ts';
 import { sharedBotRoutes } from './shared-bots.ts';
+import { shareAccessRoutes } from './robot-access.ts';
 import { marketplace,marketplaceRoutes } from './marketplace.ts';
 import { FirestoreStore } from './firestore-store.ts';
 import { ValrMarketData } from './valr-market-data.ts';
@@ -58,7 +59,7 @@ const venueMarketData = new VenueMarketData(fetch,Date.now,{
   write:async(key,value)=>{if(getR2Config())await writeR2Object(key,value)}
 });
 const dwellirHistory = new DwellirHistory();
-app.use(['/api/marketplace','/api/economy','/api/valr','/api/venues','/api/openrouter','/api/chat','/api/code-watches','/api/apps','/api/ai-sdk','/api/news','/api/agent'],requestLimit);
+app.use(['/api/shared-bots','/api/marketplace','/api/economy','/api/valr','/api/venues','/api/openrouter','/api/chat','/api/code-watches','/api/apps','/api/ai-sdk','/api/news','/api/agent'],requestLimit);
 app.use(express.json({ limit: '10mb' }));
 
 
@@ -230,6 +231,8 @@ const agentRuntimeStatus=async(uid:string,agent:AgentRecord)=>{
 agentRoutes(app,{uid:firebaseUidOrReply,registry:agentRegistry,bot:ownedAgentBot,ready:()=>FirestoreStore.configured(),runtimeStatus:agentRuntimeStatus});
 economyRoutes(app,economy,async(req,res)=>{const uid=await firebaseUidOrReply(req,res);return uid?res.locals.identity:null;});
 const publications = sharedBotRoutes(app, { read: readR2Object, write: writeR2Object, remove: deleteR2Object, uid: firebaseUidOrReply, root: userBotRoot,...(FirestoreStore.configured()?{onPublish:(bot:any)=>economy.publishSharedBot(bot),onAcquire:async(uid:string,id:string,bot:any)=>{if(!await marketplace.store.get(`marketplaceBots/${id}`))await marketplace.publish(bot);return economy.acquireSharedBot(uid,bot)},onUnpublish:(uid:string,id:string)=>marketplace.unpublish(uid,id),onView:(bot:any,visitor:string)=>marketplace.view(bot,visitor)}:{}) });
+if(FirestoreStore.configured())shareAccessRoutes(app,{store:marketplace.store,read:readR2Object,write:writeR2Object,root:userBotRoot,uid:firebaseUidOrReply});
+else app.all(['/api/shared-bots/:shareId/requests','/api/shared-bots/:shareId/my-access','/api/shared-bots/:shareId/copy','/api/user-bots/:botId/access-requests','/api/user-bots/:botId/access-requests/:requestId/:decision'],(_req,res)=>res.status(503).json({error:'Sharing requires server-side Firebase configuration.'}));
 marketplaceRoutes(app,{uid:firebaseUidOrReply,read:readR2Object,write:writeR2Object,root:userBotRoot});
 
 app.put('/api/user-bots/:botId/current', async (req, res) => {

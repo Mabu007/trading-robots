@@ -936,14 +936,13 @@ SAVED CODE CATALOGUE (user-owned names/metadata; load the exact source before de
  useEffect(()=>{const onRoute=()=>{const id=sharedIdFromPath(window.location.pathname);setPublicBotId(id);setPendingSharedAction(null);setShareError('');setScreen(id?'shared':authReady?'bots':window.location.pathname==='/sign-in'?'auth':'landing')};window.addEventListener('popstate',onRoute);return()=>window.removeEventListener('popstate',onRoute)},[authReady]);
  const openSharedAction=async(action:'backtest'|'connect'|'start')=>{
   if(!publicBotId||shareBusy)return;
-  if(!authReady||!cloudClient){setPendingSharedAction(action);setScreen('auth');return}
+  if(!authReady||!cloudClient){setPendingSharedAction('backtest');setScreen('auth');return}
+  if(action!=='backtest'){setShareError('Request access to the robot before using it with your account.');return}
   setShareBusy(true);setShareError('');
   try{
-   if(action==='connect'){setBrokerOpen(true);return;}
-   if(action==='start'){setFollowingId(publicBotId);return;}
-   const copyId=`shared-${publicBotId}`;
-   let bot=cloudBots.find(item=>item.id===copyId);
-   if(!bot){const copied=await sharingRequest<{bot:CloudBot}>(cloudClient,`/api/shared-bots/${encodeURIComponent(publicBotId)}/copy`,'POST',{});bot=copied.bot;await cloudClient.saveBot(bot,bot.storageKey!);setCloudBots(items=>[bot!,...items.filter(item=>item.id!==bot!.id)])}
+   const copied=await sharingRequest<{bot:CloudBot}>(cloudClient,'/api/shared-bots/'+encodeURIComponent(publicBotId)+'/copy','POST',{});
+   const bot=cloudBots.find(item=>item.id===copied.bot.id)||copied.bot;
+   setCloudBots(items=>[bot,...items.filter(item=>item.id!==bot.id)]);
    await openCloudBot(bot);
    setQueuedBacktest(bot.id);setPublicBotId(null);window.history.pushState({},'','/');
   }catch(cause){setShareError(err(cause));setScreen('shared')}
