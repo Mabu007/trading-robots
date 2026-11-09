@@ -6,6 +6,7 @@
 import type {TaskRecord} from '../shared/agent-task-state.ts';
 import type {DemoPolicy} from './agent-demo-policy.ts';
 import {summarizeDeploymentState} from './agent-task-monitor.ts';
+import {candidateBotId} from './agent-autonomy-activation.ts';
 export type SupervisionOutcome={
  outcome:'running'|'stopped'|'retry'|'research'|'halted';
  botId?:string;codeHash?:string;exposure:'open'|'pending'|'flat'|'unknown';message:string;
@@ -20,7 +21,8 @@ export type SupervisorDeps={
  now?:()=>number;
 };
 export async function superviseDemoTask(task:TaskRecord,deps:SupervisorDeps):Promise<SupervisionOutcome>{
- const id=task.autonomy?.botId,uid=task.ownerUid,now=(deps.now||Date.now)();
+ const candidate=task.memory.artifacts.filter(a=>a.kind==='evaluation'&&a.codeHash&&a.reviewEligible).at(-1);
+ const id=task.autonomy?.botId||(candidate?.codeHash?candidateBotId(task.ownerUid,task.id,candidate.codeHash):undefined),uid=task.ownerUid,now=(deps.now||Date.now)();
  if(!task.autonomy?.enabled) return {outcome:'halted',exposure:'unknown',message:'Autonomy is not enabled on this task'};
  if(!id)return {outcome:task.autonomy.stopRequested?'stopped':'research',exposure:'unknown',message:'No robot has been activated'};
  const fallback=(outcome:SupervisionOutcome['outcome'],message:string):SupervisionOutcome=>({

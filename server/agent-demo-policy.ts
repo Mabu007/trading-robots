@@ -34,7 +34,7 @@ export function verifyPropDAODemoAccount(account:unknown,operatorAllowlist:strin
  const providerDemo=a.demo===true||a.isDemo===true||a.environment==='demo'||
   challenge.demo===true||challenge.isDemo===true||challenge.environment==='demo';
  const optedEvaluation=consentedEvaluation&&brokerSimulated&&a.status==='active'&&
-  typeof challenge.name==='string'&&/\bevaluation\b/i.test(challenge.name);
+  [challenge.name,challenge.type,challenge.mode].some(v=>typeof v==='string'&&/\bevaluation\b|\biron\b/i.test(v));
  const listed=typeof a.accountId==='string'&&(operatorAllowlist||'').split(',').map(v=>v.trim()).filter(Boolean).includes(a.accountId);
  const explicitlyLive=a.realMoney===true||a.isLive===true||a.environment==='live'||a.accountType==='live'||
   challenge.live===true||challenge.realMoney===true;

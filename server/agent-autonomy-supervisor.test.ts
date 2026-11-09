@@ -40,6 +40,16 @@ describe('PropDAO autonomous run-until-stopped supervisor',()=>{
   const breached=deps({snapshot:vi.fn(async()=>({...await deps().snapshot(),risk:{breached:true,equity:990,roomUsd:5}}))});
   await superviseDemoTask(task,breached);expect(breached.stop).toHaveBeenCalled();
  });
+ it('can derive a candidate robot while STOP races with first activation acknowledgement',async()=>{
+  const codeHash='c'.repeat(64);
+  const pending={...task,autonomy:{...task.autonomy!,botId:undefined,codeHash:undefined,stopRequested:true},
+   memory:{...task.memory,artifacts:[{kind:'evaluation' as const,id:'eval_123456789',codeHash,reviewEligible:true,updatedAt:new Date(now).toISOString()}]}};
+  const d=deps({status:vi.fn(async()=>({connected:true,configured:true,running:false,paused:false,
+   activeAuthorization:false,brokerExposure:'flat',brokerExposureVerified:true}))});
+  await superviseDemoTask(pending,d);
+  expect(d.stop).toHaveBeenCalledTimes(1);
+  expect(d.stop.mock.calls[0][1]).toMatch(/^autobot_[a-f0-9]{32}$/);
+ });
  it('never treats uncertain exposure as zero or silently renews deployment',async()=>{
   const d=deps({status:vi.fn(async()=>({connected:true,configured:true,running:false,brokerExposure:'flat',brokerExposureVerified:false}))});
   const r=await superviseDemoTask(task,d);expect(r).toMatchObject({outcome:'retry',exposure:'unknown'});

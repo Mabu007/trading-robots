@@ -55,7 +55,7 @@ export class DurableAgentTask extends DurableObject<Env>{
    return Response.json({task:updated});
   }
   if(path==='/cancel'&&req.method==='POST'){
-   const persistent=state.autonomy?.enabled&&state.autonomy.botId;
+   const persistent=state.autonomy?.enabled===true;
    const updated={...state,status:persistent?'stopping' as const:'cancelled' as const,
     leaseId:undefined,stateVersion:state.stateVersion+1,updatedAt:Date.now(),
     ...(state.autonomy?{autonomy:{...state.autonomy,stopRequested:true,stage:'stopping' as const}}:{})};
