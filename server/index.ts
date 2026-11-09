@@ -17,6 +17,7 @@ import {chatToolRoutes} from './chat-tools.ts';
 import {registerAIPlatformRoutes} from './ai-platform.ts';
 import {registerAgentTaskRoutes} from './agent-task-routes.ts';
 import {agentDemoPolicyRoutes} from './agent-demo-policy-routes.ts';
+import {DemoPolicyStore} from './agent-demo-policy.ts';
 import {phase2FeatureEnabled,phase2SharedModelTestEnabled} from './phase2-feature-gates.ts';
 import {createAgentBacktestTool,agentBacktestInputSchema} from './agent-backtest-tools.ts';
 import {createBrokerConnectionReadTool} from './agent-broker-read.ts';
@@ -183,6 +184,8 @@ agentDemoPolicyRoutes(app,{uid:firebaseUidOrReply,store:marketplace.store,accoun
 registerAgentTaskRoutes(app,{
  uidOrReply:firebaseUidOrReply,accounts:openRouterAccounts,market:venueMarketData,
  read:readR2Object,write:writeR2Object,tasks:marketplace.store,propdao:propdaoAccounts,
+ deploymentStatus:async(uid,botId)=>propdaoLiveService.status(uid,botId),
+ policyStatus:async(uid,policyId)=>new DemoPolicyStore(marketplace.store).owned(uid,policyId),
  owned:async(uid,id)=>{
   if(!FirestoreStore.configured())return null;
   const record=await marketplace.store.get('users/'+uid+'/bots/'+id);

@@ -32,6 +32,22 @@ export class DurableAgentTask extends DurableObject<Env>{
   }
   if(!state)return Response.json({error:'Unknown task'},{status:404});
   if(path==='/status'&&req.method==='GET')return Response.json({task:state});
+  if(path==='/policy'&&req.method==='POST'){
+   if(['completed','cancelled','failed'].includes(state.status))return Response.json({error:'Cannot link a policy to a terminal task'},{status:409});
+   const body=await req.json<Partial<NonNullable<TaskRecord['policy']>>>().catch(()=>null);
+   if(!body||typeof body.policyId!=='string'||!idPattern.test(body.policyId)||
+    typeof body.fingerprint!=='string'||!/^[a-f0-9]{64}$/.test(body.fingerprint)||
+    typeof body.accountId!=='string'||!idPattern.test(body.accountId)||
+    !Number.isFinite(body.expiresAt)||Number(body.expiresAt)<=Date.now()||
+    !['bounded-demo','full-demo'].includes(String(body.mode)))return Response.json({error:'Invalid verified policy pointer'},{status:400});
+   const policy:NonNullable<TaskRecord['policy']> = {
+    policyId:body.policyId,fingerprint:body.fingerprint,accountId:body.accountId,
+    expiresAt:body.expiresAt!,mode:body.mode!,linkedAt:Date.now()
+   };
+   const updated={...state,policy,stateVersion:state.stateVersion+1,updatedAt:Date.now()};
+   await this.ctx.storage.put('task',updated);
+   return Response.json({task:updated});
+  }
   if(path==='/cancel'&&req.method==='POST'){
    const updated={...state,status:'cancelled' as const,leaseId:undefined,stateVersion:state.stateVersion+1,updatedAt:Date.now()};
    await this.ctx.storage.put('task',updated);
@@ -94,7 +110,7 @@ export default {async fetch(req:Request,env:Env){
  if(!(await authorized(req.headers.get('authorization')||'',env.VIBES_TASK_INTERNAL_SECRET)))return Response.json({error:'Internal authorization required'},{status:401});
  const path=new URL(req.url).pathname.split('/').filter(Boolean);
  if(path.length===1&&path[0]==='health')return Response.json({ready:true,runtime:'durable-task-memory'});
- if(path.length!==3||path[0]!=='tasks'||!idPattern.test(path[1])||!['start','status','cancel','pause','resume'].includes(path[2]))return Response.json({error:'Unknown task route'},{status:404});
+ if(path.length!==3||path[0]!=='tasks'||!idPattern.test(path[1])||!['start','status','cancel','pause','resume','policy'].includes(path[2]))return Response.json({error:'Unknown task route'},{status:404});
  const uid=req.headers.get('X-TV-UID')||'';
  if(!uidPattern.test(uid))return Response.json({error:'Invalid owner'},{status:403});
  const key=new TextEncoder().encode(uid+':'+path[1]);const digest=await crypto.subtle.digest('SHA-256',key);

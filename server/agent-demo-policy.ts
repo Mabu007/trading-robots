@@ -25,6 +25,18 @@ export type DemoPolicy={
 const key=(uid:string,id:string)=>'users/'+uid+'/agent-policies/'+id;
 const strongId=/^[A-Za-z0-9_-]{8,100}$/;
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
+/** A challenge name or generic "simulated" connector mode is NOT a broker demo attestation. */
+export function verifyPropDAODemoAccount(account:unknown,operatorAllowlist:string|undefined=process.env.PROPDAO_AUTONOMY_DEMO_ACCOUNT_IDS):boolean{
+ if(!account||typeof account!=='object')return false;
+ const a=account as Record<string,unknown>;
+ const challenge=a.challenge&&typeof a.challenge==='object'?a.challenge as Record<string,unknown>:{};
+ const providerDemo=a.demo===true||a.isDemo===true||a.environment==='demo'||
+  challenge.demo===true||challenge.isDemo===true||challenge.environment==='demo';
+ const listed=typeof a.accountId==='string'&&(operatorAllowlist||'').split(',').map(v=>v.trim()).filter(Boolean).includes(a.accountId);
+ const explicitlyLive=a.realMoney===true||a.isLive===true||a.environment==='live'||a.accountType==='live'||
+  challenge.live===true||challenge.realMoney===true;
+ return Boolean((providerDemo||listed)&&!explicitlyLive&&a.status==='active'&&challenge&&Object.keys(challenge).length>0);
+}
 export function evaluateDemoPolicy(policy:DemoPolicy,action:{
  uid:string;accountId:string;instrument:string;riskUsd:number;action:'deploy'|'replace'|'monitor';now:number;
  existingPositions?:number|null;existingOrders?:number|null;breached?:boolean|null;exposureVerified:boolean;
@@ -44,9 +56,9 @@ export class DemoPolicyStore{
  private readonly store:Pick<RecordStore,'get'|'create'|'put'|'query'|'transaction'>;
  private readonly clock:()=>number;
  constructor(store:Pick<RecordStore,'get'|'create'|'put'|'query'|'transaction'>,clock:()=>number=Date.now){this.store=store;this.clock=clock;}
- async create(uid:string,data:z.infer<typeof demoPolicyInput>,broker:{simulated:boolean;owned:boolean;status:string;breached:boolean;roomUsd:number}):Promise<DemoPolicy>{
+ async create(uid:string,data:z.infer<typeof demoPolicyInput>,broker:{simulated:boolean;owned:boolean;evaluation:boolean;realMoney:boolean;status:string;breached:boolean;roomUsd:number}):Promise<DemoPolicy>{
   const input=demoPolicyInput.parse(data);
-  if(!uid||uid.length>128||!broker.simulated||!broker.owned||!['active','funded'].includes(broker.status)||broker.breached||!Number.isFinite(broker.roomUsd)||broker.roomUsd<=input.maxRiskUsd*4)throw Error('Connected owned PropDAO demo account or risk room is not verified.');
+  if(!uid||uid.length>128||!broker.simulated||!broker.owned||!broker.evaluation||broker.realMoney||broker.status!=='active'||broker.breached||!Number.isFinite(broker.roomUsd)||broker.roomUsd<=input.maxRiskUsd*4)throw Error('A verified active evaluation-only demo account and safe risk room are required. Funded or unclassified accounts are excluded.');
   if(new Set(input.instruments).size!==input.instruments.length)throw Error('Duplicate instruments are not permitted.');
   const existing=await this.store.query('users/'+uid+'/agent-policies');
   if(existing.some(x=>x.ownerUid===uid&&x.accountId===input.accountId&&x.revokedAt===null&&x.expiresAt>this.clock()))throw Error('An active standing policy already exists on this account. Revoke it before replacing the scope.');

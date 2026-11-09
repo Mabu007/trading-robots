@@ -3,7 +3,9 @@ import {Activity,ArrowRight,CheckCircle2,FileCode2,ShieldCheck,XCircle} from 'lu
 import type {CloudClient} from '../firebase';
 import {readApiJson} from '../api';
 import type {TaskRecord} from '../../shared/agent-task-state';
+import type {DemoPolicy} from '../../server/agent-demo-policy.ts';
 import './agent-task-panel.css';
+import {AgentDemoPolicyPanel} from './AgentDemoPolicyPanel';
 
 async function taskRequest<T>(client:CloudClient,path:string,method:'GET'|'POST'='GET',body?:unknown):Promise<T>{
  const request=async(refresh:boolean)=>{
@@ -23,6 +25,23 @@ export function AgentTaskPanel({client}:{client:CloudClient}){
  const [busy,setBusy]=useState(false),[error,setError]=useState('');
  const [draft,setDraft]=useState('');
  const [recent,setRecent]=useState<{id:string;objective:string;createdAt:number;status:string}[]>([]);
+ const [policies,setPolicies]=useState<DemoPolicy[]>([]);
+ const [policyId,setPolicyId]=useState('');
+ const refreshPolicies=async()=>{
+  const response=await taskRequest<{policies:DemoPolicy[]}>(client,'/api/agent-policies');
+  const active=response.policies.filter(p=>p.demoOnly&&p.revokedAt===null&&p.expiresAt>Date.now());
+  setPolicies(active);setPolicyId(id=>active.some(p=>p.id===id)?id:active[0]?.id||'');
+ };
+ useEffect(()=>{if(!task)return;void refreshPolicies().catch(()=>{});},[client,task?.id]);
+ const attachPolicy=async()=>{
+  if(!task||!policyId||busy)return;
+  setBusy(true);setError('');
+  try{
+   const result=await taskRequest<{task:TaskRecord}>(client,'/api/agent-tasks/'+encodeURIComponent(task.id)+'/policy','POST',{policyId});
+   setTask(result.task);
+  }catch(cause){setError(cause instanceof Error?cause.message:'Could not bind the demo-only policy')}
+  finally{setBusy(false)}
+ };
  useEffect(()=>{
   let active=true;
   void taskRequest<{tasks:{id:string;objective:string;createdAt:number;status:string}[]}>(client,'/api/agent-tasks')
@@ -100,6 +119,19 @@ export function AgentTaskPanel({client}:{client:CloudClient}){
   </div>:<div className="tv-agent-task-progress">
    <div className="tv-agent-task-status"><strong>{task.phase.toUpperCase()} · {task.status.replaceAll('_',' ')}</strong><span>Step {task.iteration} / {task.maxIterations}</span></div>
    <p>{task.memory.lastResult||task.memory.summary||'Task accepted. Preparing the first evidence-gathering step.'}</p>
+   <div className="tv-agent-task-policy-link">
+    <strong>Demo policy for this task</strong>
+    {task.policy?<p>{'Linked policy: '+task.policy.accountId+' · '+task.policy.mode+' · expires '+new Date(task.policy.expiresAt).toLocaleString()}</p>:
+     <p>No standing policy linked. VIBES can conduct research, but cannot operate a broker account.</p>}
+    <div><select value={policyId} onChange={event=>setPolicyId(event.target.value)}>
+     {policies.length===0&&<option value="">No active, demo-only policy</option>}
+     {policies.map(p=><option key={p.id} value={p.id}>{p.accountId+' · '+p.mode}</option>)}
+    </select>
+    <button type="button" disabled={busy||!policyId} onClick={()=>void attachPolicy()}>Link policy</button>
+    <button type="button" onClick={()=>void refreshPolicies().catch(e=>setError(e instanceof Error?e.message:'Policy list unavailable'))}>Refresh policies</button>
+    </div>
+    <small>Linking a policy does not enable autonomous deployment. Its scope is checked again server-side before any future execution action.</small>
+   </div>
    {task.memory.plan.length>0&&<ol>{task.memory.plan.map((item,index)=><li key={index}>{item}</li>)}</ol>}
    {task.memory.artifacts.length>0&&<div className="tv-agent-task-artifacts">{task.memory.artifacts.map(item=><div key={item.kind+item.id}>
     {item.kind==='draft'?<FileCode2 size={16}/>:<CheckCircle2 size={16}/>}
@@ -115,5 +147,6 @@ export function AgentTaskPanel({client}:{client:CloudClient}){
    </div>
   </div>}
   {error&&<p className="tv-agent-task-error" role="alert">{error}</p>}
+  <AgentDemoPolicyPanel client={client}/>
  </section>;
 }

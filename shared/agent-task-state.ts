@@ -1,12 +1,13 @@
 /** User-scoped durable task contract. Stores decisions and evidence, never chain-of-thought or credentials. */
 export type TaskPhase='discovery'|'research'|'authoring'|'validation'|'backtesting'|'evaluation'|'review';
 export type TaskStatus='queued'|'running'|'retrying'|'paused'|'waiting_for_review'|'completed'|'blocked'|'failed'|'cancelled';
-export type TaskArtifact={kind:'draft'|'backtest'|'evaluation'|'market-evidence';id:string;codeHash?:string;venue?:string;asset?:string;quality?:'reference'|'verified';reviewEligible?:boolean;updatedAt:string};
+export type TaskArtifact={kind:'draft'|'draft-fragment'|'backtest'|'evaluation'|'market-evidence';id:string;codeHash?:string;venue?:string;asset?:string;quality?:'reference'|'verified';reviewEligible?:boolean;updatedAt:string};
 export type TaskMemory={summary:string;plan:string[];facts:string[];artifacts:TaskArtifact[];lastResult:string};
 export type TaskRecord={
  schemaVersion:1;stateVersion:number;id:string;ownerUid:string;objective:string;status:TaskStatus;phase:TaskPhase;
  createdAt:number;updatedAt:number;deadlineAt:number;iteration:number;maxIterations:number;
  failureCount:number;nextRunAt:number;lastError?:string;leaseId?:string;
+ policy?:{policyId:string;fingerprint:string;accountId:string;expiresAt:number;mode:'bounded-demo'|'full-demo';linkedAt:number};
  memory:TaskMemory;
 };
 export type TaskStepResult={
@@ -14,10 +15,26 @@ export type TaskStepResult={
  next:'continue'|'completed'|'waiting_for_review'|'blocked';message:string;
 };
 export const emptyTaskMemory=():TaskMemory=>({summary:'',plan:[],facts:[],artifacts:[],lastResult:''});
-const compact=(s:unknown,n:number)=>typeof s==='string'?s.replace(/sk-or-v1-[a-z0-9]{16,}/gi,'[REDACTED]').replace(/Bearer\s+[A-Za-z0-9._-]{24,}/g,'Bearer [REDACTED]').slice(0,n):'';
+const compact=(s:unknown,n:number)=>typeof s==='string'?s
+ .replace(/sk-or-v1-[a-z0-9]{16,}/gi,'[REDACTED]')
+ .replace(/pd_live_[a-z0-9_-]{16,}/gi,'[REDACTED]')
+ .replace(/Bearer\s+[A-Za-z0-9._-]{24,}/gi,'Bearer [REDACTED]')
+ .replace(/((?:api[_-]?key|password|client[_-]?secret)\s*[:=]\s*)['"]?[A-Za-z0-9._-]{16,}['"]?/gi,'$1[REDACTED]')
+ .slice(0,n):'';
+/** Scrub credential-shaped material before Firestore receipts and Durable Object checkpoints. */
+export function sanitizeTaskStepResult(r:TaskStepResult):TaskStepResult{
+ return {
+  phase:r.phase,next:r.next,
+  summary:compact(r.summary,2500),message:compact(r.message,1400),
+  plan:(r.plan||[]).slice(0,12).map(x=>compact(x,180)),
+  facts:(r.facts||[]).slice(-16).map(x=>compact(x,250)),
+  artifacts:(r.artifacts||[]).filter(x=>x&&/^[a-z0-9_-]{8,100}$/i.test(x.id)).slice(0,12)
+ };
+}
 export function applyTaskStep(task:TaskRecord,result:TaskStepResult,now:number):TaskRecord{
+ result=sanitizeTaskStepResult(result);
  const artifacts=new Map(task.memory.artifacts.map(a=>[a.kind+':'+a.id,a]));
- for(const a of result.artifacts.slice(0,12))if(a&&/^[a-z0-9_-]{8,100}$/i.test(a.id)&&['draft','backtest','evaluation','market-evidence'].includes(a.kind))artifacts.set(a.kind+':'+a.id,a);
+ for(const a of result.artifacts.slice(0,12))if(a&&/^[a-z0-9_-]{8,100}$/i.test(a.id)&&['draft','draft-fragment','backtest','evaluation','market-evidence'].includes(a.kind))artifacts.set(a.kind+':'+a.id,a);
  const memory:TaskMemory={
   summary:compact(result.summary,2500),
   plan:result.plan.slice(0,12).map(x=>compact(x,180)),

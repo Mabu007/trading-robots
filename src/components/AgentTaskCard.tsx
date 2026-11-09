@@ -7,6 +7,7 @@ import './agent-task-card.css';
 const terminal=new Set(['completed','blocked','failed','cancelled','waiting_for_review']);
 export function AgentTaskCard({client,taskId,onOpenScheduled}:{client:CloudClient;taskId:string;onOpenScheduled:()=>void}){
  const [task,setTask]=useState<TaskRecord|null>(null),[error,setError]=useState(''),[working,setWorking]=useState(false);
+ const [events,setEvents]=useState<{iteration:number;at:number;phase:string;summary:string;outcome:string}[]>([]);
  useEffect(()=>{
   let active=true;
   const poll=async()=>{try{
@@ -17,6 +18,18 @@ export function AgentTaskCard({client,taskId,onOpenScheduled}:{client:CloudClien
   const timer=window.setInterval(()=>{if(!terminal.has(task?.status||''))void poll()},4000);
   return ()=>{active=false;window.clearInterval(timer);};
  },[client,taskId,task?.status]);
+ useEffect(()=>{
+  let active=true;
+  const poll=async()=>{
+   try{
+    const r=await sharingRequest<{events:{iteration:number;at:number;phase:string;summary:string;outcome:string}[]}>(client,
+     '/api/agent-tasks/'+encodeURIComponent(taskId)+'/events');
+    if(active)setEvents(r.events.slice(-5));
+   }catch{/* Task status is authoritative; event history may be temporarily unavailable. */}
+  };
+  void poll();const timer=window.setInterval(()=>void poll(),30000);
+  return()=>{active=false;window.clearInterval(timer);};
+ },[client,taskId]);
  const control=async(action:'cancel'|'pause'|'resume')=>{
   if(working)return;setWorking(true);setError('');
   try{const result=await sharingRequest<{task:TaskRecord}>(client,'/api/agent-tasks/'+encodeURIComponent(taskId)+'/'+action,'POST');setTask(result.task);}
@@ -28,6 +41,10 @@ export function AgentTaskCard({client,taskId,onOpenScheduled}:{client:CloudClien
   <p>{task?.memory.lastResult||task?.memory.summary||'Loading checkpointed task progress…'}</p>
   {task&&<div className="tv-task-meta"><span><Clock3 size={13}/> {task.phase} · checkpoint {task.iteration}/{task.maxIterations}</span>
    <span>Deadline {new Date(task.deadlineAt).toLocaleString()}</span></div>}
+  {events.length>0&&<details className="tv-task-events"><summary>Verified task milestones ({events.length})</summary>
+   <ol>{events.map(event=><li key={event.iteration}><span>{new Date(event.at).toLocaleString()+' · '+event.phase}</span>
+    <p>{event.summary}</p></li>)}</ol></details>}
+  {task?.policy&&<p>{'Linked demo-only policy · '+task.policy.accountId+' · '+task.policy.mode+' · expires '+new Date(task.policy.expiresAt).toLocaleString()}. Automatic deployment remains disabled.</p>}
   {task?.memory.artifacts.length?<p>{task.memory.artifacts.filter(a=>a.kind==='draft').length} drafts · {task.memory.artifacts.filter(a=>a.kind==='backtest').length} reference backtests · {task.memory.artifacts.filter(a=>a.kind==='evaluation').length} evaluations</p>:null}
   {task?.status==='waiting_for_review'&&<p className="tv-task-review"><ShieldCheck size={15}/> Research candidate produced; demo deployment requires separate broker-specific validation and approval.</p>}
   {task?.lastError&&<p role="status">{task.lastError}</p>}

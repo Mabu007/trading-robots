@@ -1,12 +1,13 @@
 import {randomUUID,createHash,timingSafeEqual} from 'node:crypto';
 import type {Express,Request,Response} from 'express';
 import {z} from 'zod';
-import type {TaskRecord,TaskStepResult} from '../shared/agent-task-state.ts';
+import {sanitizeTaskStepResult,type TaskRecord,type TaskStepResult} from '../shared/agent-task-state.ts';
 import {runDurableTaskStep} from './agent-task-engine.ts';
 import type {OpenRouterAccounts} from './openrouter-account.ts';
 import type {PropDAOAccounts} from './propdao-account.ts';
 import type {VenueMarketData} from './venue-market-data.ts';
 import type {RecordStore} from './firestore-store.ts';
+import {DemoPolicyStore} from './agent-demo-policy.ts';
 
 const safeId=z.string().regex(/^[A-Za-z0-9_-]{8,100}$/);
 const uidSchema=z.string().min(1).max(128).regex(/^[\w:-]+$/);
@@ -17,11 +18,15 @@ const taskSchema=z.object({
  createdAt:z.number().int(),updatedAt:z.number().int(),deadlineAt:z.number().int(),
  iteration:z.number().int().nonnegative().max(80),maxIterations:z.number().int().min(1).max(80),
  failureCount:z.number().int().nonnegative().max(100),nextRunAt:z.number().int(),
- leaseId:z.string().optional(),lastError:z.string().optional(),memory:z.object({
+ leaseId:z.string().optional(),lastError:z.string().optional(),
+ policy:z.object({
+  policyId:safeId,fingerprint:z.string().regex(/^[a-f0-9]{64}$/),accountId:safeId,
+  expiresAt:z.number().int(),mode:z.enum(['bounded-demo','full-demo']),linkedAt:z.number().int()
+ }).strict().optional(),memory:z.object({
   summary:z.string().max(2500),plan:z.array(z.string().max(180)).max(12),
   facts:z.array(z.string().max(250)).max(16),
   artifacts:z.array(z.object({
-   kind:z.enum(['draft','backtest','evaluation','market-evidence']),id:safeId,codeHash:z.string().regex(/^[a-f0-9]{64}$/).optional(),
+   kind:z.enum(['draft','draft-fragment','backtest','evaluation','market-evidence']),id:safeId,codeHash:z.string().regex(/^[a-f0-9]{64}$/).optional(),
    venue:z.string().optional(),asset:z.string().optional(),quality:z.enum(['reference','verified']).optional(),reviewEligible:z.boolean().optional(),
    updatedAt:z.string()
   })).max(20),lastResult:z.string().max(1400)
@@ -30,6 +35,8 @@ const taskSchema=z.object({
 type Dependencies={
  uidOrReply:(req:Request,res:Response)=>Promise<string|null>;
  accounts:OpenRouterAccounts;market:VenueMarketData;propdao?:Pick<PropDAOAccounts,'list'|'accountRisk'>;
+ deploymentStatus?:(uid:string,botId:string)=>Promise<unknown>;
+ policyStatus?:(uid:string,policyId:string)=>Promise<import('./agent-demo-policy.ts').DemoPolicy>;
  read:(key:string)=>Promise<string|null>;
  write:(key:string,value:string)=>Promise<void>;
  owned:(uid:string,id:string)=>Promise<{id?:string;userId?:string;ownerUid?:string;asset?:string;venue?:string}|null>;
@@ -47,7 +54,7 @@ const validSecret=(presented:unknown,actual:string|undefined)=>{
  const a=createHash('sha256').update(presented).digest(),b=createHash('sha256').update('Bearer '+actual).digest();
  return timingSafeEqual(a,b);
 };
-async function callWorker(uid:string,id:string,action:'start'|'status'|'cancel'|'pause'|'resume',body?:unknown,request:typeof fetch=fetch){
+async function callWorker(uid:string,id:string,action:'start'|'status'|'cancel'|'pause'|'resume'|'policy',body?:unknown,request:typeof fetch=fetch){
  const target=process.env.VIBES_TASK_WORKER_URL,secret=process.env.VIBES_TASK_INTERNAL_SECRET;
  if(!taskRuntimeConfigured())throw Error('Durable agent task runtime is not configured');
  const uri=new URL('/tasks/'+id+'/'+action,target);
@@ -112,6 +119,41 @@ export function registerAgentTaskRoutes(app:Express,deps:Dependencies){
    }
   catch(error){return res.status(409).json({error:error instanceof Error?error.message:'Task could not be updated'});}
  });
+ app.post('/api/agent-tasks/:id/policy',async(req,res)=>{
+  const uid=await deps.uidOrReply(req,res);if(!uid)return;
+  const taskId=safeId.safeParse(req.params.id),policyId=z.string().uuid().safeParse(req.body?.policyId);
+  if(!taskId.success||!policyId.success)return res.status(400).json({error:'A valid task and policy ID are required'});
+  try{
+   const task=await callWorker(uid,taskId.data,'status');
+   if(['cancelled','completed','failed'].includes(task.status))return res.status(409).json({error:'Task is terminal'});
+   const stored=await new DemoPolicyStore(deps.tasks).owned(uid,policyId.data);
+   if(stored.revokedAt!==null||Date.now()>=stored.expiresAt||stored.demoOnly!==true||
+    !/^[a-f0-9]{64}$/.test(stored.fingerprint))return res.status(409).json({error:'Demo authorization is not active or verified'});
+   const linked=await callWorker(uid,taskId.data,'policy',{policyId:stored.id,
+    fingerprint:stored.fingerprint,accountId:stored.accountId,mode:stored.mode,expiresAt:stored.expiresAt});
+   return res.json({task:linked,executionEnabled:false,
+    warning:'A policy pointer is linked for research planning only. This does not authorize order placement.'});
+  }catch(error){return res.status(409).json({error:error instanceof Error?error.message:'Could not link policy'});}
+ });
+ app.get('/api/agent-tasks/:id/events',async(req,res)=>{
+  const uid=await deps.uidOrReply(req,res);if(!uid)return;
+  const id=safeId.safeParse(req.params.id);
+  if(!id.success)return res.status(400).json({error:'Invalid task ID'});
+  try{
+   const task=await callWorker(uid,id.data,'status');
+   if(task.ownerUid!==uid)return res.status(403).json({error:'Task owner mismatch'});
+   const receipts=await deps.tasks.query('users/'+uid+'/agentTaskReceipts');
+   const events=receipts.filter(row=>row.taskId===id.data&&row.ownerUid===uid&&
+    Number.isInteger(row.iteration)&&row.result&&typeof row.result==='object')
+    .sort((a,b)=>a.iteration-b.iteration).slice(-25).map(row=>({
+     iteration:row.iteration,at:row.savedAt,phase:row.result.phase,
+     summary:String(row.result.message||'').slice(0,400),
+     outcome:row.result.next,
+     artifacts:Array.isArray(row.result.artifacts)?row.result.artifacts.map((a:any)=>a.kind).slice(0,8):[]
+    }));
+   return res.json({taskId:id.data,events,brokerExecutionNotifications:false});
+  }catch{return res.status(503).json({error:'Task event history unavailable'});}
+ });
  app.get('/api/agent-tasks/:id/drafts/:draftId',async(req,res)=>{
   const uid=await deps.uidOrReply(req,res);if(!uid)return;
   const id=safeId.safeParse(req.params.id),draft=z.string().regex(/^draft_[a-f0-9]{32}$/).safeParse(req.params.draftId);
@@ -141,7 +183,7 @@ export function registerAgentTaskRoutes(app:Express,deps:Dependencies){
    const prior=await deps.tasks.get(receiptPath);
    if(prior?.taskId===task.id&&prior.ownerUid===task.ownerUid&&prior.iteration===task.iteration&&prior.result)
     return res.json(prior.result);
-   const receipt=await runDurableTaskStep(task,deps);
+   const receipt=sanitizeTaskStepResult(await runDurableTaskStep(task,deps));
    await deps.tasks.put(receiptPath,{taskId:task.id,ownerUid:task.ownerUid,iteration:task.iteration,result:receipt,savedAt:Date.now()});
    return res.json(receipt satisfies TaskStepResult);
   }catch(error){

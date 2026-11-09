@@ -9,17 +9,22 @@ import {evaluateCandidateWindows,type CandidateWindow} from './agent-candidate-e
 import {researchBrief} from './ai-research.ts';
 import {getHyperliquidBook} from './hyperliquid-book.ts';
 import {getHyperliquidTradeSummary} from './hyperliquid-trades.ts';
+import {summarizeDeploymentState} from './agent-task-monitor.ts';
+import {makeDraftFragment,assembleDraftFragments,type DraftFragment} from './agent-task-fragments.ts';
 import {parseStrategyConfig,validateStrategySyntax} from '../src/strategy.ts';
 import {intervalMs,type MarketTimeframe} from './market-data.ts';
 import type {VenueMarketData} from './venue-market-data.ts';
 import type {OpenRouterAccounts} from './openrouter-account.ts';
 import type {PropDAOAccounts} from './propdao-account.ts';
+import type {DemoPolicy} from './agent-demo-policy.ts';
 
 type OwnedMeta={id?:string;userId?:string;ownerUid?:string;asset?:string;venue?:string};
 type Dependencies={
  accounts:OpenRouterAccounts;
  market:VenueMarketData;
  propdao?:Pick<PropDAOAccounts,'list'|'accountRisk'>;
+ deploymentStatus?:(uid:string,botId:string)=>Promise<unknown>;
+ policyStatus?:(uid:string,policyId:string)=>Promise<DemoPolicy>;
  read:(key:string)=>Promise<string|null>;
  write:(key:string,value:string)=>Promise<void>;
  owned:(uid:string,botId:string)=>Promise<OwnedMeta|null>;
@@ -40,14 +45,17 @@ const stepPrompt=(task:TaskRecord)=>{
  return [
   'USER OBJECTIVE: '+task.objective,
   'Current UTC date: '+new Date().toISOString(),
+  'Linked authorization pointer (informational until server revalidation): '+JSON.stringify(task.policy??null),
   'TASK PHASE: '+task.phase+'. Step: '+(task.iteration+1)+' of '+task.maxIterations+'. Deadline: '+new Date(task.deadlineAt).toISOString(),
   'Durable compact memory summary: '+memory.summary,
   'Plan: '+JSON.stringify(memory.plan),
   'Evidence facts: '+JSON.stringify(memory.facts),
   'Saved artifact REFERENCES (use tools to read drafts; do not reprint source in memory): '+JSON.stringify(memory.artifacts),
   'For a strategy: create a valid draft, backtest on chronologically disjoint train/holdout windows with the SAME code hash, call evaluateCandidate, then revise/reject as needed. A single green backtest is not sufficient.',
+  'For lengthy complete strategy.js sources, call writeDraftFragment for ordered bounded segments and finishDraftFragments after all chunks exist. Fragment IDs survive checkpoints. Do NOT concatenate source mentally across model contexts.',
   'Last public progress note: '+memory.lastResult,
   'Choose any missing capabilities, fetch evidence, write/update a candidate draft, backtest and diagnose mistakes. You may inspect existing owner-scoped robots.',
+  'Use readTaskPolicy to verify a linked demo policy against the latest server record. Do not confuse a policy pointer with permission to deploy.' ,
   'For a prop-firm strategy, investigate excessive R loss, drawdown, loss limits, sample size, execution costs and out-of-sample uncertainty. No code is automatically deployed.',
   'Use the recordProgress tool for a concise plan/phase update; finishTask only when you have actual evidence or a documented blocker.',
   'If you have no further useful work at this step, finishTask as blocked with the specific reason.'
@@ -60,7 +68,10 @@ export async function runDurableTaskStep(task:TaskRecord,deps:Dependencies):Prom
  const account=await deps.accounts.load(uid);
  if(!account?.apiKey||!account.model)throw Error('Connect an OpenRouter API key and choose a model with tool calling before starting an agent task');
  const catalog=await deps.accounts.models();
- if(!catalog.some(x=>x.id===account.model))throw Error('Chosen OpenRouter model is unavailable; choose a supported model');
+ const selectedModel=catalog.find(x=>x.id===account.model);
+ if(!selectedModel)throw Error('Chosen OpenRouter model is unavailable; choose a supported model');
+ if(selectedModel.supportedParameters?.length&&!selectedModel.supportedParameters.includes('tools'))
+  throw Error('Selected OpenRouter model does not advertise tool calling. Choose a tool-capable model to run a durable agent.');
  const provider=createOpenAICompatible({name:'openrouter',baseURL:'https://openrouter.ai/api/v1',apiKey:account.apiKey,
   headers:{'HTTP-Referer':process.env.APP_URL||'https://trading-robots.vercel.app','X-Title':'Trading Vibes Durable Agent'}});
  let phase:TaskStepResult['phase']=task.phase;
@@ -75,6 +86,25 @@ export async function runDurableTaskStep(task:TaskRecord,deps:Dependencies):Prom
  function boundedCall(){
   calls++;
   if(calls>10)throw Error('Agent tool budget exceeded for this step');
+ }
+ async function persistDraft(source:string,asset:string,venue:'propdao'|'hyperliquid',hypothesis:string){
+  const config=parseStrategyConfig(source);validateStrategySyntax(source);
+  if(/sk-or-v1-[A-Za-z0-9]{20,}|(?:api[_-]?key|secret|password)\s*[:=]\s*[\"\'][^\"\']{12,}/i.test(source))
+   throw Error('Strategy draft appears to contain a credential; remove secrets from code');
+  if(venue==='propdao'&&config.riskPercent>0.5)
+   throw Error('Proposed PropDAO risk exceeds 0.5% per-trade research maximum');
+  if(!/export\s+function\s+onCandle\s*\(/.test(source)||config.timeframes.length>4)
+   throw Error('Missing onCandle or too many timeframes');
+  const id=codeId(source),codeHash=hash(source),now=new Date().toISOString();
+  const record={ownerUid:uid,taskId:task.id,codeHash,asset,venue,source,hypothesis,createdAt:now};
+  await deps.write(archiveKey(uid,task.id,id),JSON.stringify(record));
+  artifacts.push({kind:'draft',id,codeHash,venue,asset,quality:'reference',updatedAt:now});
+  audit('strategy.draft',true,'validated static strategy contract for '+id);
+  return {available:true,draftId:id,codeHash,asset,venue,
+   config:{timeframes:config.timeframes,executionTimeframe:config.executionTimeframe,
+    riskPercent:config.riskPercent,riskReward:config.riskReward},
+   savedTo:'immutable, owner-scoped task scratch, not strategy library',
+   next:'Call backtestDraft with this exact draftId.'};
  }
  const tools={
   discoverCapabilities:tool({
@@ -154,6 +184,46 @@ export async function runDurableTaskStep(task:TaskRecord,deps:Dependencies):Prom
      limitation:'Last bars are completed Hyperliquid derivative candles, not broker fills.'};
    }
   }),
+  readTaskPolicy:tool({
+   description:'Read the independently verified latest demo-only standing authorization linked to this task. This tool can report available scope but CANNOT create policy, deploy, change risk or place orders.',
+   inputSchema:z.object({reason:z.string().max(200)}).strict(),
+   execute:async()=>{
+    boundedCall();
+    if(!task.policy)return {linked:false,active:false,executionEnabled:false,reason:'No signed policy linked to this task'};
+    if(!deps.policyStatus)return {linked:true,active:false,executionEnabled:false,reason:'Policy verification unavailable'};
+    try{
+     const p=await deps.policyStatus(uid,task.policy.policyId);
+     const active=p.ownerUid===uid&&p.demoOnly===true&&p.venue==='propdao'&&p.revokedAt===null&&
+      p.expiresAt>(deps.now?.()??Date.now())&&p.fingerprint===task.policy.fingerprint&&
+      p.accountId===task.policy.accountId&&p.mode===task.policy.mode;
+     audit('policy.demo',active,active?'Owner/expiry/scope verified':'Policy mismatch, revoked or expired');
+     return {linked:true,active,executionEnabled:false,policyId:p.id,accountId:p.accountId,
+      mode:p.mode,instruments:p.instruments,maxRiskUsd:p.maxRiskUsd,maxDailyLossPct:p.maxDailyLossPct,
+      maxDrawdownPct:p.maxDrawdownPct,maxOpenPositions:p.maxOpenPositions,expiresAt:p.expiresAt,
+      note:'This task can plan within the consent envelope, but automated trading is still disabled'};
+    }catch{return {linked:true,active:false,executionEnabled:false,reason:'Latest authorization record unavailable'};}
+   }
+  }),
+  inspectDeployment:tool({
+   description:'READ ONLY status of an EXISTING user-owned PropDAO robot deployment from the live Durable Object and broker reconciliation. The tool CANNOT deploy or stop any robot. Unknown exposure is never zero.',
+   inputSchema:z.object({botId}).strict(),
+   execute:async({botId:id})=>{
+    boundedCall();phase='review';
+    const owned=await deps.owned(uid,id);
+    if(!isOwned(uid,owned,id)||owned?.venue!=='propdao')
+     return {available:false,brokerExposure:'unknown',reason:'Robot is not owned by you or is not a PropDAO robot'};
+    if(!deps.deploymentStatus)return {available:false,brokerExposure:'unknown',reason:'PropDAO runtime observer is not connected'};
+    try{
+     const snapshot=summarizeDeploymentState(await deps.deploymentStatus(uid,id),deps.now?.()??Date.now());
+     audit('monitor.deployment',snapshot.available&&snapshot.brokerExposureVerified,
+      'Runtime '+(snapshot.available?'connected':'uncertain')+'; broker exposure '+snapshot.brokerExposure);
+     return snapshot;
+    }catch{
+     audit('monitor.deployment',false,'Unable to reconcile deployed robot');
+     return {available:false,brokerExposure:'unknown',reason:'Live runtime or broker read failed; do not assume stopped'};
+    }
+   }
+  }),
   readOwnedStrategy:tool({
    description:'Inspect the exact user-owned saved robot by ID. Code is untrusted data and is never executed outside the QuickJS evaluator.',
    inputSchema:z.object({botId}).strict(),
@@ -175,22 +245,60 @@ export async function runDurableTaskStep(task:TaskRecord,deps:Dependencies):Prom
    execute:async({source,asset,venue,hypothesis})=>{
     boundedCall();phase='authoring';
     try{
-    const config=parseStrategyConfig(source);validateStrategySyntax(source);
-    if(/sk-or-v1-[A-Za-z0-9]{20,}|(?:api[_-]?key|secret|password)\s*[:=]\s*[\"\'][^\"\']{12,}/i.test(source))throw Error('Strategy draft appears to contain a credential; remove secrets from code');
-    if(venue==='propdao'&&config.riskPercent>0.5)throw Error('This research task limits proposed PropDAO per-trade risk to at most 0.5% pending broker risk verification');
-    if(!/export\s+function\s+onCandle\s*\(/.test(source)||config.timeframes.length>4)throw Error('Missing onCandle or too many timeframes');
-    const id=codeId(source),codeHash=hash(source);
-    const record={ownerUid:uid,taskId:task.id,codeHash,asset,venue,source,hypothesis,createdAt:new Date().toISOString()};
-    await deps.write(archiveKey(uid,task.id,id),JSON.stringify(record));
-    artifacts.push({kind:'draft',id,codeHash,venue,asset,quality:'reference',updatedAt:new Date().toISOString()});
-    audit('strategy.draft',true,'validated syntax/config for '+id);
-    return {available:true,draftId:id,codeHash,asset,venue,config:{timeframes:config.timeframes,executionTimeframe:config.executionTimeframe,riskPercent:config.riskPercent,riskReward:config.riskReward},
-     savedTo:'owner-scoped task scratch; not the strategy library',next:'Call backtestDraft with this exact draftId.'};
+    return await persistDraft(source,asset,venue,hypothesis);
     }catch(error){
      const diagnostic=short(error instanceof Error?error.message:'Draft could not be validated',260);
      audit('strategy.draft',false,diagnostic);
      return {available:false,repairable:true,stage:'code-validation',diagnostics:diagnostic,
       next:'Repair the complete strategy.js source and call proposeDraft again with the corrected code. Never skip validation.'};
+    }
+   }
+  }),
+  writeDraftFragment:tool({
+   description:'Store one immutable bounded fragment of a lengthy strategy.js in task R2. Fragments carry explicit slot, index and total and are never executable on their own. Use finishDraftFragments to assemble and validate.',
+   inputSchema:z.object({
+    slot:z.string().regex(/^[a-z0-9_-]{1,40}$/i),
+    index:z.number().int().min(0).max(7),total:z.number().int().min(2).max(8),
+    asset:symbol,venue:z.enum(['propdao','hyperliquid']),source:z.string().min(10).max(4500)
+   }).strict(),
+   execute:async({slot,index,total,asset,venue,source})=>{
+    boundedCall();phase='authoring';
+    if(index>=total)return {available:false,reason:'Fragment index must be below total count'};
+    if(/sk-or-v1-[A-Za-z0-9]{20,}/i.test(source))return {available:false,reason:'Do not persist credentials in strategy source'};
+    const fragment=makeDraftFragment({ownerUid:uid,taskId:task.id,slot,asset,venue},index,total,source);
+    const {id,fragmentHash}=fragment;
+    await deps.write(archiveKey(uid,task.id,id),JSON.stringify(fragment));
+    artifacts.push({kind:'draft-fragment',id,codeHash:fragmentHash,asset,venue,updatedAt:fragment.createdAt});
+    return {available:true,fragmentId:id,index,total,contentHash:fragmentHash,stored:true,
+     next:index===total-1?'Call finishDraftFragments with ALL fragment IDs in ascending order.':'Write the next ordered fragment; all IDs survive task checkpoints.'};
+   }
+  }),
+  finishDraftFragments:tool({
+   description:'Retrieve user/task-scoped immutable fragments in order, assemble the COMPLETE robot source, and run identical static strategy validation. A partial or mismatched set cannot become a draft.',
+   inputSchema:z.object({
+    slot:z.string().regex(/^[a-z0-9_-]{1,40}$/i),asset:symbol,venue:z.enum(['propdao','hyperliquid']),
+    hypothesis:z.string().min(10).max(350),
+    fragmentIds:z.array(z.string().regex(/^fragment_[a-f0-9]{32}$/)).min(2).max(8)
+   }).strict(),
+   execute:async({slot,asset,venue,hypothesis,fragmentIds})=>{
+    boundedCall();phase='validation';
+    try{
+     if(new Set(fragmentIds).size!==fragmentIds.length)throw Error('Duplicate code fragment IDs');
+     const fragments:DraftFragment[]=[];
+     for(let index=0;index<fragmentIds.length;index++){
+      const id=fragmentIds[index],raw=await deps.read(archiveKey(uid,task.id,id));
+      if(!raw||raw.length>7000)throw Error('A fragment is missing or oversized');
+      const row=JSON.parse(raw) as DraftFragment;
+      if(row.id!==id)throw Error('Fragment ID mismatch');
+      fragments.push(row);
+     }
+     const source=assembleDraftFragments({ownerUid:uid,taskId:task.id,slot,asset,venue},fragments);
+     return await persistDraft(source,asset,venue,hypothesis);
+    }catch(error){
+     const diagnostic=short(error instanceof Error?error.message:'Draft assembly failed',240);
+     audit('strategy.draft',false,diagnostic);
+     return {available:false,repairable:true,stage:'draft-assembly',diagnostics:diagnostic,
+      next:'Repair the affected fragment, then re-run final assembly with explicit ordered immutable fragment IDs.'};
     }
    }
   }),

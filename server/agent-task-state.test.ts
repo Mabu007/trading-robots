@@ -1,5 +1,5 @@
 import {describe,it,expect} from 'vitest';
-import {applyTaskStep,initialTask} from '../shared/agent-task-state';
+import {applyTaskStep,initialTask,sanitizeTaskStepResult} from '../shared/agent-task-state';
 import {listDataCapabilities,declaredToolForCapability} from './data-capability-registry';
 const t=1700000000000;
 describe('durable task memory and completion gating',()=>{
@@ -32,6 +32,14 @@ describe('durable task memory and completion gating',()=>{
   expect(result.status).toBe('completed');expect(result.memory.summary).toHaveLength(2500);
   expect(result.memory.plan).toHaveLength(12);expect(result.memory.facts.length).toBeLessThanOrEqual(16);
   expect(result.memory.lastResult).toHaveLength(1400);
+ });
+ it('removes credential-shaped text from Firestore receipts before persistence',()=>{
+  const record=sanitizeTaskStepResult({phase:'research',next:'continue',
+   summary:'secret sk-or-v1-ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890',
+   message:'Authorization Bearer abcdefghijklmnopqrstuvwxyz1234567890',
+   plan:['password=superdupersecretpassword123'],facts:['pd_live_abcdefghijklmnopqrstuvwxyz'],
+   artifacts:[]});
+  expect(JSON.stringify(record)).not.toMatch(/sk-or-v1-|pd_live_|superdupersecretpassword|abcdefghijklmnopqrstuvwxyz123456/);
  });
  it('registers unavailable approvals without exposing order tools as callable data',()=>{
   const capabilities=listDataCapabilities({allowReadOwner:true,allowDraft:true,allowSimulation:true});

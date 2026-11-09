@@ -1,8 +1,8 @@
 import {describe,it,expect} from 'vitest';
-import {DemoPolicyStore,demoPolicyInput,evaluateDemoPolicy} from './agent-demo-policy';
+import {DemoPolicyStore,demoPolicyInput,evaluateDemoPolicy,verifyPropDAODemoAccount} from './agent-demo-policy';
 const now=Date.parse('2026-11-09T14:00:00Z');
 const input={mode:'full-demo' as const,accountId:'demo_account',instruments:['GOLDUSDC'],maxRiskUsd:.5,maxDailyLossPct:1,maxDrawdownPct:3,maxOpenPositions:1,expiresInHours:120,allowReplace:true,confirmation:'I AUTHORIZE VIBES PROPDAO DEMO AUTONOMY' as const};
-const broker={simulated:true,owned:true,status:'active',breached:false,roomUsd:50};
+const broker={simulated:true,owned:true,evaluation:true,realMoney:false,status:'active',breached:false,roomUsd:50};
 const make=()=>{
  const records=new Map<string,any>();
  const store={
@@ -17,12 +17,24 @@ const make=()=>{
  };
  return new DemoPolicyStore(store,()=>now);
 };
+describe('broker demo attestation',()=>{
+ it('does not mistake generic simulation or evaluation label for proof of a demo-only account',()=>{
+  expect(verifyPropDAODemoAccount({accountId:'A',status:'active',challenge:{name:'Evaluation'}},'')).toBe(false);
+  expect(verifyPropDAODemoAccount({accountId:'A',status:'active',challenge:{name:'Evaluation',demo:true}},'')).toBe(true);
+  expect(verifyPropDAODemoAccount({accountId:'A',status:'active',challenge:{name:'Evaluation'},realMoney:true},'A')).toBe(false);
+  expect(verifyPropDAODemoAccount({accountId:'A',status:'funded',challenge:{name:'Evaluation',demo:true}},'')).toBe(false);
+  expect(verifyPropDAODemoAccount({accountId:'A',status:'active',challenge:{name:'Evaluation'}},'A')).toBe(true);
+ });
+});
 describe('explicit demo-only standing authorization',()=>{
  it('requires exact confirmation and owned active simulated broker account',async()=>{
   const store=make();
   expect(()=>demoPolicyInput.parse({...input,confirmation:'approve'})).toThrow();
   await expect(store.create('owner',input,{...broker,simulated:false})).rejects.toThrow();
   await expect(store.create('owner',input,{...broker,breached:true})).rejects.toThrow();
+  await expect(store.create('owner',input,{...broker,realMoney:true})).rejects.toThrow();
+  await expect(store.create('owner',input,{...broker,evaluation:false})).rejects.toThrow();
+  await expect(store.create('owner',input,{...broker,status:'funded'})).rejects.toThrow();
  });
  it('binds verified scope, denies cross-account, excess risk, expired, unknown exposure and invalid instrument',async()=>{
   const store=make(),policy=await store.create('owner',input,broker);

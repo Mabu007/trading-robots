@@ -1,13 +1,13 @@
 import type {Express,Request,Response} from 'express';
 import {z} from 'zod';
-import {DemoPolicyStore,demoPolicyInput} from './agent-demo-policy.ts';
+import {DemoPolicyStore,demoPolicyInput,verifyPropDAODemoAccount} from './agent-demo-policy.ts';
 import type {RecordStore} from './firestore-store.ts';
 import type {PropDAOAccounts} from './propdao-account.ts';
 
 type Dependencies={
  uid:(req:Request,res:Response)=>Promise<string|null>;
  store:RecordStore;
- accounts:Pick<PropDAOAccounts,'snapshot'>;
+ accounts:Pick<PropDAOAccounts,'snapshot'|'list'>;
  configured:()=>boolean;
 };
 const policyId=z.string().uuid();
@@ -16,7 +16,16 @@ export function agentDemoPolicyRoutes(app:Express,deps:Dependencies){
  app.get('/api/agent-policies',async(req,res)=>{
   const uid=await deps.uid(req,res);if(!uid)return;
   if(!deps.configured())return res.status(503).json({error:'Policy storage is unavailable'});
-  try{return res.json({policies:await policies.list(uid),demoOnly:true,automaticExecutionEnabled:false})}
+  try{
+   const records=await policies.list(uid);
+   let eligibleAccounts:{accountId:string;status:string;challenge:unknown}[]=[];
+   try{
+    const listing=await deps.accounts.list(uid);
+    eligibleAccounts=(listing.accounts||[]).filter((a:any)=>verifyPropDAODemoAccount(a)).slice(0,25)
+     .map((a:any)=>({accountId:a.accountId,status:a.status,challenge:a.challenge}));
+   }catch{}
+   return res.json({policies:records,eligibleAccounts,demoOnly:true,automaticExecutionEnabled:false});
+  }
   catch{return res.status(503).json({error:'Could not verify your policies'})}
  });
  app.post('/api/agent-policies',async(req,res)=>{
@@ -27,7 +36,9 @@ export function agentDemoPolicyRoutes(app:Express,deps:Dependencies){
   if(!input.success)return res.status(400).json({error:'Choose a valid explicit DEMO authorization scope, expiry and confirmation phrase.'});
   try{
    const snapshot=await deps.accounts.snapshot(uid,input.data.accountId);
-   const broker={simulated:snapshot.simulated===true,owned:true,status:String(snapshot.account?.status||''),
+   const broker={simulated:snapshot.simulated===true,owned:true,
+    evaluation:verifyPropDAODemoAccount(snapshot.account),
+    realMoney:!verifyPropDAODemoAccount(snapshot.account),status:String(snapshot.account?.status||''),
     breached:snapshot.risk?.breached===true,roomUsd:Number(snapshot.risk?.roomUsd)};
    const policy=await policies.create(uid,input.data,broker);
    return res.status(201).json({policy,executionEnabled:false,

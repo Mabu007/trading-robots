@@ -12,3 +12,5 @@
 .tv-agent-task-recent{display:grid;gap:6px;margin-bottom:12px}.tv-agent-task-recent strong{font-size:.86rem}.tv-agent-task-recent button{text-align:left;background:transparent;color:inherit;border:1px solid var(--border,#ccd4dc);border-radius:8px;padding:9px;cursor:pointer}.tv-agent-task-recent button:hover{background:var(--surface-secondary,#f3f4f6)}
 
 .tv-agent-task-setup select{padding:10px;border-radius:9px;border:1px solid var(--border,#ccd4dc);background:var(--surface,#fff);color:inherit;font:inherit}.tv-agent-task-setup small{font-size:.78rem;color:var(--text-muted,#657381)}
+
+.tv-agent-task-policy-link{padding:12px;border:1px solid var(--border,#d2d9d7);border-radius:10px;display:grid;gap:8px}.tv-agent-task-policy-link strong{font-size:.82rem}.tv-agent-task-policy-link div{display:flex;flex-wrap:wrap;gap:8px}.tv-agent-task-policy-link select,.tv-agent-task-policy-link button{border:1px solid var(--border,#d2d9d7);border-radius:7px;padding:7px;background:transparent;color:inherit;font:inherit;font-size:.82rem}.tv-agent-task-policy-link p,.tv-agent-task-policy-link small{margin:0;font-size:.77rem;opacity:.8}
