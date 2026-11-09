@@ -26,6 +26,18 @@ describe('durable task memory and completion gating',()=>{
   }]};
   expect(applyTaskStep(state,certified,t+10).status).toBe('waiting_for_review');
  });
+ it('pauses when the AI asks a question and records token cost without claiming a trade authorization',()=>{
+  const state=initialTask('owner','task_q12345678','Research Gold',t);
+  const next=applyTaskStep(state,{phase:'research',summary:'Needs an answer',plan:[],facts:[],artifacts:[],
+   next:'waiting_for_input',message:'Waiting for owner',question:{id:'question_123456789',
+    prompt:'How much risk are you willing to tolerate?',options:['Protect the account','Use DEMO-only bounded experimentation'],
+    context:'Answering does not grant broker authority',createdAt:t},
+   usage:{inputTokens:1200,outputTokens:400,estimatedModelUsd:.003}},t+1000);
+  expect(next.status).toBe('waiting_for_input');
+  expect(next.question?.options).toHaveLength(2);
+  expect(next.usage).toMatchObject({inputTokens:1200,outputTokens:400,steps:1});
+  expect(next.policy).toBeUndefined();
+ });
  it('caps summary and structured evidence, does not store raw chain of thought',()=>{
   const state=initialTask('u','task_12345678','How is gold doing?',t);
   const result=applyTaskStep(state,{phase:'research',summary:'x'.repeat(3000),plan:Array(100).fill('q'),facts:Array(100).fill('f'),artifacts:[],next:'completed',message:'y'.repeat(5000)},t+10);

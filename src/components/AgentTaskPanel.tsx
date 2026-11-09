@@ -6,6 +6,7 @@ import type {TaskRecord} from '../../shared/agent-task-state';
 import type {DemoPolicy} from '../../server/agent-demo-policy.ts';
 import './agent-task-panel.css';
 import {AgentDemoPolicyPanel} from './AgentDemoPolicyPanel';
+import {AgentQuestionCard} from './AgentQuestionCard';
 
 async function taskRequest<T>(client:CloudClient,path:string,method:'GET'|'POST'='GET',body?:unknown):Promise<T>{
  const request=async(refresh:boolean)=>{
@@ -33,6 +34,12 @@ export function AgentTaskPanel({client}:{client:CloudClient}){
   setPolicies(active);setPolicyId(id=>active.some(p=>p.id===id)?id:active[0]?.id||'');
  };
  useEffect(()=>{void refreshPolicies().catch(()=>{});},[client,task?.id]);
+ const replyQuestion=async(answer:string)=>{
+  if(!task||!task.question||busy)return;
+  const result=await taskRequest<{task:TaskRecord}>(client,'/api/agent-tasks/'+encodeURIComponent(task.id)+'/answer','POST',
+   {questionId:task.question.id,answer});
+  setTask(result.task);setError('');
+ };
  const attachPolicy=async()=>{
   if(!task||!policyId||busy)return;
   setBusy(true);setError('');
@@ -122,6 +129,8 @@ export function AgentTaskPanel({client}:{client:CloudClient}){
    <div className="tv-agent-task-status"><strong>{task.autonomy?.enabled?'AUTONOMOUS DEMO AGENT':'RESEARCH TASK'} · {task.status.replaceAll('_',' ')}</strong><span>{task.autonomy?.enabled?'Run-until-stopped · cycle '+task.autonomy.completedCycles:'Step '+task.iteration+' / '+task.maxIterations}</span></div>
    <p>{task.memory.lastResult||task.memory.summary||'Task accepted. Preparing the first evidence-gathering step.'}</p>
    {task.autonomy?.enabled&&<p role="status">Broker robot: {task.autonomy.botId||'awaiting validated candidate'} · Exposure: {task.autonomy.lastBrokerExposure||'unknown'} · {task.autonomy.lastDeploymentOutcome||'no broker action yet'}. Last check: {task.autonomy.lastMonitorAt?new Date(task.autonomy.lastMonitorAt).toLocaleString():'not verified yet'}</p>}
+   {task.usage&&<p>{'Estimated model spending: $'+task.usage.estimatedModelUsd.toFixed(4)+' over '+(task.usage.inputTokens+task.usage.outputTokens).toLocaleString()+' tokens · '+task.usage.steps+' AI turns. Execution, storage and broker fees are separate.'}</p>}
+   {task.status==='waiting_for_input'&&task.question&&<AgentQuestionCard key={task.question.id} question={task.question} onAnswer={replyQuestion} disabled={busy}/>}
    <div className="tv-agent-task-policy-link">
     <strong>Demo policy for this task</strong>
     {task.policy?<p>{'Linked policy: '+task.policy.accountId+' · '+task.policy.mode+' · expires '+new Date(task.policy.expiresAt).toLocaleString()}</p>:

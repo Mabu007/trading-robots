@@ -1,0 +1,8 @@
+.tv-browser-voice{position:relative;display:flex;align-items:center;gap:4px;flex-shrink:0}
+.tv-voice-mic,.tv-voice-stop{border:1px solid var(--border,#4b565c);background:transparent;color:inherit;display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;cursor:pointer;touch-action:none}
+.tv-voice-mic:disabled{opacity:.35;cursor:not-allowed}
+.tv-voice-mic.is-listening{color:#32cabc;border-color:#32cabc;box-shadow:0 0 0 5px rgba(50,202,188,.12);animation:tv-voice-pulse 1s ease-in-out infinite}
+.tv-voice-stop{width:29px;height:29px}
+.tv-voice-caption{position:absolute;bottom:calc(100% + 10px);right:0;z-index:6;background:var(--surface,#171e22);color:inherit;border:1px solid var(--border,#4b565c);border-radius:10px;padding:8px 10px;font-size:.75rem;min-width:140px;max-width:290px;max-height:76px;overflow:auto;overflow-wrap:anywhere;box-shadow:0 6px 20px rgba(0,0,0,.14)}
+@keyframes tv-voice-pulse{50%{box-shadow:0 0 0 11px rgba(50,202,188,.05)}}
+@media (prefers-reduced-motion:reduce){.tv-voice-mic.is-listening{animation:none}}
