@@ -361,7 +361,7 @@ export async function runDurableTaskStep(task:TaskRecord,deps:Dependencies):Prom
        hash(draft.source)!==draft.codeHash||codeId(draft.source)!==draftId)throw Error('Draft integrity mismatch');
      const config=parseStrategyConfig(draft.source);
      const reports:CandidateWindow[]=[];
-     for(const id of [...new Set(reportIds)]){
+     for(const id of [...new Set(reportIds as string[])]){
       const body=await deps.read(archiveKey(uid,task.id,id));
       if(!body||body.length>24000)throw Error('An immutable backtest report is missing');
       const record=JSON.parse(body);
