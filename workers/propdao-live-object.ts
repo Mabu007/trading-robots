@@ -4,8 +4,9 @@ import {evaluateStrategyInSandbox} from './strategy-sandbox';
 import {parseStrategyConfig} from '../src/strategy';
 import {propDAOLiveHistoryBars,propDAOLiveHistoryStats} from './propdao-live-history';
 import {TF_SECONDS} from '../shared/trading';
+import {evaluateAutonomousEquity,type EvaluationEnvelope} from '../shared/propdao-autonomous-guard';
 import {parseUpstreamJson,TemporaryReadError,retryableReadError} from './propdao-upstream-response';
-type Grant={id:string;uid:string;botId:string;agentId?:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;leverage:number;issuedAt:number;expiresAt:number};
+type Grant={autoPolicy?:EvaluationEnvelope;id:string;uid:string;botId:string;agentId?:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;leverage:number;issuedAt:number;expiresAt:number};
 type Status={running:boolean;paused:boolean;lastError?:string;lastEvaluation?:any;lastOrder?:any;lastAccount?:any;events:string[];lastMarketData?:any;lastReconciliation?:any};
 const interval:Record<string,string>={m1:'1m',m5:'5m',m15:'15m',m30:'30m',h1:'1h',h4:'4h',d1:'1d'};
 async function hash(s:string){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s)))).map(v=>v.toString(16).padStart(2,'0')).join('')}
@@ -97,6 +98,12 @@ export class PropDAOLiveBot extends DurableObject<any>{
    if(this.env.PROPDAO_LIVE_ENABLED!=='true'||!this.env.PROPDAO_LIVE_INTERNAL_SECRET)throw Error('Live runtime is disabled');
    const grant=input as Grant;
    if(!grant?.uid||grant.uid!==req.headers.get('X-TV-UID')||!grant.id||!grant.botId||grant.agentId!==undefined&&!/^agent_[a-f0-9]{32}$/.test(grant.agentId)||!grant.code||!Number.isFinite(grant.issuedAt)||!Number.isFinite(grant.expiresAt)||grant.issuedAt>Date.now()+5000||grant.expiresAt>grant.issuedAt+7*24*3600_000||Date.now()>grant.issuedAt+60000||Date.now()>=grant.expiresAt)throw Error('Invalid or expired deployment');
+   if(grant.autoPolicy&&(!grant.autoPolicy.demoOnly||
+    !/^[a-f0-9]{64}$/.test(grant.autoPolicy.policyFingerprint)||
+    grant.autoPolicy.startingEquity!==1000||
+    !Number.isFinite(grant.autoPolicy.maxDailyLossPct)||grant.autoPolicy.maxDailyLossPct>2||
+    !Number.isFinite(grant.autoPolicy.maxDrawdownPct)||grant.autoPolicy.maxDrawdownPct>5))
+    throw Error('Invalid autonomous demo risk limits');
    if(await hash(grant.code)!==grant.codeHash)throw Error('Strategy identity mismatch');
    if(existing?.uid&&existing.uid!==grant.uid)throw Error('This account belongs to another identity');
    if(existing&&(await this.ctx.storage.get<boolean>('running')))throw Error('Account already has a running robot');
@@ -164,6 +171,18 @@ export class PropDAOLiveBot extends DurableObject<any>{
    const account=await this.provider(grant,'snapshot');
    await this.ctx.storage.put('lastAccount',{time:Date.now(),equity:account.risk?.equity,roomUsd:account.risk?.roomUsd,positions:account.positions?.length??0,orders:account.orders?.length??0,accountStatus:account.account?.status});
    if(account.risk?.breached||!['active','funded'].includes(account.account?.status)){await this.ctx.storage.put('running',false);await this.ctx.storage.put('paused',false);await this.record('Account ineligible or risk breached. Trading stopped.');return}
+   if(grant.autoPolicy){
+    const day=new Date().toISOString().slice(0,10);
+    const prior=await this.ctx.storage.get<{day:string;equity:number}>('autonomyDailyStart');
+    const daily=prior?.day===day&&Number.isFinite(prior.equity)?prior.equity:account.risk?.equity;
+    if(!prior||prior.day!==day)await this.ctx.storage.put('autonomyDailyStart',{day,equity:daily});
+    const verdict=evaluateAutonomousEquity(grant.autoPolicy,account.risk?.equity,daily,
+     {breached:account.risk?.breached,roomUsd:account.risk?.roomUsd},grant.riskUsd);
+    if(!verdict.canEnter){
+     await this.ctx.storage.put('running',false);await this.ctx.storage.put('paused',false);
+     await this.record('Autonomous DEMO risk guard stopped new entries: '+verdict.reason);return;
+    }
+   }
    if(account.positions?.length||account.orders?.length){await this.ctx.storage.put(marker,close);await this.record('Existing position/order; awaiting reconciliation and skipping entry.');return}
    const data:Record<string,any[]>={};
    for(const tf of config.timeframes)data[tf]=await this.candles(grant,tf,close);
