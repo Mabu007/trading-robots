@@ -55,7 +55,7 @@ export function AgentDemoPolicyPanel({client}:{client:CloudClient}){
   <header><ShieldCheck size={18}/><div><strong>PropDAO demo operating policy</strong><p>Define the PropDAO Evaluation demo account and risk envelope. Explicit confirmation permits free evaluation trading; funded and real-money accounts are excluded.</p></div></header>
   {policies.filter(p=>p.revokedAt===null&&p.expiresAt>Date.now()).map(p=><div className="tv-agent-policy-active" key={p.id}>
    <div><strong>{p.accountId+' · '+p.mode}</strong>
-    <p>{'GOLDUSDC · }</p>
+    <p>{'GOLDUSDC · $'+p.maxRiskUsd.toFixed(2)+' risk/order · '+(p.untilStopped?'until stopped':'expires '+new Date(p.expiresAt).toLocaleString())}</p>
     <small>Policy recorded · Autonomous execution disabled</small></div>
    <button type="button" disabled={busy} onClick={()=>void revoke(p.id)}><PowerOff size={14}/> Revoke</button>
   </div>)}
