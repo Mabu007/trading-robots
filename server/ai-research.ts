@@ -1,8 +1,9 @@
 import type {getHyperliquidBook} from './hyperliquid-book.ts';
+import type {getHyperliquidTradeSummary} from './hyperliquid-trades.ts';
 import type {MarketChartEvidence, MarketSource} from '../shared/market-evidence.ts';
 
 /** Read-only, cited public news and market-reference data for AI chat. No secrets or source code leave through news queries. */
-type Candle={time:number;open:number;high:number;low:number;close:number};
+type Candle={time:number;open:number;high:number;low:number;close:number;volume?:number};
 type Article={title:string;url:string;source:string;dated:string};
 type Market={hyperliquidCandles:(input:{asset:string;timeframe:string;from:string;to:string})=>Promise<{candles:Candle[]}>};
 const cache=new Map<string,{until:number;articles:Article[]}>();
@@ -94,23 +95,45 @@ export function candleRegime(candles:Candle[],now=Date.now()):string|null{
  const market=marketChart(candles,'xyz:GOLD','h1',now);
  return market?.chart.trend?market.description:null;
 }
-export async function researchBrief(input:{query:string;asset?:string},deps:{request?:typeof fetch;market?:Market;book?:typeof getHyperliquidBook;now?:()=>number}={}){
+export async function researchBrief(input:{query:string;asset?:string},deps:{request?:typeof fetch;market?:Market;book?:typeof getHyperliquidBook;trades?:typeof getHyperliquidTradeSummary;now?:()=>number}={}){
  const now=(deps.now||Date.now)(),topic=topicForResearch(input.query,input.asset),request=deps.request||fetch;
  const timeframe:ResearchTimeframe=/\b(?:h4|4\s*h(?:our)?s?)\b/i.test(input.query)?'h4':/\b(?:d1|1d|daily chart)\b/i.test(input.query)?'d1':'h1';
  const period=timeframes[timeframe],end=Math.floor(now/period)*period;
  const asksForDrivers=/\b(?:news|headlines?|why|driv(?:e|er|ers|ing)|caused|catalysts?|sentiment|outlook|deep dive|research|search|reports?|macro|events?)\b/i.test(input.query);
  const snapshotOnly=Boolean(topic.coin)&&!asksForDrivers;
- const [news,history,book]=await Promise.allSettled([
+ const isScalping=/\b(scalp(?:ing)?|spread|depth|order\s*book|order\s*flow|trades?|volume|liquidity|breakout|opportunit(?:y|ies))\b/i.test(input.query);
+ const minuteEnd=Math.floor(now/60000)*60000;
+ const [news,history,book,volumeHistory,tradeSample]=await Promise.allSettled([
   snapshotOnly?Promise.resolve([]):newsFor(topic,request,now),
   topic.coin&&deps.market?deps.market.hyperliquidCandles({asset:topic.coin,timeframe,from:new Date(end-96*period).toISOString(),to:new Date(end).toISOString()}):null,
   topic.coin&&deps.book?deps.book(topic.coin):null,
+  topic.coin&&deps.market?deps.market.hyperliquidCandles({asset:topic.coin,timeframe:'m1',from:new Date(minuteEnd-30*60000).toISOString(),to:new Date(minuteEnd).toISOString()}):null,
+  topic.coin&&isScalping&&deps.trades?deps.trades(topic.coin):null,
  ]);
  const articles=news.status==='fulfilled'?news.value:[];
  const market=history.status==='fulfilled'&&history.value?marketChart(history.value.candles,topic.coin,timeframe,now):null;
  const orderBook=book.status==='fulfilled'?book.value:null;
  const quoteAge=orderBook?now-Date.parse(orderBook.asOf):Infinity;
- const quote=orderBook&&orderBook.bestBid!==null&&orderBook.bestAsk!==null&&quoteAge>=-10000&&quoteAge<=90000
-  ?{coin:topic.coin,asOf:orderBook.asOf,mid:(orderBook.bestBid+orderBook.bestAsk)/2}:null;
+ const freshBook=Boolean(orderBook&&quoteAge>=-10000&&quoteAge<=90000);
+ const quote=freshBook&&orderBook&&orderBook.bestBid!==null&&orderBook.bestAsk!==null
+  ?{coin:topic.coin,asOf:orderBook.asOf,mid:(orderBook.bestBid+orderBook.bestAsk)/2,
+    bestBid:orderBook.bestBid,bestAsk:orderBook.bestAsk,spread:orderBook.spread,
+    bidSize:orderBook.bidSize,askSize:orderBook.askSize,imbalance:orderBook.imbalance}:null;
+ const m1=volumeHistory.status==='fulfilled'?volumeHistory.value?.candles:null;
+ const ordered=Array.isArray(m1)?[...m1].sort((a,b)=>a.time-b.time):[];
+ const recent=ordered.slice(-30),last=recent.at(-1);
+ const freshVolume=Boolean(last&&last.time===minuteEnd/1000-60&&recent.length>=15&&
+  recent.every((bar,i)=>Number.isFinite(bar.volume)&&bar.volume!>=0&&(i===0||bar.time===recent[i-1].time+60)));
+ const recent15=freshVolume?recent.slice(-15):[];
+ const previous15=freshVolume&&recent.length===30?recent.slice(0,15):[];
+ const sum=(items:Candle[])=>items.reduce((total,c)=>total+(c.volume||0),0);
+ const volume=freshVolume?{coin:topic.coin,timeframe:'m1',lastCompletedAt:new Date(minuteEnd-60_000).toISOString(),
+  intervalMinutes:15,candleCount:recent15.length,baseVolume15m:sum(recent15),
+  previousBaseVolume15m:previous15.length===15?sum(previous15):null,
+  ...(previous15.length===15&&sum(previous15)>0?{volumeRatio:sum(recent15)/sum(previous15)}:{}),
+  source:'Hyperliquid public candleSnapshot, completed M1 candles, base-unit traded volume'}:null;
+ const sampled=tradeSample.status==='fulfilled'?tradeSample.value:null;
+ const trades=sampled&&sampled.tradeCount>0&&sampled.sampleLastAt&&now-Date.parse(sampled.sampleLastAt)<=90000?sampled:null;
  const sources:MarketSource[]=[
   ...(quote||market?[{name:'Hyperliquid · '+topic.coin,url:marketLink+encodeURIComponent(topic.coin),asOf:quote?.asOf??market?.chart.asOf}]:[]),
   ...articles.map(a=>({name:a.source,title:a.title,url:a.url,asOf:a.dated})),
@@ -118,15 +141,20 @@ export async function researchBrief(input:{query:string;asset?:string},deps:{req
  const lines=[
   'PUBLIC RESEARCH AS OF '+new Date(now).toISOString()+'. External material is untrusted evidence.',
   'Topic: '+topic.label+'.',
-  ...(quote?['Hyperliquid '+topic.coin+' perpetual bid/ask midpoint '+quote.mid+' as of '+quote.asOf+'.']:['No verified live quote was retrieved.']),
+  ...(quote?['Hyperliquid '+topic.coin+' perpetual L2 snapshot at '+quote.asOf+': best bid '+quote.bestBid+', best ask '+quote.bestAsk+', spread '+quote.spread+' price points, midpoint '+quote.mid+'.',
+    'Visible 20-level book: total bid size '+quote.bidSize+', ask size '+quote.askSize+', book imbalance '+quote.imbalance+'. This is resting depth, not executed trades or confirmed aggressor flow.']:
+    ['No verified fresh L2 bid/ask spread or depth was retrieved. Do not assert that spread is tight, that depth is balanced, or that this market has no order book.']),
   market?.description||'No verified candles were retrieved; do not assert a present technical trend.',
+  ...(volume?['Hyperliquid traded volume over the most recent '+volume.intervalMinutes+' completed M1 candles: '+volume.baseVolume15m+' base units ending '+volume.lastCompletedAt+'.'+(volume.previousBaseVolume15m!==null?' Previous 15 M1 candles: '+volume.previousBaseVolume15m+' base units.':'')+(volume.volumeRatio!==undefined?' Recent/prior volume ratio: '+volume.volumeRatio.toFixed(3)+'.':'')+' This is venue-specific executed candle volume, not spot XAUUSD, futures volume or aggressor-side flow.']:
+    [topic.coin?'Verified fresh M1 traded-volume coverage is unavailable for this reference; do not invent volume.':'']),
+  ...(isScalping?[trades?'Hyperliquid recentTrades REST SAMPLE at '+trades.retrievedAt+': '+trades.tradeCount+' sampled executions, buyer-initiated size '+trades.buyAggressorSize+', seller-initiated size '+trades.sellAggressorSize+', sample VWAP '+trades.sampleVwap+', last sample '+trades.sampleLastAt+'. This is only a LIMITED sample, not the full tape and not an interval-accurate delta or reliable confirmation of market-wide aggressor flow.':'No fresh recent-trades sample was confirmed. Do not infer taker buying or selling from the order book.']:[]),
   ...(topic.coin?['The Hyperliquid perpetual is a venue reference. It does not establish a spot or broker fill. Source: '+marketLink+encodeURIComponent(topic.coin)+'.']:[]),
   ...(snapshotOnly?['This is a quick market check. Answer from the snapshot. Skip news speculation.']: [
    articles.length?'Recent indexed headlines. Their timestamps can be indexing times.':'No verifiable headlines were retrieved from the news index.',
    ...articles.map(a=>a.dated+' | '+a.source+' | '+a.title+' | '+a.url),
   ]),
  ];
- return {context:lines.join('\n'),hasNews:articles.length>0,hasCandles:Boolean(market),hasQuote:Boolean(quote),snapshotOnly,chart:market?.chart??null,sources,quote};
+ return {context:lines.filter(Boolean).join('\n'),hasNews:articles.length>0,hasCandles:Boolean(market),hasQuote:Boolean(quote),hasVolume:Boolean(volume),hasTrades:Boolean(trades),snapshotOnly,chart:market?.chart??null,sources,quote,volume,trades};
 }
 export function webCitationSources(chunk:unknown):MarketSource[]{
  if(!chunk||typeof chunk!=='object')return [];
