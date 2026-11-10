@@ -90,3 +90,15 @@
 .tv-stopped-robot-row button:first-child{background:var(--tv-shell-accent);border-color:var(--tv-shell-accent);color:#fff}
 .tv-stopped-robot-row button.tv-clear-robot{color:#b7565b}
 @media(max-width:620px){.tv-stopped-robot-row{flex-direction:column;align-items:stretch}.tv-stopped-robot-row .tv-code-item-actions button{flex:1}}
+
+
+/* Preserve readable contrast on the Inspect & manage control when hovered. */
+.tv-code-deployments .tv-code-inspect-button:hover,
+.tv-code-deployments .tv-code-inspect-button:focus-visible{
+ background:#16674a!important;
+ border-color:#16674a!important;
+ color:#ffffff!important;
+ filter:none!important;
+}
+.tv-code-deployments .tv-code-inspect-button:hover svg,
+.tv-code-deployments .tv-code-inspect-button:focus-visible svg{color:inherit!important}

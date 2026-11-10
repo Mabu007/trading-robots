@@ -8,13 +8,13 @@ import {evaluateAutonomousEquity,type EvaluationEnvelope} from '../shared/propda
 import {parseUpstreamJson,TemporaryReadError,retryableReadError} from './propdao-upstream-response';
 import {MAX_EXECUTION_EVENTS,type ExecutionEvent,type ExecutionStage} from '../shared/propdao-execution-journal';
 type Grant={autoPolicy?:EvaluationEnvelope;id:string;uid:string;botId:string;agentId?:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;riskReward?:number;leverage:number;issuedAt:number;expiresAt:number};
-type Status={running:boolean;paused:boolean;lastError?:string;lastEvaluation?:any;lastOrder?:any;lastAccount?:any;events:string[];lastMarketData?:any;lastReconciliation?:any};
+type Status={running:boolean;paused:boolean;lastError?:string;lastEvaluation?:any;lastOrder?:any;lastAccount?:any;events:string[];lastMarketData?:any;recentDecisions?:any[];lastReconciliation?:any};
 const interval:Record<string,string>={m1:'1m',m5:'5m',m15:'15m',m30:'30m',h1:'1h',h4:'4h',d1:'1d'};
 async function hash(s:string){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s)))).map(v=>v.toString(16).padStart(2,'0')).join('')}
 export class PropDAOLiveBot extends DurableObject<any>{
  private tail:Promise<unknown>=Promise.resolve();
  private serial<T>(fn:()=>Promise<T>):Promise<T>{const next=this.tail.then(fn,fn);this.tail=next.catch(()=>{});return next}
- private async state():Promise<Status>{return {running:(await this.ctx.storage.get<boolean>('running'))===true,paused:(await this.ctx.storage.get<boolean>('paused'))===true,lastError:await this.ctx.storage.get<string>('lastError'),lastEvaluation:await this.ctx.storage.get('lastEvaluation'),lastOrder:await this.ctx.storage.get('lastOrder'),lastAccount:await this.ctx.storage.get('lastAccount'),lastMarketData:await this.ctx.storage.get('lastMarketData'),lastReconciliation:await this.ctx.storage.get('lastReconciliation'),events:(await this.ctx.storage.get<string[]>('events'))||[]};}
+ private async state():Promise<Status>{return {running:(await this.ctx.storage.get<boolean>('running'))===true,paused:(await this.ctx.storage.get<boolean>('paused'))===true,lastError:await this.ctx.storage.get<string>('lastError'),lastEvaluation:await this.ctx.storage.get('lastEvaluation'),recentDecisions:await this.ctx.storage.get<any[]>('recentDecisions')||[],lastOrder:await this.ctx.storage.get('lastOrder'),lastAccount:await this.ctx.storage.get('lastAccount'),lastMarketData:await this.ctx.storage.get('lastMarketData'),lastReconciliation:await this.ctx.storage.get('lastReconciliation'),events:(await this.ctx.storage.get<string[]>('events'))||[]};}
  private async record(message:string){const events=(await this.ctx.storage.get<string[]>('events'))||[];events.push(`${new Date().toISOString()} · ${message.slice(0,240)}`);await this.ctx.storage.put('events',events.slice(-100));}
  /** Account-owned durable trail. A signal must never be represented as a fill. */
  private async journal(grant:Grant,stage:ExecutionStage,details:Partial<Pick<ExecutionEvent,
@@ -207,7 +207,13 @@ export class PropDAOLiveBot extends DurableObject<any>{
    const decisions=evaluateStrategyInSandbox(vm,grant.code,data,config as any) as any[];
    const decision=decisions.at(-1);
    await this.ctx.storage.put(marker,close);
-   await this.ctx.storage.put('lastEvaluation',{time:Date.now(),candleClose:close,action:decision?.action||'WAIT',reason:decision?.reason||'',history:diagnostics});
+   const evaluation={time:Date.now(),candleClose:close,action:decision?.action||'WAIT',
+    reason:typeof decision?.reason==='string'?decision.reason.slice(0,240):'',checks:Array.isArray(decision?.checks)?decision.checks.slice(0,16):[],history:diagnostics};
+   await this.ctx.storage.put('lastEvaluation',evaluation);
+   const recent=await this.ctx.storage.get<any[]>('recentDecisions')||[];
+   await this.ctx.storage.put('recentDecisions',[...recent.slice(-119),{
+    time:evaluation.time,candleClose:close,action:evaluation.action,reason:evaluation.reason,checks:evaluation.checks
+   }]);
    await this.record(`Candle ${config.executionTimeframe.toUpperCase()} · ${new Date(close*1000).toISOString()} · ${decision?.action||'WAIT'}${decision?.reason?' · '+decision.reason:''} · history ${config.timeframes.map((tf:string)=>tf.toUpperCase()+' '+diagnostics[tf].received+'/'+diagnostics[tf].requested).join(', ')}`);
    if(decision?.action!=='BUY'&&decision?.action!=='SELL'){await this.ctx.storage.delete('lastError');return;}
    intentSignal={side:decision.action,intentId:'tv-'+grant.id+'-'+close};

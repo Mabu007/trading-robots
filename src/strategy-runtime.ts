@@ -28,7 +28,13 @@ export async function evaluate(loadStrategy, code, datasets, config) {
     }
     const decision = strategy.onCandle(Object.freeze({candle:current,index:i,timeframes:Object.freeze(timeframes)}));
     if (!decision || !['BUY','SELL','WAIT'].includes(decision.action)) throw Error('Invalid strategy decision at candle ' + i);
-    decisions.push({action:decision.action,stopLoss:decision.stopLoss,takeProfit:decision.takeProfit,reason:typeof decision.reason==='string'?decision.reason.slice(0,300):''});
+    const checks=Array.isArray(decision.checks)?decision.checks.slice(0,16).filter(item=>item&&typeof item==='object'&&typeof item.name==='string').map(item=>({
+      name:item.name.slice(0,60),
+      passed:typeof item.passed==='boolean'?item.passed:null,
+      actual:typeof item.actual==='number'&&Number.isFinite(item.actual)?item.actual:null,
+      threshold:typeof item.threshold==='number'&&Number.isFinite(item.threshold)?item.threshold:null
+    })):[];
+    decisions.push({action:decision.action,stopLoss:decision.stopLoss,takeProfit:decision.takeProfit,reason:typeof decision.reason==='string'?decision.reason.slice(0,300):'',checks});
   }
   return decisions;
 }`;

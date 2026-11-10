@@ -82,6 +82,14 @@ type AssistantChange=({uid:string;chatId:string}&(
  |{kind:'broker';action:'connect'|'disconnect';broker:BrokerChoice}
 ));
 function ChatText({content}:{content:string}){return <div className="tv-streamdown"><Streamdown>{content}</Streamdown></div>}
+function MarketAnswer({content,report}:{content:string;report:MarketReport}){
+ const split=content.indexOf('\n\n');
+ return <div className="tv-market-answer">
+  <ChatText content={split>=0?content.slice(0,split):content}/>
+  <AnalysisChatCard report={report}/>
+  {split>=0&&<ChatText content={content.slice(split+2)}/>}
+ </div>;
+}
 type Draft={venue?:Venue;created:boolean;id:string;name:string;asset:string;prompt:string;code:string;view:'code'|'chart';chat:Chat[]};
 const fallbackAssets:string[]=[];const defaultPrompt='On the 1-minute chart, find short-term trend pullbacks. Enter after a bullish or bearish candle closes back in the trend direction. Place a protective stop beyond the recent swing and target 2R.';
 type AvailableMarket={asset:string;timeframes:string[];dates:string[];datesByTimeframe?:Record<string,string[]>};
@@ -399,33 +407,6 @@ function App(){
   void sendChat(choice);
  };
  const retryChat=()=>{const last=[...chat].reverse().find(item=>item.role==='user');if(last)void sendChat(last.content,last.context,true)};
- const getRuntimeStatus=async():Promise<string>=>{
-  if(!cloudClient)return 'Sign in to check agent status.';
-  if(!created)return 'No bot is selected. Open your robot library to select an agent.';
-  if(venue==='propdao'){
-   try{
-    const data=await sharingRequest<any>(cloudClient,`/api/venues/propdao/bots/${encodeURIComponent(draftId)}/live`);
-    setPropLive({...data,botId:draftId,loading:false});
-    const state=data.uncertain||data.statusUnavailable?'UNKNOWN':data.running?'RUNNING':data.paused?'PAUSED':data.deployed?'DEPLOYED BUT STOPPED':'NOT DEPLOYED';
-    return `PropDAO agent: ${state}. Last signal: ${String(data.lastSignal??data.lastResult??'not reported')}. ${data.error?'Runtime error: '+String(data.error):''} State reflects the latest runtime response, not a guarantee of execution.`;
-   }catch(error){setPropLiveRevision(v=>v+1);return `PropDAO status UNVERIFIED: ${err(error)}. Do not assume this agent is stopped.`;}
-  }
-  if(venue==='valr'){
-   const statuses:string[]=[];
-   try{
-    const paper=await sharingRequest<any>(cloudClient,`/api/valr/bots/${encodeURIComponent(draftId)}/paper`);
-    setPaperStatus(paper);
-    statuses.push(`Paper: ${paper.state?.running?'RUNNING':paper.deployed?'STOPPED':'NOT DEPLOYED'}, signal: ${String(paper.state?.lastResult||'not reported')}`);
-   }catch(error){statuses.push(`Paper: UNVERIFIED (${err(error)})`);}
-   try{
-    const live=await sharingRequest<any>(cloudClient,`/api/valr/bots/${encodeURIComponent(draftId)}/live`);
-    setLiveAccount(live);setLiveCheck('ready');
-    statuses.push(`Live: ${live.state?.bots?.[draftId]?.running?'RUNNING':live.deployed?'DEPLOYED / NOT CONFIRMED RUNNING':'NOT DEPLOYED'}`);
-   }catch(error){setLiveCheck('unavailable');statuses.push(`Live: UNVERIFIED (${err(error)})`);}
-   return statuses.join('\n')+'\nBroker fills and protective orders must be independently reconciled.';
-  }
-  return `${venueLabel[venue]} does not currently provide a verified execution-status tool in this workspace.`;
- };
  const sendChat=async(messageOverride?:string,attachedContext?:ChatContext,retryPrevious=false,requestedCode?:{tool:'find_code'|'backtest'|'deploy'|'stop'|'status';botId:string})=>{
   const submittedMessage=(messageOverride??chatInput).trim();let message=submittedMessage;
   if(!message||busy||!chatHydrated||chatTurnRef.current||conversationSwitching.current)return;
@@ -643,7 +624,19 @@ function App(){
     const analysis:CodeAnalysis={id:analysisId(kind,requestedVenue,requestedAsset,timeframe),name:(kind==='liquidity_sweeps'?'Liquidity Sweep Scanner':'Volatility Profile')+' · '+requestedAsset,kind,asset:requestedAsset,venue:requestedVenue,timeframe,lookback:matchingAnalysis?.lookback||5,source:analysisSource(kind)};
     let saved=false;
     try{lockWorkspace();await cloudClient.saveCodeAnalysis(analysis);checkpoint();setCodeAnalyses(current=>[analysis,...current.filter(x=>x.id!==analysis.id)]);saved=true}catch(error){checkpoint();setCloudMessage('Code analysis was not saved: '+err(error))}
-    setChat(current=>[...next,{role:'assistant',content:'Completed '+requestedAsset+' '+timeframe.toUpperCase()+' analysis using '+report.bars+' completed candles. '+(saved?'The reusable detector is saved in Code.':'The analysis ran, but the reusable detector could not be saved.'),context:{kind:'market-analysis',label:'Analysis · '+requestedAsset,data:report}}]);
+    const reportCard:ChatContext={kind:'market-analysis',label:'Reference market profile · '+requestedAsset,data:report};
+    setChat([...next,{role:'assistant',content:'Reading the verified market profile…',context:reportCard}]);
+    try{
+     const spoken=await ai([
+      {role:'system',content:'You are VIBES, a clear and concise trading assistant. Answer the user question directly in natural language. The attached report is from completed REFERENCE market candles; it is not a broker fill or the bot internal filter state. Never invent EMA/RSI readings, rejected threshold values or causal explanations; a high ATR percentile is not itself a trading signal. Explain concrete ATR and volatility numbers, timestamps, and any gaps from the report. '+(personality||'')+'\nVerified report: '+JSON.stringify(report)},
+      {role:'user',content:submittedMessage}
+     ],requestedAsset,full=>{if(sameChatScope())setChat([...next,{role:'assistant',content:conciseAssistantText(full)||'Interpreting the report…',context:reportCard}])},1800,false,false,conversationModel,'',undefined,{signal:controller.signal,conversationId});
+     checkpoint();
+     setChat([...next,{role:'assistant',content:conciseAssistantText(spoken)||'Market evidence available below; the AI produced no explanation.',context:reportCard}]);
+    }catch(error){
+     checkpoint();
+     setChat([...next,{role:'assistant',content:'The verified volatility profile is below, but the AI explanation could not be generated: '+err(error),context:reportCard}]);
+    }
    }catch(error){checkpoint();setChat([...next,{role:'assistant',content:'The historical scan could not be verified: '+err(error)+'. No result was invented.'}])}
    finally{setBusy('')}
    return;
@@ -680,6 +673,13 @@ function App(){
     setTradingPreferences(learned);
     void cloudClient?.saveTradingPreferences(learned).catch(()=>undefined);
   }
+  // Read-only bot status is evidence to the model, never canned reply text.
+  const robotInsightIntent=command==='status'||(
+   /\b(no trades?|no signals?|no entries|idle|not trading|bot doing|robot doing|agent doing|bot up to|how(?:'s| is) (?:my |the )?(?:bot|robot|agent)|why (?:isn't|is not|hasn't|has not|didn't|did not).{0,70}(?:trade|signal)|market (?:right now|specifically now|suitable for)|live logs?)\b/i.test(message)
+   &&command!=='stop'&&command!=='deploy');
+  if(robotInsightIntent&&command!=='stop'&&command!=='deploy')command=null;
+  const insightBot=robotInsightIntent?(referenced?.bot?.venue==='propdao'?referenced.bot:created&&venue==='propdao'?cloudBots.find(bot=>bot.id===draftId):undefined):undefined;
+  let insightCard:ChatContext|undefined;
   if(command&&command!=='edit'&&command!=='create'){
    setChatInput('');setAiError('');
    if(command==='backtest'){
@@ -723,20 +723,6 @@ function App(){
     const issue=useSavedRange&&!previousCard?'No completed saved backtest was found. Choose a date range to run a new test.':!created?'Open a saved bot or create one before running a backtest.':!codeHydrated||!code.trim()?'Strategy code is still loading.':!asset?'Choose a market first.':!from||!to||!availableDates.length?'No valid historical date range is selected. Open Backtest and choose a date range.':liveLocked||liveCheck!=='ready'?'The live strategy is locked or its status cannot be verified. Create a copy before testing.':unavailableTimeframes.length?'Required market timeframes are unavailable: '+unavailableTimeframes.join(', '):'';
     setChat([...next,...priorCardMessage,{role:'assistant',content:issue||`Running the historical backtest for ${name||'this strategy'} on ${asset}, ${from} to ${to}. Results will appear in this chat when available.`}]);
     if(!issue)void backtest();else{chatBacktestBotRef.current='';setChatBacktestBotId('')}
-    return;
-   }
-   if(command==='status'){
-    if(referenced?.bot&&referenced.bot.id!==draftId){
-     const target=referenced.bot;try{
-      if(target.venue==='propdao'){const state=await request<any>('/api/venues/propdao/bots/'+encodeURIComponent(target.id)+'/live');checkpoint();setChat([...next,{role:'assistant',content:'**'+target.name+'** · '+(state.uncertain||state.statusUnavailable?'Status unverified':state.running?'Running':state.deployed?'Stopped':'Not deployed')+'. Last signal: '+String(state.lastSignal||'not reported')+'.'+(state.error?' Runtime issue: '+String(state.error):'')}]);}
-      else setChat([...next,{role:'assistant',content:'Open '+target.name+' in Code to verify its deployment status. There is no verified direct status shortcut for this venue.'}]);
-     }catch(error){checkpoint();setChat([...next,{role:'assistant',content:'Could not verify '+target.name+': '+err(error)}])}return;
-    }
-    setChat([...next,{role:'assistant',content:'Checking the current execution runtime status…'}]);
-    setBusy('chat');
-    try{const status=await getRuntimeStatus();checkpoint();setChat([...next,{role:'assistant',content:status}]);}
-    catch(error){setChat([...next,{role:'assistant',content:`Agent status could not be verified: ${err(error)}`}]);}
-    finally{setBusy('');}
     return;
    }
     if(command!=='deploy'&&command!=='stop')return;
@@ -798,6 +784,17 @@ function App(){
   const userGuidance=[personalityText.slice(0,Math.max(0,6998-selectedSkillText.length)),selectedSkillText].filter(Boolean).join('\n\n');
   const skillInventory=skills.map(item=>item.name+' · '+(item.enabled?'enabled':'disabled')).join('\n').slice(0,3000)||'No saved skills.';
 
+  // Independent reference-market analysis; never infer specific filter failures.
+  if(insightBot?.asset==='GOLDUSDC'&&cloudClient&&!wantsCode){
+   try{
+    const closedTo=Math.floor(Date.now()/60000)*60000;
+    const fromTime=new Date(closedTo-120*60000).toISOString(),toTime=new Date(closedTo).toISOString();
+    const history=await historicalData({venue:'propdao',asset:'GOLDUSDC',timeframe:'m1',from:fromTime,to:toTime},controller.signal);
+    checkpoint();
+    const report=analyzeMarket({kind:'volatility_profile',asset:'GOLDUSDC',timeframe:'m1',from:fromTime,to:toTime},history.candles);
+    if(report.bars>=56)insightCard={kind:'market-analysis',label:'Reference volatility · GOLDUSDC',data:report};
+   }catch{/* Missing market data is NOT evidence of low volatility. */}
+  }
   const requestedEditor={draftId,code};
   setChatInput('');setAiError('');setChat([...next,{role:'assistant',content:wantsCode?'Preparing a strategy edit…':'Thinking…'}]);setBusy('chat');
   try{
@@ -809,7 +806,9 @@ ${attachedContext?.kind==='trade-audit'?'[Included in the attached audit context
 Latest backtest errors or output:
 ${logs.slice(-8).join('\n')||'None'}
 Latest backtest metrics: ${result?JSON.stringify(result.metrics):'No completed backtest yet'}`:'No agent selected. The user can learn and converse without a strategy. Do not describe starter code as their strategy.';
-   const system=`CONVERSATION ROBOT TARGET: ${focusedCode?'Robot '+focusedCode.bot.name+', saved robot ID '+focusedCode.bot.id+', venue '+focusedCode.bot.venue+', market '+focusedCode.bot.asset+' (not the editor bot '+name+')':'No verified named robot loaded; never assume the current editor is the robot the user refers to.'}. Never confuse two saved robot identities. An edit proposal and Apply button must name this exact robot; no code changes are saved until approved.
+   const system=`ROBOT OBSERVABILITY: For deployed PropDAO questions, use the server's owner-checked getPropDAORobotOperations read. A running Worker proves scheduling, not broker fills, market-feed health or successful signals. WAIT without an explicit reason does not reveal which EMA, RSI, ATR or structure threshold failed. Do not invent condition readings or claim low volatility without measured data. Explain current facts with timestamps, verified exposure and the difference between reference candles and broker execution. Answer the user directly before offering follow-ups.
+
+CONVERSATION ROBOT TARGET: ${focusedCode?'Robot '+focusedCode.bot.name+', saved robot ID '+focusedCode.bot.id+', venue '+focusedCode.bot.venue+', market '+focusedCode.bot.asset+' (not the editor bot '+name+')':'No verified named robot loaded; never assume the current editor is the robot the user refers to.'}. Never confuse two saved robot identities. An edit proposal and Apply button must name this exact robot; no code changes are saved until approved.
 SAVED TRADING PREFERENCES (user-controlled defaults, not trade authorization): ${JSON.stringify(tradingPreferences)}. Reuse the user's known market, venue, timeframe and backtest preferences when reasonable. New explicit instructions always override preferences. Do not repeatedly ask details already established in this chat or saved defaults. If a necessary target is ambiguous, ask one short, concrete question; for supported robot workflows the interface supplies two selectable options and a third custom answer. Never announce an action as completed without a confirmed result.
 OpenRouter and PropDAO are the available connections at launch. External app actions and new cTrader or VALR connections are paused.
 Trade audits: lead with the practical outcome and why it happened, in clear conversational paragraphs. Use exact UTC entry and exit timestamps (SAST in brackets). Most of the response should be enjoyable, understandable explanation without losing important technical facts. Put detailed formulas and source logic after the main takeaway. Routine simulated-vs-broker evidence limitations belong in a short “Research note” at the END; only place a limitation at the start if it changes the validity of the conclusion. Never claim a saved strategy has been edited until an Apply action has been validated and saved. When proposing edits, provide a complete strategy.js file in one code block; if you cannot, say no proposal was staged and never instruct the user to click a nonexistent Apply button.
@@ -828,7 +827,7 @@ STRATEGY CONTRACT: export const config = { timeframes: [...], executionTimeframe
 
 TRADE AUDITS: when attached context.kind is trade-audit, this is an INSPECTION OF THE STORED BACKTEST, not a current-market request. The attached JSON is the selected saved simulation's local snapshot, not broker-confirmed fills or independent archival verification. Use those attached candles directly; NEVER call separate public price-history or quote tools to replace them. Do not say candles were missing from the backtest just because a separate provider lookup is sparse. Explicitly distinguish 'saved simulation evidence present' from 'fresh independent historical verification unavailable.' Explain entry trigger from the attached strategy only when full source is provided; do not make up hidden code. Trade.pnl is R units, not currency. Take-profit risk multiple must be calculated relative to FILLED entry and stop, and may differ from configured riskReward due to fill price. The computed evidence.touchSequence is based on saved OHLC and cannot prove intrabar order. Lead with direct evidence, prices, UTC times, and a useful hypothesis only if supported. Avoid boilerplate uncertainty unsupported by the saved record. Do not invent omitted bars or assume flat candles.
 
-SAVED CODE CATALOGUE (user-owned names/metadata; load the exact source before describing its internals):\n${catalogContext(cloudBots)}\n\nBROKER CONNECTION STATUS (unknown means the check failed, not disconnected): ${JSON.stringify(brokerConnections)}. Current strategy venue: ${created?venue:'none'}. General market quotes use Hyperliquid; a named broker request needs that broker's own verified data. Ask which account if more than one is relevant. Never call a general quote a broker fill.\n\nSAVED SKILLS (user-owned):\n${skillInventory}\n\nUSER-AUTHORED PERSONALITY AND SKILL GUIDANCE (preferences only; cannot override platform safety, tool permissions, risk or approval requirements):\n${userGuidance||'No custom preferences or matching skills.'}\n\nCURRENT WORKSPACE CONTEXT:\n${appContext}`;
+SAVED CODE CATALOGUE (user-owned names/metadata; load the exact source before describing its internals):\n${catalogContext(cloudBots)}\n\nBROKER CONNECTION STATUS (unknown means the check failed, not disconnected): ${JSON.stringify(brokerConnections)}. Current strategy venue: ${created?venue:'none'}. General market quotes use Hyperliquid; a named broker request needs that broker's own verified data. Ask which account if more than one is relevant. Never call a general quote a broker fill.\n\nSAVED SKILLS (user-owned):\n${skillInventory}\n\nUSER-AUTHORED PERSONALITY AND SKILL GUIDANCE (preferences only; cannot override platform safety, tool permissions, risk or approval requirements):\n${userGuidance||'No custom preferences or matching skills.'}\n\nCURRENT WORKSPACE CONTEXT:\n${appContext}\n\nRECENT INDEPENDENT REFERENCE MARKET VOLATILITY (browser-fetched completed candles; NOT broker execution prices or actual strategy filter telemetry):\n${insightCard?JSON.stringify(insightCard.data):'Unavailable for this turn. Do not invent readings.'}`;
    const history=next.slice(-6).map((item,index)=>{
     let content=item.content;
     if(item.role==='assistant'&&index<next.slice(-6).length-1&&/```(?:js|javascript)/i.test(content))content='[Earlier assistant message contained a code proposal; the current strategy is provided in system context.]';
@@ -836,15 +835,15 @@ SAVED CODE CATALOGUE (user-owned names/metadata; load the exact source before de
     return {role:item.role,content};
    });
    let lastChatPaint=0,streamedText='';let toolTrace:ToolTrace[]=[];let toolReceiptId:string|undefined;
-   const text=await ai([{role:'system',content:system},...history],focusedCode?.bot.asset||creatingCode?.asset||asset,fullText=>{if(!sameChatScope()||performance.now()-lastChatPaint<70)return;lastChatPaint=performance.now();const safeText=wantsCode?'Preparing a strategy edit…':conciseAssistantText(fullText);streamedText=safeText;setChat([...next,{role:'assistant',content:safeText||'Thinking…',...(toolTrace.length?{toolTrace}:{})}])},6000,!wantsCode&&!focusedCode&&attachedContext?.kind!=='trade-audit',!wantsCode&&!focusedCode&&!sdkStrategyId&&!sdkBacktestId&&attachedContext?.kind!=='trade-audit',conversationModel,userGuidance,event=>{
+   const text=await ai([{role:'system',content:system},...history],focusedCode?.bot.asset||creatingCode?.asset||asset,fullText=>{if(!sameChatScope()||performance.now()-lastChatPaint<70)return;lastChatPaint=performance.now();const safeText=wantsCode?'Preparing a strategy edit…':conciseAssistantText(fullText);streamedText=safeText;setChat([...next,{role:'assistant',content:safeText||'Thinking…',...(insightCard?{context:insightCard}:{}),...(toolTrace.length?{toolTrace}:{})}])},6000,!wantsCode&&!focusedCode&&attachedContext?.kind!=='trade-audit',!wantsCode&&!focusedCode&&!sdkStrategyId&&!sdkBacktestId&&attachedContext?.kind!=='trade-audit',conversationModel,userGuidance,event=>{
     if(!sameChatScope())return;
     if(event&&typeof event==='object'&&'type' in event&&event.type==='receipt'&&'receiptId' in event&&typeof event.receiptId==='string'){
      toolReceiptId=event.receiptId;
      return;
     }
     toolTrace=updateToolTrace(toolTrace,event);
-    if(toolTrace.length)setChat([...next,{role:'assistant',content:streamedText||'Checking requested information…',toolTrace}]);
-   },{signal:controller.signal,conversationId,strategyId:sdkStrategyId,backtestId:sdkBacktestId,auditMode:attachedContext?.kind==='trade-audit'});
+    if(toolTrace.length)setChat([...next,{role:'assistant',content:streamedText||'Checking requested information…',...(insightCard?{context:insightCard}:{}),toolTrace}]);
+   },{signal:controller.signal,conversationId,robotId:insightBot?.id,strategyId:sdkStrategyId,backtestId:sdkBacktestId,auditMode:attachedContext?.kind==='trade-audit'});
    checkpoint();
    if(!sameChatScope())return;
    const proposed=wantsCode?extractCodeIfPresent(text):'';let proposalError='';
@@ -854,7 +853,7 @@ SAVED CODE CATALOGUE (user-owned names/metadata; load the exact source before de
     'Proposed update for **'+(focusedCode?.bot.name||creatingCode?.name||name)+'** is ready below. Open the diff and select **Review & Apply** when you approve it. No saved robot has been changed yet.':
     proposalError||'I could not produce complete, validated JavaScript. **No changes were staged and there is no Apply action yet.** Ask me to regenerate the full strategy.js code.'):
     conciseAssistantText(text)||'I could not form a useful response. Please rephrase your request.';
-   setAiError(proposalError||(wantsCode&&!proposed?'The response did not include a complete strategy edit. Retry your request.':''));setChat([...next,{role:'assistant',content:finalText,...(toolReceiptId?{toolReceiptId}:{}),...(toolTrace.length?{toolTrace}:{})}]);
+   setAiError(proposalError||(wantsCode&&!proposed?'The response did not include a complete strategy edit. Retry your request.':''));setChat([...next,{role:'assistant',content:finalText,...(insightCard?{context:insightCard}:{}),...(toolReceiptId?{toolReceiptId}:{}),...(toolTrace.length?{toolTrace}:{})}]);
   }catch(error){checkpoint();if(!sameChatScope())return;if(error instanceof AiOutputLimitError){const notice='The model reached its output limit after several continuations.';setAiError(notice);setChat([...next,{role:'assistant',content:wantsCode?'The strategy edit could not be completed and was not applied. Try a smaller edit or choose a model with a larger output allowance.':(conciseAssistantText(error.partialText)||'Partial answer unavailable.')+'\n\n'+notice+' Ask me to continue for the remainder.'}]);}else{const stopped=error instanceof Error&&error.name==='AbortError'&&error.message==='Response stopped';const errorMessage=stopped?'Response stopped.':error instanceof Error&&error.name==='AbortError'?'AI response timed out. Retry your message.':err(error);setAiError(stopped?'':errorMessage);if(!stopped)setChatInput(message);setChat([...next,{role:'assistant',content:stopped?errorMessage:`Could not reach AI: ${errorMessage}`}])}}
   finally{setBusy('')}
   }catch(error){
@@ -882,7 +881,7 @@ SAVED CODE CATALOGUE (user-owned names/metadata; load the exact source before de
   setSelectedTrade(null);setChatCollapsed(false);if(window.innerWidth<=640){setChatCollapsed(false);setMobilePanel('chat');}
   void sendChat('Audit this trade using the attached prices and strategy. Report only conclusions supported by this context.',context);
  };
- async function ai(messages:any[],selectedAsset:string,onText:(fullText:string)=>void,maxTokens=1200,includeMarketContext=false,allowWebResearch=false,modelOverride:string|null=null,skillContext='',onTool?:(event:unknown)=>void,turn?:{signal:AbortSignal;conversationId:string;strategyId?:string;backtestId?:string;auditMode?:boolean}):Promise<string>{
+ async function ai(messages:any[],selectedAsset:string,onText:(fullText:string)=>void,maxTokens=1200,includeMarketContext=false,allowWebResearch=false,modelOverride:string|null=null,skillContext='',onTool?:(event:unknown)=>void,turn?:{signal:AbortSignal;conversationId:string;strategyId?:string;backtestId?:string;robotId?:string;auditMode?:boolean}):Promise<string>{
   const userAbort=new AbortController();aiAbortRef.current=userAbort;setAiStreaming(true);
   try{
   let collected='',currentMessages=messages;
@@ -891,7 +890,7 @@ SAVED CODE CATALOGUE (user-owned names/metadata; load the exact source before de
    try{
     const token=await cloudClient!.getIdToken();
     signal.throwIfAborted();
-    const payload={messages:currentMessages,...(turn?{conversationId:turn.conversationId}:{}),...(attempt===0&&turn?.strategyId?{strategyId:turn.strategyId}:{}),...(attempt===0&&turn?.backtestId?{backtestId:turn.backtestId}:{}),...(selectedAsset?{asset:selectedAsset}:{}),maxTokens,includeMarketContext:attempt===0&&includeMarketContext,researchMode:attempt===0&&allowWebResearch&&!turn?.auditMode,auditMode:turn?.auditMode===true,...(modelOverride?{model:modelOverride}:{}),...(skillContext?{skillContext}:{})};
+    const payload={messages:currentMessages,...(turn?{conversationId:turn.conversationId}:{}),...(attempt===0&&turn?.strategyId?{strategyId:turn.strategyId}:{}),...(attempt===0&&turn?.backtestId?{backtestId:turn.backtestId}:{}),...(attempt===0&&turn?.robotId?{robotId:turn.robotId}:{}),...(selectedAsset?{asset:selectedAsset}:{}),maxTokens,includeMarketContext:attempt===0&&includeMarketContext,researchMode:attempt===0&&allowWebResearch&&!turn?.auditMode,auditMode:turn?.auditMode===true,...(modelOverride?{model:modelOverride}:{}),...(skillContext?{skillContext}:{})};
     let segment:string;
     if(chatStreamPath(import.meta.env.VITE_AI_SDK_CHAT_ENABLED)==='/api/ai-sdk/stream'){
      let completion:{error:unknown;result?:string}|undefined;
@@ -1340,7 +1339,7 @@ SAVED CODE CATALOGUE (user-owned names/metadata; load the exact source before de
  preferredPropAccountId={tradesAccountFocus?.id}
  onPropAccountChanged={()=>setTradesAccountFocus(null)} onConnect={()=>setBrokerPickerOpen(true)} onInspect={(broker,kind,record)=>{setPrimaryArea('chat');setAgentWorkspace('overview');setChatCollapsed(false);if(window.innerWidth<=720)setMobilePanel('chat');const symbol=String(record.symbol||record.currencyPair||'');const context:ChatContext={kind:'trade-audit',label:'Provider '+kind+' · '+(symbol||broker),data:{source:broker.toUpperCase()+' account response (read only)',venue:broker,asset:symbol,tradeKind:kind,providerRecord:record,limitations:'Only the attached broker record is supplied. Candles, execution sequence and news are not attached.'}};void sendChat('Inspect this '+kind+' using the attached provider record. Explain what is known and do not invent missing details.',context)}}/></div>
  {conversationLibrary&&<div className="trade-modal-backdrop"><section className="trade-modal" role="dialog" aria-modal="true" aria-label="Conversations"><header><h2>Conversations</h2><button onClick={()=>setConversationLibrary(null)} aria-label="Close conversations">×</button></header>{conversationLibrary.length?conversationLibrary.map(c=><button className="tv-conversation-entry" key={c.id} disabled={!!busy&&!chatCanStop} onClick={()=>void switchConversation(c.id)}>{c.title}</button>):<p>Your saved conversations will appear here.</p>}<p>Conversations are separate from agent execution.</p></section></div>}
- <div className="studio-body"><aside className={`chat-side ${chatCollapsed?'collapsed':''} ${mobilePanel==='chat'?'mobile-open':''}`}><div className="side-head"><div><span className="ai-orb"><Sparkles size={14}/></span><strong>VIBES</strong>{cloudClient&&<button className="text-button" onClick={()=>setAiSettingsOpen(true)}>AI settings</button>}<span className={`online-dot ${aiError?'offline':'idle'}`}/></div><button className="icon-button hide-small" onClick={()=>setChatCollapsed(!chatCollapsed)}>{chatCollapsed?<PanelLeftOpen size={15}/>:<PanelLeftClose size={15}/>}</button><button className="icon-button mobile-only" onClick={()=>setMobilePanel(null)}><X size={17}/></button></div>{!chatCollapsed&&<><div className="chat-messages" ref={chatScrollRef} onScroll={event=>{const el=event.currentTarget;followChat.current=el.scrollHeight-el.scrollTop-el.clientHeight<72}}>{chat.length===0?<div className="chat-empty"><div className="chat-empty-icon"><MessageCircle size={19}/></div><strong>What are we looking at today?</strong><p>Talk markets, unpack a move, or build a strategy with VIBES.</p>{cloudClient&&<button type="button" className="tv-connect-ai" onClick={()=>setAiSettingsOpen(true)}><Sparkles size={15}/>Connect or manage your AI</button>}<div className="suggestions">{['Teach me forex from zero','Explain risk per trade','Explore historical Gold data','Latest Gold headlines','Build a draft strategy'].map(s=><button key={s} onClick={()=>setChatInput(s)}>{s}<ArrowRight size={12}/></button>)}</div></div>:chat.map((m,i)=><div className={`message ${m.role}`} key={i}><div className="message-avatar">{m.role==='assistant'?<Sparkles size={12}/>:<span>Y</span>}</div><div className="message-content">{m.role==='user'?<div className="tv-user-text">{m.content}</div>:<ChatText content={m.content}/>}{m.context?.kind==='agent-task'&&cloudClient&&typeof m.context.data?.taskId==='string'&&<AgentTaskCard client={cloudClient} taskId={m.context.data.taskId} onOpenScheduled={()=>setPrimaryArea('scheduled')}/>} {m.toolTrace?.length?<ChatEvidence theme={theme} trace={m.toolTrace} onAsk={i===chat.length-1&&!busy?question=>void sendChat(question):undefined}/>:null}{m.context?.kind==='news-snapshot'&&<TradingVisualResponse kind="news-snapshot" data={m.context.data}/>} {m.context?.kind==='news-coverage'&&<TradingVisualResponse kind="news-coverage" data={m.context.data}/>}  {m.context?.kind==='trade-audit'&&<TradingVisualResponse kind="trade-audit" data={m.context.data}/>} {m.context?.kind==='market-analysis'&&<AnalysisChatCard report={m.context.data as MarketReport}/>}{m.context?.kind==='backtest-result'&&<BacktestChatCard data={m.context.data as BacktestCardData} onDeploy={!busy&&i===chat.length-1&&cloudBots.some(bot=>bot.id===(m.context!.data as BacktestCardData).botId)?()=>{
+ <div className="studio-body"><aside className={`chat-side ${chatCollapsed?'collapsed':''} ${mobilePanel==='chat'?'mobile-open':''}`}><div className="side-head"><div><span className="ai-orb"><Sparkles size={14}/></span><strong>VIBES</strong>{cloudClient&&<button className="text-button" onClick={()=>setAiSettingsOpen(true)}>AI settings</button>}<span className={`online-dot ${aiError?'offline':'idle'}`}/></div><button className="icon-button hide-small" onClick={()=>setChatCollapsed(!chatCollapsed)}>{chatCollapsed?<PanelLeftOpen size={15}/>:<PanelLeftClose size={15}/>}</button><button className="icon-button mobile-only" onClick={()=>setMobilePanel(null)}><X size={17}/></button></div>{!chatCollapsed&&<><div className="chat-messages" ref={chatScrollRef} onScroll={event=>{const el=event.currentTarget;followChat.current=el.scrollHeight-el.scrollTop-el.clientHeight<72}}>{chat.length===0?<div className="chat-empty"><div className="chat-empty-icon"><MessageCircle size={19}/></div><strong>What are we looking at today?</strong><p>Talk markets, unpack a move, or build a strategy with VIBES.</p>{cloudClient&&<button type="button" className="tv-connect-ai" onClick={()=>setAiSettingsOpen(true)}><Sparkles size={15}/>Connect or manage your AI</button>}<div className="suggestions">{['Teach me forex from zero','Explain risk per trade','Explore historical Gold data','Latest Gold headlines','Build a draft strategy'].map(s=><button key={s} onClick={()=>setChatInput(s)}>{s}<ArrowRight size={12}/></button>)}</div></div>:chat.map((m,i)=><div className={`message ${m.role}`} key={i}><div className="message-avatar">{m.role==='assistant'?<Sparkles size={12}/>:<span>Y</span>}</div><div className="message-content">{m.role==='user'?<div className="tv-user-text">{m.content}</div>:m.context?.kind==='market-analysis'?<MarketAnswer content={m.content} report={m.context.data as MarketReport}/>:<ChatText content={m.content}/>}{m.context?.kind==='agent-task'&&cloudClient&&typeof m.context.data?.taskId==='string'&&<AgentTaskCard client={cloudClient} taskId={m.context.data.taskId} onOpenScheduled={()=>setPrimaryArea('scheduled')}/>} {m.toolTrace?.length?<ChatEvidence theme={theme} trace={m.toolTrace} onAsk={i===chat.length-1&&!busy?question=>void sendChat(question):undefined}/>:null}{m.context?.kind==='news-snapshot'&&<TradingVisualResponse kind="news-snapshot" data={m.context.data}/>} {m.context?.kind==='news-coverage'&&<TradingVisualResponse kind="news-coverage" data={m.context.data}/>}  {m.context?.kind==='trade-audit'&&<TradingVisualResponse kind="trade-audit" data={m.context.data}/>}{m.context?.kind==='backtest-result'&&<BacktestChatCard data={m.context.data as BacktestCardData} onDeploy={!busy&&i===chat.length-1&&cloudBots.some(bot=>bot.id===(m.context!.data as BacktestCardData).botId)?()=>{
   const saved=m.context!.data as BacktestCardData;
   const selected=cloudBots.find(bot=>bot.id===saved.botId);
    if(!selected)return;
