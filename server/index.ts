@@ -1314,9 +1314,11 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
       res.once('drain',resume);res.once('close',resume);
      });
     };
+    let streamedChars=0;
     for await (const part of result.fullStream){
       if(clientAbort.signal.aborted)break;
       if(part.type==='text-delta'){
+        streamedChars+=part.text.length;
         const event='data: '+JSON.stringify({choices:[{delta:{content:part.text}}]})+'\n\n';
         await sendEvent(event);
       } else if(part.type==='tool-call'||part.type==='tool-result'){
@@ -1327,7 +1329,8 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     }
     clientAbort.signal.throwIfAborted();
     if(webSources.size)await runRead('getWebResearchSources',{},async()=>({sources:[...webSources.values()]}));
-    if(receipt&&await receipt.save(marketplace.store).catch(()=>false)){
+    const receiptSaved=Boolean(receipt&&await receipt.save(marketplace.store).catch(()=>false));
+    if(receiptSaved&&receipt){
      console.info('chat-tool-receipt saved',{receiptId:receipt.id});
      res.write('data: '+JSON.stringify({tvTool:{type:'receipt',receiptId:receipt.id}})+'\n\n');
     }
@@ -1336,6 +1339,16 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     const usage=await result.usage;
     measuredUsage={prompt_tokens:usage.inputTokens,completion_tokens:usage.outputTokens};
     usageStatus=finishReason==='length'?'interrupted':'completed';
+    // Save a minimal, signed-in user/conversation-scoped proof only after a
+    // genuine OpenRouter stream completed AND its evidence receipt persisted.
+    // This is not a fabricated model answer or a broker order authorization.
+    if(receiptSaved&&receipt&&conversationId&&usageStatus==='completed'&&
+       streamedChars>0&&FirestoreStore.configured()){
+     await marketplace.store.put('users/'+uid+'/aiChatProofs/'+conversationId,{
+      ownerUid:uid,conversationId,receiptId:receipt.id,model,completed:true,
+      streamedChars,recordedAt:Date.now()
+     }).catch(()=>console.warn('AI chat completion proof unavailable'));
+    }
     res.write('data: '+JSON.stringify({choices:[{delta:{},finish_reason:finishReason}]})+'\n\n');
     res.write('data: [DONE]\n\n');
     return res.end();
