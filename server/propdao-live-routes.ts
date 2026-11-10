@@ -12,7 +12,7 @@ import {safeExecutionEvents,oldWorkerEvents,type ExecutionEvent} from '../shared
 
 type Storage={read:(key:string)=>Promise<string|null>;write:(key:string,value:string)=>Promise<void>;remove?:(key:string)=>Promise<void>;list?:(prefix:string,limit:number)=>Promise<string[]>};
 type Dependencies=Storage&{/** Legacy unit fixtures only; never pass from HTTP routes. */unsafeLegacyDeployForTests?:boolean;uid:(req:Request,res:Response)=>Promise<string|null>;bot:(uid:string,id:string,req:Request)=>Promise<{asset:string;code:string;venue?:string;name?:string}|null>;accounts:PropDAOAccounts;agents?:AgentRegistry;request?:typeof fetch;exclusive?:<T>(uid:string,id:string,work:()=>Promise<T>)=>Promise<T>;history?:Pick<DwellirHistory,'candles'>};
-export type PropGrant={autoPolicy?:{demoOnly:true;taskId:string;policyFingerprint:string;maxDailyLossPct:number;maxDrawdownPct:number;startingEquity:number};id:string;uid:string;botId:string;agentId?:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;leverage:number;issuedAt:number;expiresAt:number;revokedAt?:number;runtimeScope?:'bot'|'lock'};
+export type PropGrant={autoPolicy?:{demoOnly:true;taskId:string;policyFingerprint:string;maxDailyLossPct:number;maxDrawdownPct:number;startingEquity:number};id:string;uid:string;botId:string;agentId?:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;riskReward?:number;leverage:number;issuedAt:number;expiresAt:number;revokedAt?:number;runtimeScope?:'bot'|'lock'};
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 const safeId=(value:string)=>/^[A-Za-z0-9_-]{1,128}$/.test(value);
 export class PropDAOLiveService{
@@ -34,6 +34,8 @@ export class PropDAOLiveService{
   const codeHash=hash(bot.code);
   if(req.body?.expectedCodeHash!==undefined&&req.body.expectedCodeHash!==codeHash)throw Error('The saved strategy changed. Open it again and review the current backtest.');
   const config=parseStrategyConfig(bot.code);
+  const riskReward=Number(req.body?.riskReward??config.riskReward);
+  if(!Number.isFinite(riskReward)||riskReward<1||riskReward>5)throw Error('Deployment risk-to-reward must be between 1:1 and 1:5.');
   if(config.timeframes.some((tf:string)=>!['m1','m5','m15','m30','h1','h4'].includes(tf)))throw Error('Unsupported live strategy timeframe.');
   const marketList=await this.deps.accounts.getPublicMarkets(),market=marketList.data.find((m:any)=>m.symbol===bot.asset);
   if(!market||!Number.isFinite(leverage)||leverage<1||leverage>Number(market.maxLeverage))throw Error('Instrument or leverage is not currently supported on PropDAO.');
@@ -61,7 +63,7 @@ export class PropDAOLiveService{
    verificationNote=error.message+' Browser-generated simulation validated for internal consistency only; NOT independently replayed.';
   }
   const id=randomBytes(24).toString('hex'),createdAt=Date.now();
-  const data={version:1,id,uid,botId,accountId,riskUsd,leverage,symbol:bot.asset,codeHash,evidenceHash:evidence.receiptHash,backtest:{from:evidence.from,to:evidence.to,source:evidence.source,savedAt:evidence.savedAt,provenance:replay?.provenance??evidence.provenance,replayHash:replay?.replayHash??null,verifiedCandles:replay?.candleCount??null,browserObservedCandles:evidence.observedCandles,calendarIntervals:evidence.calendarIntervals},strategyRiskPercent:config.riskPercent,executionTimeframe:config.executionTimeframe,createdAt,expiresAt:createdAt+120000,consumedAt:null as number|null};
+  const data={version:1,id,uid,botId,accountId,riskUsd,riskReward,leverage,symbol:bot.asset,codeHash,evidenceHash:evidence.receiptHash,backtest:{from:evidence.from,to:evidence.to,source:evidence.source,savedAt:evidence.savedAt,provenance:replay?.provenance??evidence.provenance,replayHash:replay?.replayHash??null,verifiedCandles:replay?.candleCount??null,browserObservedCandles:evidence.observedCandles,calendarIntervals:evidence.calendarIntervals},strategyRiskPercent:config.riskPercent,strategyRiskReward:config.riskReward,executionTimeframe:config.executionTimeframe,createdAt,expiresAt:createdAt+120000,consumedAt:null as number|null};
   await this.deps.write(this.reviewKey(uid,botId,id),JSON.stringify(data));
   return {...data,reviewId:id,environment:process.env.VERCEL_ENV||'development',evidence:verificationNote};
  }
@@ -99,7 +101,7 @@ export class PropDAOLiveService{
   if(prior&&!prior.revokedAt&&Date.now()<prior.expiresAt)throw Error('A robot grant already exists; inspect and reconcile instead of repeating');
   const reviewId=randomBytes(24).toString('hex'),createdAt=Date.now();
   const payload={version:1,kind:'server-evaluated-demo' as const,id:reviewId,uid,botId,accountId:input.accountId,
-   symbol:bot.asset,codeHash:input.codeHash,riskUsd:input.riskUsd,leverage:input.leverage,
+   symbol:bot.asset,codeHash:input.codeHash,riskUsd:input.riskUsd,riskReward:parseStrategyConfig(bot.code).riskReward,leverage:input.leverage,
    proofKey:input.proofKey,proofHash:hash(record),policyFingerprint:input.policyFingerprint,
    maxDailyLossPct:proof.maxDailyLossPct,maxDrawdownPct:proof.maxDrawdownPct,
    createdAt,expiresAt:createdAt+120_000,consumedAt:null as number|null};
@@ -113,7 +115,7 @@ export class PropDAOLiveService{
   if(!raw)throw Error('Deployment review not found. Start a new review.');
   const r=JSON.parse(raw);
   if(r.version!==1||r.uid!==uid||r.botId!==botId||r.id!==input.reviewId||r.consumedAt!==null||!Number.isFinite(r.expiresAt)||Date.now()>=r.expiresAt)throw Error('Deployment review expired or already used.');
-  if(r.accountId!==input.accountId||r.symbol!==bot.asset||r.codeHash!==hash(bot.code)||r.codeHash!==input.expectedCodeHash||r.riskUsd!==Number(input.riskUsd)||r.leverage!==leverage)throw Error('Strategy revision, account or risk changed since review. Request a fresh review.');
+  if(r.accountId!==input.accountId||r.symbol!==bot.asset||r.codeHash!==hash(bot.code)||r.codeHash!==input.expectedCodeHash||r.riskUsd!==Number(input.riskUsd)||r.riskReward!==Number(input.riskReward??parseStrategyConfig(bot.code).riskReward)||r.leverage!==leverage)throw Error('Strategy revision, account or risk changed since review. Request a fresh review.');
   if(r.kind==='server-evaluated-demo'){
    const raw=await this.deps.read(r.proofKey);
    if(!raw||hash(raw)!==r.proofHash)throw Error('Autonomous evaluation proof changed after review.');
@@ -333,6 +335,8 @@ export class PropDAOLiveService{
   if(existing){if(!existing.revokedAt&&Date.now()<existing.expiresAt)throw Error('Existing deployment authorization must be stopped and reconciled before replacement.');const old=await this.status(uid,botId);if(old.running||old.uncertain||old.paused||old.pendingIntent||old.statusUnavailable)throw Error('Stop and reconcile the current deployment before replacing it.')}
   const bot=await this.deps.bot(uid,botId,req);if(!bot||bot.venue!=='propdao')throw Error('Save a PropDAO strategy before deploying');
   const config=parseStrategyConfig(bot.code);
+  const riskReward=Number(input.riskReward??config.riskReward);
+  if(!Number.isFinite(riskReward)||riskReward<1||riskReward>5)throw Error('Deployment reward ratio must be between 1:1 and 1:5.');
   const marketList=await this.deps.accounts.getPublicMarkets();
   const market=marketList.data.find((m:any)=>m.symbol===bot.asset);
   if(!market)throw Error('Bot market is not currently tradable on PropDAO');
@@ -345,7 +349,7 @@ export class PropDAOLiveService{
   if(!Number.isFinite(leverage)||leverage<1||leverage>Number(market.maxLeverage))throw Error('Selected leverage exceeds allowed market limit');
   const acceptedReview=await this.consumeReview(uid,botId,input,bot,leverage);
   const now=Date.now();
-  const grant:PropGrant={id:randomBytes(24).toString('hex'),uid,botId,...(this.deps.agents?{agentId:this.deps.agents.idFor(uid,botId)}:{}),accountId:input.accountId,symbol:bot.asset,coin:market.dex?`${market.dex}:${market.coin}`:market.coin,code:bot.code,codeHash:hash(bot.code),riskUsd:Number(input.riskUsd),leverage,issuedAt:now,expiresAt:now+7*24*3600_000,runtimeScope:'bot',
+  const grant:PropGrant={id:randomBytes(24).toString('hex'),uid,botId,...(this.deps.agents?{agentId:this.deps.agents.idFor(uid,botId)}:{}),accountId:input.accountId,symbol:bot.asset,coin:market.dex?`${market.dex}:${market.coin}`:market.coin,code:bot.code,codeHash:hash(bot.code),riskUsd:Number(input.riskUsd),riskReward,leverage,issuedAt:now,expiresAt:now+7*24*3600_000,runtimeScope:'bot',
    ...(acceptedReview?.kind==='server-evaluated-demo'?{autoPolicy:{demoOnly:true as const,
     taskId:acceptedReview.proofKey.split('/').at(-2),policyFingerprint:acceptedReview.policyFingerprint,
     maxDailyLossPct:acceptedReview.maxDailyLossPct,maxDrawdownPct:acceptedReview.maxDrawdownPct,startingEquity:1000}}:{})};
@@ -361,7 +365,7 @@ export class PropDAOLiveService{
   if(priorState.pendingIntent)throw Error('Unresolved prior order on this PropDAO account. Use Reconcile pending order in Deploy after checking your PropDAO account.');
   if(priorState.running||priorState.paused)throw Error('This robot is already running. Stop it before deploying a new strategy version.');
   await this.deps.write(this.key(uid,botId),JSON.stringify(grant));
-  try{await this.recordAgent(uid,botId,bot,{state:'deployment_pending',action:'deployment_authorized',grantId:grant.id,expiresAt:grant.expiresAt,codeHash:grant.codeHash,limits:{riskUsd:grant.riskUsd,leverage:grant.leverage},authorized:true})}
+  try{await this.recordAgent(uid,botId,bot,{state:'deployment_pending',action:'deployment_authorized',grantId:grant.id,expiresAt:grant.expiresAt,codeHash:grant.codeHash,limits:{riskUsd:grant.riskUsd,riskReward,leverage:grant.leverage},authorized:true})}
   catch(error){if(existing)await this.deps.write(this.key(uid,botId),JSON.stringify(existing));else if(this.deps.remove)await this.deps.remove(this.key(uid,botId));else await this.deps.write(this.key(uid,botId),JSON.stringify({...grant,revokedAt:Date.now()}));throw error}
   try{
    const result=await this.runtime(grant,'deploy',grant);
@@ -370,7 +374,7 @@ export class PropDAOLiveService{
    const observed=await this.runtime(grant,'status',undefined,5000).catch(()=>null);
    const matched=observed?.grant?.id===grant.id;
    const state=matched&&observed.running===true?'running':matched&&observed.paused===true?'paused':'unknown';
-   await this.recordAgent(uid,botId,bot,{state,action:state==='unknown'?'deployment_response_unverified':'deployment_confirmed',grantId:grant.id,expiresAt:grant.expiresAt,codeHash:grant.codeHash,limits:{riskUsd:grant.riskUsd,leverage:grant.leverage},authorized:true,error:state==='unknown'?'Deployment was accepted but its running state could not be verified.':undefined},true);
+   await this.recordAgent(uid,botId,bot,{state,action:state==='unknown'?'deployment_response_unverified':'deployment_confirmed',grantId:grant.id,expiresAt:grant.expiresAt,codeHash:grant.codeHash,limits:{riskUsd:grant.riskUsd,riskReward,leverage:grant.leverage},authorized:true,error:state==='unknown'?'Deployment was accepted but its running state could not be verified.':undefined},true);
    return {...result,running:state==='running',paused:state==='paused',grant:matched?observed.grant:null,uncertain:state==='unknown'};
   }
   catch(e){
@@ -385,7 +389,7 @@ export class PropDAOLiveService{
    }else{
     // A timeout or malformed response is an unknown outcome. Keep the
     // existing grant for reconciliation and never retry the deployment.
-    await this.recordAgent(uid,botId,bot,{state:'unknown',action:'deployment_outcome_unknown',grantId:grant.id,expiresAt:grant.expiresAt,codeHash:grant.codeHash,limits:{riskUsd:grant.riskUsd,leverage:grant.leverage},authorized:true,error:reason||'Deployment outcome is unknown.'},true);
+    await this.recordAgent(uid,botId,bot,{state:'unknown',action:'deployment_outcome_unknown',grantId:grant.id,expiresAt:grant.expiresAt,codeHash:grant.codeHash,limits:{riskUsd:grant.riskUsd,riskReward,leverage:grant.leverage},authorized:true,error:reason||'Deployment outcome is unknown.'},true);
    }
    throw e;
   }
@@ -468,7 +472,7 @@ export class PropDAOLiveService{
   if(action==='execute'){
    if(!this.configured())throw Error('Live execution disabled');
    if(payload?.symbol!==grant.symbol||payload?.intentId!==`tv-${grant.id}-${payload?.candleClose}`)throw Error('Order does not match authorized strategy');
-   return this.deps.accounts.executeOrder(uid,grant.accountId,{symbol:grant.symbol,side:payload.side,price:payload.price,stop:payload.stop,target:payload.target,leverage:grant.leverage,riskUsd:grant.riskUsd,intentId:payload.intentId,quoteTime:payload.quoteTime});
+   return this.deps.accounts.executeOrder(uid,grant.accountId,{symbol:grant.symbol,side:payload.side,price:payload.price,stop:payload.stop,target:payload.target,leverage:grant.leverage,riskUsd:grant.riskUsd,riskReward:grant.riskReward??parseStrategyConfig(grant.code).riskReward,intentId:payload.intentId,quoteTime:payload.quoteTime});
   }
   throw Error('Unknown provider action');
  }
