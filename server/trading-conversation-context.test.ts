@@ -1,5 +1,5 @@
 import {describe,it,expect} from 'vitest';
-import {readTradingReferent,rememberDeskTrade,rememberInspectedTrade} from './trading-conversation-context';
+import {readTradingReferent,rememberDeskTrade,rememberInspectedTrade,readRobotReferent,rememberRobotReferent} from './trading-conversation-context';
 import type {RecordStore} from './firestore-store';
 const now=Date.UTC(2026,10,10,12,0);
 function store(){
@@ -45,5 +45,21 @@ describe('durable owner-scoped conversational trade references',()=>{
    available:true,accountId:'prop-1',tradeId:'trade-2',
    attribution:{botId:null,attribution:'unattributed'}},now+1000);
   expect(updated).toMatchObject({tradeId:'trade-2',robotId:null,attribution:'unattributed'});
+ });
+});
+
+describe('robot context independent of any closed trade',()=>{
+ it('remembers a verified robot per user and conversation until expiration',async()=>{
+  const {db}=store();
+  expect(await rememberRobotReferent(db,'alice','conv-1','bot-1','prop-1',now)).toBe(true);
+  expect(await readRobotReferent(db,'alice','conv-1',now)).toMatchObject({robotId:'bot-1',accountId:'prop-1'});
+  expect(await readRobotReferent(db,'bob','conv-1',now)).toBeNull();
+  expect(await readRobotReferent(db,'alice','conv-1',now+8*24*3600_000)).toBeNull();
+ });
+ it('does not save untrusted cross-path identifiers',async()=>{
+  const {db,docs}=store();
+  expect(await rememberRobotReferent(db,'alice/other','conv-1','bot-1','prop-1',now)).toBe(false);
+  expect(await rememberRobotReferent(db,'alice','conv/1','bot-1','prop-1',now)).toBe(false);
+  expect(docs.size).toBe(0);
  });
 });
