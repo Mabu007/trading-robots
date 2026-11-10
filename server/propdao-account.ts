@@ -32,7 +32,7 @@ export class PropDAOAccounts {
   if(typeof risk?.equity!=='number'||!Number.isFinite(risk.equity)||!Number.isFinite(risk.roomUsd)||typeof risk.breached!=='boolean'||!Array.isArray(positions?.data)||!Array.isArray(orders?.data))throw Error('PropDAO live account state is invalid');
   return {account,risk,positions:positions.data,orders:orders.data};
  }
- async executeOrder(uid:string,id:string,input:{symbol:string;side:'BUY'|'SELL';price:number;stop:number;target:number;leverage:number;riskUsd:number;intentId:string;quoteTime:number}){
+ async executeOrder(uid:string,id:string,input:{symbol:string;side:'BUY'|'SELL';price:number;stop:number;target:number;leverage:number;riskUsd:number;riskReward:number;intentId:string;quoteTime:number}){
   let submissionStarted=false;
   try{
   if(!validId(id)||!/^[A-Z0-9]{2,40}$/.test(input.symbol)||!['BUY','SELL'].includes(input.side)||!/^[a-zA-Z0-9_-]{10,128}$/.test(input.intentId))throw Error('Invalid live order intent');
@@ -44,24 +44,43 @@ export class PropDAOAccounts {
   const fee=Number(markets.fees?.taker);
   const risk=Math.min(Number(input.riskUsd),live.risk.roomUsd*0.2);
   if(!Number.isFinite(risk)||risk<=0||risk>10)throw Error('Invalid live trade risk budget');
-  if(!Number.isFinite(input.price)||!Number.isFinite(input.stop)||!Number.isFinite(input.target)||input.price<=0||input.stop<=0||input.target<=0||!Number.isFinite(input.leverage))throw Error('Invalid live order prices');
+  if(!Number.isFinite(input.price)||!Number.isFinite(input.stop)||!Number.isFinite(input.target)||input.price<=0||input.stop<=0||input.target<=0||!Number.isFinite(input.leverage)||!Number.isFinite(input.riskReward)||input.riskReward<1||input.riskReward>5)throw Error('Invalid live order prices or reward ratio');
   if(input.side==='BUY'?input.target<=input.price:input.target>=input.price)throw Error('Target must be on profitable side');
   if(input.side==='BUY'?input.stop>=input.price:input.stop<=input.price)throw Error('Stop must be on the losing side of the reference price');
   // Bound entry price to 0.10% using a GTC limit. PropDAO rejects limit+IOC.
   // A resting remainder requires reconciliation; never treat submission as a fill.
   // Size from that adverse limit, not the stale candle-close reference quote.
   const maxEntry=Number((input.price*(input.side==='BUY'?1.001:0.999)).toPrecision(12));
-  if(input.side==='BUY'?input.target<=maxEntry:input.target>=maxEntry)throw Error('Take profit must remain beyond the worst allowed entry fill');
+  // Conservative risk uses worst executable GTC limit price, inclusive of both fees.
   const lossPerUnit=Math.abs(maxEntry-input.stop)+(maxEntry+input.stop)*fee;
   const marginPerUnit=maxEntry/input.leverage;
-  if(!Number.isFinite(lossPerUnit)||lossPerUnit<=0||!Number.isFinite(marginPerUnit)||marginPerUnit<=0)throw Error('Invalid market size');
+  if(!Number.isFinite(lossPerUnit)||lossPerUnit<=0||!Number.isFinite(marginPerUnit)||marginPerUnit<=0||!Number.isFinite(fee)||fee<0||fee>=0.1)throw Error('Invalid market size or fees');
   const maxQty=Math.min(risk/lossPerUnit,live.risk.equity/marginPerUnit);
   const qty=Number((Math.floor(maxQty/market.lotStep+1e-9)*market.lotStep).toPrecision(12));
   const verdict=validatePropDAORisk({status:live.account.status,breached:live.risk.breached,roomUsd:live.risk.roomUsd,availableMargin:live.risk.equity,side:input.side,entry:maxEntry,stop:input.stop,quantity:qty,lotStep:market.lotStep,leverage:input.leverage,maxLeverage:market.maxLeverage,takerFeeRate:fee,userRiskLimitUsd:risk});
   if(!verdict.ok)throw Error(verdict.reason);
+  // A configured $2 budget must not silently become a tiny risk allocation.
+  const utilization=verdict.plannedLoss/input.riskUsd;
+  if(utilization<0.9)throw Error('Entry skipped: executable risk is only '+(utilization*100).toFixed(1)+'% of the $'+input.riskUsd.toFixed(2)+' deployment risk budget. Adjust the lot/stop/account settings.');
+  // Net target includes both entry and exit taker fees at the worst allowed fill.
+  // BUY: target-entry-fee*(entry+target) = R:R*lossPerUnit.
+  // SELL: entry-target-fee*(entry+target) = R:R*lossPerUnit.
+  const rewardPerUnit=input.riskReward*lossPerUnit;
+  const rawTarget=input.side==='BUY'
+   ?(maxEntry*(1+fee)+rewardPerUnit)/(1-fee)
+   :(maxEntry*(1-fee)-rewardPerUnit)/(1+fee);
+  const priceStep=Number(market.priceStep??market.tickSize);
+  const target=Number.isFinite(priceStep)&&priceStep>0
+   ?Number(((input.side==='BUY'?Math.ceil(rawTarget/priceStep-1e-9):Math.floor(rawTarget/priceStep+1e-9))*priceStep).toPrecision(12))
+   :Number(rawTarget.toPrecision(12));
+  if(!Number.isFinite(target)||target<=0||(input.side==='BUY'?target<=maxEntry:target>=maxEntry))
+   throw Error('Cannot calculate an executable net reward target for this deployment.');
+  const projectedNetProfit=(input.side==='BUY'?target-maxEntry:maxEntry-target)*qty-(maxEntry+target)*qty*fee;
+  if(projectedNetProfit+0.000001<verdict.plannedLoss*input.riskReward)
+   throw Error('Executable target would undercut the deployment reward ratio.');
   const apiKey=await this.load(uid);if(!apiKey)throw Error('Credentials unavailable');
   submissionStarted=true;
-  const response=await this.request(`https://app.propdao.finance/api/v1/accounts/${encodeURIComponent(id)}/orders`,{method:'POST',headers:{Authorization:`Bearer ${apiKey}`,'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({symbol:input.symbol,side:input.side,qty,leverage:input.leverage,orderType:'limit',tif:'gtc',limitPrice:maxEntry,sl:input.stop,tp:input.target,intentId:input.intentId}),signal:AbortSignal.timeout(15000)});
+  const response=await this.request(`https://app.propdao.finance/api/v1/accounts/${encodeURIComponent(id)}/orders`,{method:'POST',headers:{Authorization:`Bearer ${apiKey}`,'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({symbol:input.symbol,side:input.side,qty,leverage:input.leverage,orderType:'limit',tif:'gtc',limitPrice:maxEntry,sl:input.stop,tp:target,intentId:input.intentId}),signal:AbortSignal.timeout(15000)});
   let body:any;try{body=await response.json()}catch{throw Error('PropDAO order response is ambiguous; reconcile by intentId before retrying')};
   if(!response.ok)throw Error(typeof body?.error==='string'?body.error:'PropDAO rejected live order');
   const base=`https://app.propdao.finance/api/v1/accounts/${encodeURIComponent(id)}`;
@@ -71,7 +90,7 @@ export class PropDAOAccounts {
    return positions.data;
   };
   const protectedPrice=(actual:unknown,expected:number)=>typeof actual==='number'&&Number.isFinite(actual)&&Math.abs(actual-expected)<=Math.max(0.01,Math.abs(expected)*0.000001);
-  const isProtected=(position:any)=>protectedPrice(position.slPrice,input.stop)&&protectedPrice(position.tpPrice,input.target);
+  const isProtected=(position:any)=>protectedPrice(position.slPrice,input.stop)&&protectedPrice(position.tpPrice,target);
   // Never cancel another user's/manual order. Require the response ID or intentId.
   const entryOrders=await this.get(apiKey,`/accounts/${encodeURIComponent(id)}/orders`);
   if(!Array.isArray(entryOrders?.data))throw Error('Unable to reconcile PropDAO resting orders');
@@ -93,12 +112,12 @@ export class PropDAOAccounts {
    cancelledUnfilled=true;
   }
   const matching=(await fetchPositions()).filter((p:any)=>p.symbol===input.symbol&&p.side===input.side&&Number(p.qty)>0);
-  if(matching.length===0&&cancelledUnfilled)return {intentId:input.intentId,quantity:0,requestedQuantity:qty,plannedLoss:0,protected:false,filled:false,providerStatus:'CANCELLED_UNFILLED'};
+  if(matching.length===0&&cancelledUnfilled)return {intentId:input.intentId,quantity:0,requestedQuantity:qty,plannedLoss:0,projectedNetProfit:0,riskBudgetUsd:input.riskUsd,riskReward:input.riskReward,stop:input.stop,target,protected:false,filled:false,providerStatus:'CANCELLED_UNFILLED'};
   if(matching.length!==1)throw Error('Live entry needs reconciliation; no further entries permitted while positions are unresolved');
   let position=matching[0];
   if(!isProtected(position)){
    if(!validId(String(position.id||'')))throw Error('Protective position identity unavailable');
-   const patched=await this.request(`${base}/positions/${encodeURIComponent(position.id)}`,{method:'PATCH',headers:{Authorization:`Bearer ${apiKey}`,'Content-Type':'application/json'},body:JSON.stringify({sl:input.stop,tp:input.target}),signal:AbortSignal.timeout(12000)});
+   const patched=await this.request(`${base}/positions/${encodeURIComponent(position.id)}`,{method:'PATCH',headers:{Authorization:`Bearer ${apiKey}`,'Content-Type':'application/json'},body:JSON.stringify({sl:input.stop,tp:target}),signal:AbortSignal.timeout(12000)});
    if(!patched.ok)throw Error('Protective orders unconfirmed. Inspect and close this position on PropDAO');
    const revised=(await fetchPositions()).find((p:any)=>p.id===position.id);
    if(!revised||!isProtected(revised))throw Error('Protective orders did not reconcile. Inspect your position immediately');
@@ -108,7 +127,7 @@ export class PropDAOAccounts {
   if(!Array.isArray(remaining?.data)||remaining.data.length)throw Error('Resting order or partial fill requires reconciliation. Protected positions remain; no further entries permitted.');
   const filledQuantity=Number(position.qty);
   if(!Number.isFinite(filledQuantity)||filledQuantity<=0||filledQuantity>qty+market.lotStep/2)throw Error('Unexpected filled quantity; account reconciliation required');
-  return {intentId:input.intentId,quantity:filledQuantity,requestedQuantity:qty,plannedLoss:verdict.plannedLoss,protected:true,filled:true,positionId:position.id,providerStatus:'PROTECTED_FILL',provider:body};
+  return {intentId:input.intentId,quantity:filledQuantity,requestedQuantity:qty,plannedLoss:verdict.plannedLoss*(filledQuantity/qty),projectedNetProfit:projectedNetProfit*(filledQuantity/qty),riskBudgetUsd:input.riskUsd,riskReward:input.riskReward,stop:input.stop,target,protected:true,filled:true,positionId:position.id,providerStatus:'PROTECTED_FILL',provider:body};
   }catch(error){
    if(!submissionStarted)throw new PropDAONoSubmissionError(error instanceof Error?error.message:'Order preflight failed before submission');
    throw error;
