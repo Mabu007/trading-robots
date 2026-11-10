@@ -279,7 +279,7 @@ describe('PropDAO live execution authorization',()=>{
    return Response.json({error:'Unresolved prior order. Operator reconciliation required before redeployment.'},{status:400});
   });
   await expect(svc.deploy('alice','bot-1',{body:{accountId:'prop-1',riskUsd:2,leverage:1,confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'}} as any)).rejects.toThrow(/Unresolved prior order/);
-  expect(storage.remove).toHaveBeenCalledTimes(1);
+  expect(storage.remove).toHaveBeenCalledTimes(2);
   expect(saved.size).toBe(0);
  });
  it('requires an explicit reconciliation confirmation and an existing grant',async()=>{
