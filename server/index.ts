@@ -227,7 +227,8 @@ const ctraderTokenLock=new ValrAccountLock(marketplace.store,'ctraderTokenLocks'
 const valrExclusive=<T>(uid:string,task:()=>Promise<T>)=>FirestoreStore.configured()?valrLock.run(uid,task):task();
 // Serialize changes to one PropDAO bot with deletion across server instances.
 const propBotExclusive=<T>(uid:string,id:string,task:()=>Promise<T>)=>FirestoreStore.configured()?propBotLock.run(uid+':'+id,task):task();
-const propdaoLiveService=propDAOLiveRoutes(app,{uid:firebaseUidOrReply,bot:ownedPropDAOBot,accounts:propdaoAccounts,agents:agentRegistry,read:readR2Object,write:writeR2Object,remove:deleteR2Object,list:listR2Objects,exclusive:propBotExclusive,history:dwellirHistory});
+const propdaoLiveService=propDAOLiveRoutes(app,{uid:firebaseUidOrReply,bot:ownedPropDAOBot,accounts:propdaoAccounts,agents:agentRegistry,read:readR2Object,write:writeR2Object,remove:deleteR2Object,list:listR2Objects,exclusive:propBotExclusive,history:dwellirHistory,
+ archive:(uid,botId,accountId,grantId,rows)=>tradingDesk.ingestWorkerArchive(uid,botId,accountId,grantId,rows)});
 const tradingDesk=new TradingDesk(FirestoreStore.configured()?marketplace.store:null,propdaoAccounts,
  async(uid,accountId)=>Promise.race([
   propdaoLiveService.executionHistory(uid,accountId),

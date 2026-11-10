@@ -62,3 +62,57 @@ it('disconnected accounts do not cause any broker trades call',async()=>{
  expect(await desk.today('alice',now)).toMatchObject({available:false});
  expect(read).not.toHaveBeenCalled();
 });
+
+it('accepts signed, owner-scope-checked SQL archival batches and ACKs only persisted Firestore records',async()=>{
+ const {TradingDesk}=await import('./trading-desk');
+ const docs=new Map<string,Record<string,unknown>>();
+ const store={
+  create:vi.fn(async(path:string,value:Record<string,unknown>)=>{if(docs.has(path))return false;docs.set(path,value);return true}),
+  get:vi.fn(async(path:string)=>docs.get(path)||null),put:vi.fn(),query:vi.fn(async()=>[])
+ } as unknown as RecordStore;
+ const desk=new TradingDesk(store,{list:vi.fn(),recentTrades:vi.fn()});
+ const now=Date.now(),tradeId='broker-trade-1001';
+ const rows:any[]=[
+  {kind:'trade',key:'prop-1:'+tradeId,grantId:'grant-old',accountId:'prop-1',botId:'bot-1',time:now,
+   payload:{id:tradeId,symbol:'GOLDUSDC',side:'SELL',qty:1,entry:4000,exit:4010,pnl:-2,
+    openedAt:Math.floor(now/1000)-120,closedAt:Math.floor(now/1000),reason:'SL',fee:.03}},
+  {kind:'event',key:'grant-old:event_12345678',grantId:'grant-old',accountId:'prop-1',botId:'bot-1',time:now,
+   payload:{id:'event_12345678',time:now,accountId:'prop-1',botId:'bot-1',grantId:'grant-old',
+    symbol:'GOLDUSDC',stage:'PROTECTED_FILL',side:'SELL',positionId:'pos_12345678'}},
+  {kind:'decision',key:'grant-old:1762780000',grantId:'grant-old',accountId:'prop-1',botId:'bot-1',time:now,
+   payload:{accountId:'prop-1',botId:'bot-1',grantId:'grant-old',codeHash:'hash123',
+    action:'WAIT',candleClose:1762780000,reason:'ATR too low',checks:[{name:'ATR',passed:false}]}}
+ ];
+ const first=await desk.ingestWorkerArchive('alice','bot-1','prop-1','grant-old',rows);
+ const second=await desk.ingestWorkerArchive('alice','bot-1','prop-1','grant-old',rows);
+ expect(first.acknowledged).toHaveLength(3);
+ expect(second.acknowledged).toEqual(first.acknowledged);
+ expect(docs.size).toBe(3);
+ expect([...docs.keys()].every(x=>x.startsWith('users/alice/'))).toBe(true);
+ expect([...docs.values()].find(v=>v.providerTradeId===tradeId)?.botId).toBeNull();
+ expect([...docs.values()].find(v=>v.codeHash==='hash123')?.reason).toBe('ATR too low');
+});
+it('refuses corrupted cross-account archival rows before acknowledging',async()=>{
+ const {TradingDesk}=await import('./trading-desk');
+ const store={create:vi.fn(),get:vi.fn(),put:vi.fn(),query:vi.fn()} as unknown as RecordStore;
+ const desk=new TradingDesk(store,{list:vi.fn(),recentTrades:vi.fn()});
+ await expect(desk.ingestWorkerArchive('alice','bot-1','prop-1','grant-old',
+  [{kind:'trade',key:'x',grantId:'grant-old',accountId:'prop-OTHER',botId:'bot-1',time:Date.now(),payload:{id:'trade-1'}}]))
+  .rejects.toThrow(/cross-account/i);
+ expect(store.create).not.toHaveBeenCalled();
+});
+
+it('uses SQL Durable Object broker evidence while a robot is running and defers Firestore archival',async()=>{
+ const store={create:vi.fn(async()=>true),get:vi.fn(),put:vi.fn(),query:vi.fn(async()=>[])} as unknown as RecordStore;
+ const broker={list:async()=>({connected:true,accounts:[{accountId:'prop-1',status:'active'}]}),
+  recentTrades:async()=>{throw Error('Direct broker history temporarily unavailable')}};
+ const journal=async()=>({available:true,events:[],decisionSnapshots:[],sqlLiveAvailable:true,
+  sqlCoverage:[{botId:'bot-1',running:true,brokerSync:{time:now,capped:false}}],
+  liveTrades:[trade('broker-01',-2)]});
+ const desk=new TradingDesk(store,broker,journal);
+ const response=await desk.today('alice',now);
+ expect(response).toMatchObject({available:true,partial:true,closedTradesToday:1,losses:1,
+  reportedPnl:-2,liveDurableObject:{activeAccounts:1,retainedBrokerTrades:1}});
+ expect((response as any).ledger.tradeWrites).toBe(0);
+ expect(store.create).not.toHaveBeenCalled();
+});

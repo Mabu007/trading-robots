@@ -6,7 +6,10 @@ type Trade={id:string;symbol:string;side:'BUY'|'SELL';qty:number;entry:number;ex
 type Account={accountId:string;status:string};
 type Broker={list:(uid:string)=>Promise<{connected:boolean;accounts:Account[]}>;recentTrades:(uid:string,accountId:string)=>Promise<Trade[]>};
 type Decision={accountId:string;botId:string;grantId:string;codeHash:string|null;candleClose:number;time:number;action:string;reason:string;checks:unknown[]};
-type History=(uid:string,accountId:string)=>Promise<{available:boolean;partial?:boolean;events?:ExecutionEvent[]|null;decisionSnapshots?:Decision[];error?:string}>;
+type History=(uid:string,accountId:string)=>Promise<{available:boolean;partial?:boolean;events?:ExecutionEvent[]|null;
+ decisionSnapshots?:Decision[];liveTrades?:Trade[];sqlLiveAvailable?:boolean;
+ sqlCoverage?:Array<{botId:string;running:boolean;brokerSync?:{time:number;capped?:boolean}|null}>;
+ error?:string}>;
 const hash=(...parts:string[])=>createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0,40);
 const validId=(v:string)=>typeof v==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(v);
 const timestamp=(v:number|null)=>{
@@ -62,9 +65,76 @@ export function summarizeDay(trades:Array<Trade&{accountId:string;botId:string|n
    closedAtUTC:timestamp(t.closedAt)!==null?new Date(timestamp(t.closedAt)!).toISOString():null})),
   limitation:'Only broker-recorded closed trades are counted. An SL reason does not prove indicator failure. Worker history can be incomplete. The broker supplies up to 50 trades per read per account. Firestore retains only trades observed by this system.'};
 }
+type ArchiveRow={kind:'trade'|'event'|'decision';key:string;grantId:string;accountId:string;botId:string;time:number;payload:Record<string,unknown>};
 export class TradingDesk{
  private readonly store:RecordStore|null;private readonly broker:Broker;private readonly history?:History;
  constructor(store:RecordStore|null,broker:Broker,history?:History){this.store=store;this.broker=broker;this.history=history;}
+ /** Signed Worker archival transfer. Caller must authenticate the internal
+  * bearer AND independently validate this exact owner/bot/account grant.
+  * Only an acknowledged Firestore write allows the Worker to mark SQL rows
+  * archived. No order state or authorization is affected. */
+ async ingestWorkerArchive(uid:string,botId:string,accountId:string,grantId:string,rows:ArchiveRow[]){
+  if(!this.store)throw Error('Firestore archival store not configured');
+  if(!uid||uid.length>256||uid.includes('/')||!validId(botId)||!validId(accountId)||
+   typeof grantId!=='string'||grantId.length>120||!Array.isArray(rows)||rows.length>60)
+   throw Error('Invalid Worker archival request');
+  const acknowledged:string[]=[];
+  for(const row of rows){
+   if(!row||!['trade','event','decision'].includes(row.kind)||typeof row.key!=='string'||
+    !row.key||row.key.length>400||row.accountId!==accountId||row.botId!==botId||
+    typeof row.grantId!=='string'||row.grantId.length>120||!Number.isFinite(row.time)||
+    !row.payload||typeof row.payload!=='object'||Array.isArray(row.payload)||
+    JSON.stringify(row.payload).length>24000)throw Error('Invalid or cross-account Worker archive row');
+   const v=row.payload,root='users/'+uid+'/';
+   let path:string,record:Record<string,unknown>;
+   if(row.kind==='trade'){
+    const trade={...v,id:v.id} as Trade;
+    if(!validTrade(trade))throw Error('Archived broker trade invalid');
+    path=root+'liveTrades/'+hash('propdao',accountId,trade.id);
+    const {id,...brokerFields}=trade;
+    record={...brokerFields,accountId,providerTradeId:id,botId:null,grantId:null,
+     attribution:'unattributed',localDay:timestamp(trade.closedAt)!==null?sastDay(timestamp(trade.closedAt)!):null,
+     openedAtMillis:timestamp(trade.openedAt),closedAtMillis:timestamp(trade.closedAt),
+     source:'durable-object-sql-authenticated-broker',observedAt:Date.now(),ledgerVersion:1};
+   }else if(row.kind==='event'){
+    const event=safeExecutionEvents([v],accountId)[0];
+    if(!event||event.botId!==botId||event.grantId!==row.grantId)throw Error('Archived event identity invalid');
+    path=root+'liveExecutionEvents/'+hash('propdao-event',accountId,botId,event.id);
+    record={...event,source:'durable-object-sql-worker-event-not-broker-trade',observedAt:Date.now(),
+     codeHash:typeof v.codeHash==='string'?v.codeHash:null,
+     riskUsd:typeof v.riskUsd==='number'&&Number.isFinite(v.riskUsd)?v.riskUsd:null,
+     riskReward:typeof v.riskReward==='number'&&Number.isFinite(v.riskReward)?v.riskReward:null,
+     execution:v.execution&&typeof v.execution==='object'&&!Array.isArray(v.execution)?v.execution:null,
+     ledgerVersion:1};
+   }else{
+    if(v.accountId!==accountId||v.botId!==botId||v.grantId!==row.grantId||
+      !Number.isFinite(v.candleClose)||!['WAIT','BUY','SELL'].includes(String(v.action)))
+     throw Error('Archived decision identity invalid');
+    path=root+'liveRobotDecisions/'+hash('propdao-decision',accountId,botId,row.grantId,String(v.candleClose));
+    record={accountId,botId,grantId:row.grantId,codeHash:typeof v.codeHash==='string'?v.codeHash:null,
+     candleClose:v.candleClose,time:row.time,action:v.action,
+     reason:typeof v.reason==='string'?v.reason.slice(0,240):'',
+     checks:Array.isArray(v.checks)?v.checks.slice(0,16):[],
+     completedCandles:v.completedCandles&&typeof v.completedCandles==='object'&&!Array.isArray(v.completedCandles)?v.completedCandles:null,
+     historyCoverage:v.historyCoverage&&typeof v.historyCoverage==='object'&&!Array.isArray(v.historyCoverage)?v.historyCoverage:null,
+     marketSource:'Hyperliquid',source:'durable-object-sql-strategy-decision',
+     observedAt:Date.now(),ledgerVersion:1};
+   }
+   // create is atomic and idempotent; an existing document with the same
+   // deterministic identity is already archived and may be acknowledged.
+   const created=await this.store.create(path,record);
+   if(!created){
+    const prior=await this.store.get(path);
+    if(!prior||prior.accountId!==accountId||
+      (row.kind==='trade'&&prior.providerTradeId!==record.providerTradeId)||
+      (row.kind==='event'&&(prior.id!==record.id||prior.botId!==botId))||
+      (row.kind==='decision'&&(prior.botId!==botId||prior.candleClose!==record.candleClose)))
+     throw Error('Existing Firebase archive identity mismatch');
+   }
+   acknowledged.push(row.kind+':'+row.key);
+  }
+  return {acknowledged};
+ }
  /** Read-through, account-scoped and idempotent. Does NOT place any orders. */
  async today(uid:string,now=Date.now()){
   if(typeof uid!=='string'||uid.length>256||!uid||uid.includes('/'))throw Error('Invalid owner');
@@ -77,20 +147,42 @@ export class TradingDesk{
   const retained=new Map<string,Trade&{accountId:string;botId:string|null;attribution:string}>();
   const failures:string[]=[],capped:string[]=[],journalWarnings:string[]=[];
   let writeFailures=0,tradeWrites=0,eventWrites=0,decisionWrites=0;
+  let liveSqlAccountCount=0,liveSqlTradeCount=0;
   for(const accountId of accounts){
    try{
-    const trades=await this.broker.recentTrades(uid,accountId);
-    if(trades.length===50)capped.push(accountId);
+    // Worker SQL is the durable live source. Broker reads independently
+    // reconcile newly closed trades. Neither source's outage masks the other.
+    const [brokerResult,workerResult]=await Promise.allSettled([
+     this.broker.recentTrades(uid,accountId),
+     this.history?this.history(uid,accountId):Promise.resolve(null)
+    ]);
+    const brokerTrades=brokerResult.status==='fulfilled'?brokerResult.value:[];
+    if(brokerResult.status==='rejected')failures.push(accountId+': Live broker read unavailable; showing retained evidence if present');
+    if(brokerTrades.length===50)capped.push(accountId);
     let events:ExecutionEvent[]=[],decisions:Decision[]=[];
-    if(this.history){
-     try{
-      const activity=await this.history(uid,accountId);
-      events=safeExecutionEvents(activity.events,accountId);
-      decisions=Array.isArray(activity.decisionSnapshots)?activity.decisionSnapshots.filter(d=>
-       d&&d.accountId===accountId&&validId(d.botId)&&validId(d.grantId)&&Number.isFinite(d.candleClose)).slice(-300):[];
-      if(!activity.available||activity.partial)journalWarnings.push(accountId+': '+(activity.error||'Worker history incomplete'));
-     }catch{journalWarnings.push(accountId+': Worker history unavailable');}
-    }else journalWarnings.push(accountId+': No Worker journal reader');
+    let doTrades:Trade[]=[],activeSql=false;
+    if(workerResult.status==='fulfilled'&&workerResult.value){
+     const activity=workerResult.value;
+     events=safeExecutionEvents(activity.events,accountId);
+     decisions=Array.isArray(activity.decisionSnapshots)?activity.decisionSnapshots.filter(d=>
+      d&&d.accountId===accountId&&validId(d.botId)&&validId(d.grantId)&&Number.isFinite(d.candleClose)).slice(-300):[];
+     doTrades=Array.isArray(activity.liveTrades)?activity.liveTrades.filter(validTrade):[];
+     activeSql=activity.sqlLiveAvailable===true&&Array.isArray(activity.sqlCoverage)&&
+      activity.sqlCoverage.some(x=>x.running===true);
+     if(activeSql)liveSqlAccountCount++;
+     liveSqlTradeCount+=doTrades.length;
+     if(!activity.available||activity.partial)journalWarnings.push(accountId+': '+(activity.error||'Worker history incomplete'));
+     if(activity.sqlCoverage?.some(x=>x.brokerSync?.capped))capped.push(accountId+': DO last broker sample capped');
+    }else journalWarnings.push(accountId+': Worker journal unavailable');
+    const byTradeId=new Map<string,Trade>();
+    for(const trade of doTrades)byTradeId.set(trade.id,trade);
+    for(const trade of brokerTrades.filter(validTrade))byTradeId.set(trade.id,trade);
+    const trades=[...byTradeId.values()];
+    if(brokerResult.status==='rejected'&&trades.length===0)
+     journalWarnings.push(accountId+': No verified fresh or retained broker trades');
+    // When a robot is live with a SQL journal, Firebase archival is deferred
+    // until stop; the DO continues holding the authoritative observation.
+    const writeThrough=!activeSql;
     const persist=async(rootName:string,id:string,data:Record<string,any>)=>{
      if(!this.store)return false;
      try{return await this.store.create('users/'+uid+'/'+rootName+'/'+id,data)}
@@ -117,7 +209,7 @@ export class TradingDesk{
      retained.set(scope,{...record,id:providerTradeId});
      return {scope,record};
     });
-    if(this.store)for(let i=0;i<documents.length;i+=8){
+    if(this.store&&writeThrough)for(let i=0;i<documents.length;i+=8){
      await Promise.all(documents.slice(i,i+8).map(async({scope,record})=>{
       const path=root+'/'+scope;
       try{
@@ -159,6 +251,9 @@ export class TradingDesk{
    }catch{ledgerAvailable=false;journalWarnings.push('Firestore ledger read unavailable');}
   }
   return {...summarizeDay([...retained.values()],day,{accountsChecked:accounts.length,failures,capped,journalWarnings,ledgerAvailable,writeFailures}),
-   fetchedAt:new Date(now).toISOString(),ledger:{tradeWrites,eventWrites,decisionWrites,writeFailures,available:ledgerAvailable}};
+   fetchedAt:new Date(now).toISOString(),
+   liveDurableObject:{activeAccounts:liveSqlAccountCount,retainedBrokerTrades:liveSqlTradeCount,
+    source:'Per-robot SQLite Durable Objects; provider fills remain account-wide'},
+   ledger:{tradeWrites,eventWrites,decisionWrites,writeFailures,available:ledgerAvailable}};
  }
 }
