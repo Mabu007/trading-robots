@@ -5,7 +5,9 @@ export type ExecutionStage='SIGNAL'|'ENTRY_SKIPPED'|'SUBMISSION_STARTED'|'PRE_SU
 export type ExecutionEvent={
  id:string;time:number;accountId:string;botId:string;grantId:string;symbol:string;
  stage:ExecutionStage;side?:'BUY'|'SELL';intentId?:string;
- quantity?:number;positionId?:string;reason?:string;
+ quantity?:number;positionId?:string;brokerOrderId?:string;entryPrice?:number;
+ filledAt?:number;stopPrice?:number;targetPrice?:number;riskBudgetUsd?:number;
+ decisionCandleClose?:number;codeHash?:string;reason?:string;
 };
 /** A missing durable write for these transitions can leave an order without
  * an auditable causal chain. Never proceed to an order after such a failure. */
@@ -31,6 +33,15 @@ export function safeExecutionEvents(raw:unknown,accountId:string):ExecutionEvent
   intentId:typeof v.intentId==='string'&&/^[A-Za-z0-9_-]{8,140}$/.test(v.intentId)?v.intentId:undefined,
   side:v.side==='BUY'||v.side==='SELL'?v.side:undefined,
   quantity:typeof v.quantity==='number'&&Number.isFinite(v.quantity)&&v.quantity>=0?v.quantity:undefined,
+  brokerOrderId:typeof v.brokerOrderId==='string'&&/^[A-Za-z0-9_-]{1,160}$/.test(v.brokerOrderId)?v.brokerOrderId:undefined,
+  positionId:typeof v.positionId==='string'&&/^[A-Za-z0-9_-]{1,160}$/.test(v.positionId)?v.positionId:undefined,
+  entryPrice:typeof v.entryPrice==='number'&&Number.isFinite(v.entryPrice)&&v.entryPrice>0?v.entryPrice:undefined,
+  filledAt:typeof v.filledAt==='number'&&Number.isFinite(v.filledAt)&&v.filledAt>0?v.filledAt:undefined,
+  stopPrice:typeof v.stopPrice==='number'&&Number.isFinite(v.stopPrice)&&v.stopPrice>0?v.stopPrice:undefined,
+  targetPrice:typeof v.targetPrice==='number'&&Number.isFinite(v.targetPrice)&&v.targetPrice>0?v.targetPrice:undefined,
+  riskBudgetUsd:typeof v.riskBudgetUsd==='number'&&Number.isFinite(v.riskBudgetUsd)&&v.riskBudgetUsd>0?v.riskBudgetUsd:undefined,
+  decisionCandleClose:typeof v.decisionCandleClose==='number'&&Number.isFinite(v.decisionCandleClose)?v.decisionCandleClose:undefined,
+  codeHash:typeof v.codeHash==='string'&&/^[a-f0-9]{64}$/.test(v.codeHash)?v.codeHash:undefined,
  })).sort((a,b)=>b.time-a.time);
 }
 /** Older Workers expose textual events. They have no reliable bot/revision
