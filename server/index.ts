@@ -283,11 +283,20 @@ app.post('/api/trading-desk/release-acceptance',async(req,res)=>{
     }catch{/* Failed Worker health is reported as unverified; no broker writes. */}
    }
   }
+  // The selected AI model can be per-chat, not only the account default.
+  // Validate the actual completed provider model against the fresh catalogue.
+  let configuredModel:string|null=null;
+  if(personalAI?.apiKey&&typeof chatProof?.model==='string'){
+   try{
+    const models=await openRouterAccounts.models();
+    if(models.some(item=>item.id===chatProof.model))configuredModel=chatProof.model;
+   }catch{/* Missing catalogue verification keeps the acceptance gate closed. */}
+  }
   const report=evaluatePropDAOReleaseGate({ownerUid:uid,accountId,tradeId,
    ownedDemoAccount,investigation,archivedTrade,archivedFill,revision,
    chatProof,chatTrace,workerHealth,
    productionSha:process.env.VERCEL_GIT_COMMIT_SHA||process.env.TV_RELEASE_SHA||null,
-   configuredModel:personalAI?.model||null,receiptId,conversationId});
+   configuredModel,receiptId,conversationId});
   return res.status(report.passed?200:409).json(report);
  }catch(error){
   return res.status(503).json({passed:false,error:error instanceof Error?error.message:'Release evidence unavailable'});
