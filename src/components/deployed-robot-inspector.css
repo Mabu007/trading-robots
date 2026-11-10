@@ -75,3 +75,29 @@
  .tv-deployed-panel{padding:13px}.tv-deployed-panel dl>div{gap:8px}
  .tv-deployed-actions button{flex:1}
 }
+
+
+/* The global modal header uses a dark gradient. Keep Operations readable in light mode. */
+html[data-theme="light"] .app-dialog.tv-deployed-inspector.market-modal{
+ --operations-ink:#17342a;
+ --operations-muted:#4e685c;
+ --operations-border:#d3e3d9;
+ --operations-panel:#ffffff;
+ --operations-soft:#f2f7f3;
+ --operations-accent:#14734f;
+ color:var(--operations-ink);
+ background:var(--operations-panel);
+}
+html[data-theme="light"] .tv-deployed-inspector .app-dialog-header{
+ background:#fff!important;
+ background-image:none!important;
+ color:#17342a!important;
+ border-bottom-color:#d3e3d9!important;
+}
+html[data-theme="light"] .tv-deployed-inspector .app-dialog-header h2,
+html[data-theme="light"] .tv-deployed-inspector .app-dialog-header button{
+ color:#17342a!important;
+}
+html[data-theme="light"] .tv-deployed-inspector .app-dialog-header button:hover{
+ background:#e6f1ea!important;
+}
