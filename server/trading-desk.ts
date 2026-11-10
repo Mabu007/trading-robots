@@ -6,7 +6,8 @@ import {diagnoseBrokerTrade,summarizeDeterministicPerformance,type DecisionEvide
 
 type Trade={id:string;symbol:string;side:'BUY'|'SELL';qty:number;entry:number;exit:number;pnl:number;openedAt:number|null;closedAt:number|null;reason:string;fee:number|null;positionId?:string|null;intentId?:string|null;orderId?:string|null};
 type Account={accountId:string;status:string};
-type Broker={list:(uid:string)=>Promise<{connected:boolean;accounts:Account[]}>;recentTrades:(uid:string,accountId:string)=>Promise<Trade[]>};
+type Broker={list:(uid:string)=>Promise<{connected:boolean;accounts:Account[]}>;recentTrades:(uid:string,accountId:string)=>Promise<Trade[]>;
+ tradesSince?:(uid:string,accountId:string,sinceMs:number,maxRecords?:number)=>Promise<{trades:Trade[];complete:boolean;capped:boolean;pages:number;providerTotal:number|null}>};
 type Decision=DecisionEvidence;
 type History=(uid:string,accountId:string)=>Promise<{available:boolean;partial?:boolean;events?:ExecutionEvent[]|null;
  decisionSnapshots?:Decision[];liveTrades?:Trade[];sqlLiveAvailable?:boolean;
@@ -79,7 +80,7 @@ export function summarizeDay(trades:Array<Trade&{accountId:string;botId:string|n
    openedAtUTC:timestamp(t.openedAt)!==null?new Date(timestamp(t.openedAt)!).toISOString():null,
    closedAtUTC:timestamp(t.closedAt)!==null?new Date(timestamp(t.closedAt)!).toISOString():null})),
   performanceAllObserved:summarizeDeterministicPerformance(today.map(t=>({...t,accountId:t.accountId}))),
-  limitation:'Only broker-recorded closed trades are counted. An SL reason does not prove indicator failure. Worker history can be incomplete. The broker supplies up to 50 trades per read per account. Firestore retains only trades observed by this system.'};
+  limitation:'Only broker-recorded closed trades are counted. Stop Loss is an exit label, not proof of indicator failure. Worker history can be incomplete. Historical broker pagination is bounded to 500 trades per account per investigation; coverage is flagged if incomplete. Firestore retains only trades observed by this system.'};
 }
 type ArchiveRow={kind:'trade'|'event'|'decision';key:string;grantId:string;accountId:string;botId:string;time:number;payload:Record<string,unknown>};
 export class TradingDesk{
@@ -252,13 +253,19 @@ export class TradingDesk{
    try{
     // Worker SQL is the durable live source. Broker reads independently
     // reconcile newly closed trades. Neither source's outage masks the other.
+    const sinceMs=Date.parse(day+'T00:00:00.000Z')-2*3600_000;
     const [brokerResult,workerResult]=await Promise.allSettled([
-     this.broker.recentTrades(uid,accountId),
+     this.broker.tradesSince?this.broker.tradesSince(uid,accountId,sinceMs,500):
+      this.broker.recentTrades(uid,accountId).then(trades=>({
+       trades,complete:trades.length<50,capped:trades.length>=50,
+       pages:1,providerTotal:null
+      })),
      this.history?this.history(uid,accountId):Promise.resolve(null)
     ]);
-    const brokerTrades=brokerResult.status==='fulfilled'?brokerResult.value:[];
+    const brokerTrades=brokerResult.status==='fulfilled'?brokerResult.value.trades:[];
     if(brokerResult.status==='rejected')failures.push(accountId+': Live broker read unavailable; showing retained evidence if present');
-    if(brokerTrades.length===50)capped.push(accountId);
+    if(brokerResult.status==='fulfilled'&&!brokerResult.value.complete)
+     capped.push(accountId+': Broker pagination window incomplete');
     let events:ExecutionEvent[]=[],decisions:Decision[]=[];
     let doTrades:Trade[]=[],activeSql=false;
     if(workerResult.status==='fulfilled'&&workerResult.value){
