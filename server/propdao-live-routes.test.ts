@@ -33,7 +33,7 @@ describe('PropDAO live execution authorization',()=>{
   const {svc,fetcher,saved}=setup();
   await svc.assertDeletable('alice','bot-1');
   await svc.deploy('alice','bot-1',{body:{accountId:'prop-1',riskUsd:2,leverage:1,confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'}} as any);
-  const grant=JSON.parse([...saved.values()][0]);
+  const grant=JSON.parse([...saved.entries()].find(([key])=>key.startsWith('propdao-live/v1/'))![1]);
   fetcher.mockImplementation(async(url:string)=>String(url).endsWith('/health')?Response.json({ready:true}):Response.json({grant:{id:grant.id},running:true,paused:false,pendingIntent:null}));
   await expect(svc.assertDeletable('alice','bot-1')).rejects.toThrow(/Stop and reconcile/);
   fetcher.mockRejectedValue(Error('offline'));
@@ -465,4 +465,25 @@ it('permits authenticated read-only broker history after robot authorization is 
  expect(accounts.executeOrder).not.toHaveBeenCalled();
  await expect(svc.provider({uid:'alice',botId:'bot-1',grantId:'grant-stop-1',action:'execute',payload:{}}))
   .rejects.toThrow(/expired/i);
+});
+
+describe('Immutable live strategy revision evidence',()=>{
+ it('archives the exact authorized source and refuses another owner after saved code changes',async()=>{
+  vi.stubEnv('PROPDAO_LIVE_ENABLED','true');
+  vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');
+  vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
+  const {svc,saved}=setup();
+  await svc.deploy('alice','bot-1',{body:{accountId:'prop-1',riskUsd:2,leverage:1,
+   confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'}} as any);
+  const grantEntry=[...saved.entries()].find(([key])=>key.startsWith('propdao-live/v1/'))!;
+  const grant=JSON.parse(grantEntry[1]);
+  const snapshot=await svc.revision('alice','bot-1',grant.id);
+  expect(snapshot).toMatchObject({available:true,botId:'bot-1',grantId:grant.id,
+   accountId:'prop-1',code:starterCode,codeHash:grant.codeHash});
+  saved.set('user-bots/'+Buffer.from('alice').toString('base64url')+'/bot-1/current.json',
+   JSON.stringify({code:'later editable revision'}));
+  expect(await svc.revision('alice','bot-1',grant.id)).toMatchObject({code:starterCode});
+  expect(await svc.revision('bob','bot-1',grant.id)).toMatchObject({available:false});
+  expect(await svc.revision('alice','bot-1','unknown-grant')).toMatchObject({available:false});
+ });
 });
