@@ -273,7 +273,8 @@ export class PropDAOLiveService{
    .map(g=>({...g,runtimeScope:'bot' as const}))];
   const gathered:ExecutionEvent[]=[],failed:string[]=[];
   const decisionSnapshots:Array<{accountId:string;botId:string;grantId:string;codeHash:string|null;
-   candleClose:number;time:number;action:string;reason:string;checks:unknown[]}> = [];
+   candleClose:number;time:number;action:string;reason:string;checks:unknown[];
+   recentCandles?:any[];executionTimeframe?:string;marketSource?:string}> = [];
   const sqlBrokerTrades=new Map<string,any>();
   const sqlCoverage:Array<{botId:string;running:boolean;brokerSync:any;counts:any}> = [];
   // Six concurrent reads at most; never query another user's account.
@@ -329,7 +330,10 @@ export class PropDAOLiveService{
         decisionSnapshots.push({accountId,botId:d.botId,grantId:String(d.grantId),
          codeHash:typeof d.codeHash==='string'?d.codeHash:null,
          candleClose:d.candleClose,time:d.time,action:d.action,reason:d.reason||'',
-         checks:Array.isArray(d.checks)?d.checks.slice(0,16):[]});
+         checks:Array.isArray(d.checks)?d.checks.slice(0,16):[],
+         recentCandles:Array.isArray(d.recentCandles)?d.recentCandles.slice(-20):[],
+         executionTimeframe:typeof d.executionTimeframe==='string'?d.executionTimeframe:null,
+         marketSource:typeof d.marketSource==='string'?d.marketSource:null});
       }
      }
      if(Array.isArray(ledger.events)){
