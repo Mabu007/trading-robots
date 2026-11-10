@@ -140,6 +140,86 @@ export class TradingDesk{
   }
   return {acknowledged};
  }
+ /** Owner-scoped, read-only investigation of ONE broker trade and its actual
+  * decision evidence. Never treat missing journal data as a zero or an SL as
+  * proof of a broken strategy. Stored trades remain accessible after STOP. */
+ async inspect(uid:string,accountId:string,tradeId:string){
+  if(typeof uid!=='string'||!uid||uid.length>256||uid.includes('/')||
+     !validId(accountId)||!validId(tradeId))
+   return {available:false,reason:'Invalid investigation identity'};
+  const accounts=await this.broker.list(uid).catch(()=>null);
+  if(!accounts?.connected||!accounts.accounts.some(a=>a.accountId===accountId))
+   return {available:false,reason:'Cannot verify ownership of this broker account'};
+  const [brokerResult,workerResult]=await Promise.allSettled([
+   this.broker.recentTrades(uid,accountId),
+   this.history?this.history(uid,accountId):Promise.resolve(null)
+  ]);
+  const issues:string[]=[];
+  if(brokerResult.status==='rejected')issues.push('Live broker closed-trade read unavailable');
+  if(workerResult.status==='rejected'||!workerResult.value?.available)
+   issues.push('Worker execution history partially unavailable');
+  const direct=brokerResult.status==='fulfilled'?brokerResult.value.find(t=>t.id===tradeId):null;
+  let trade:Trade|null=direct&&validTrade(direct)?direct:null;
+  if(!trade&&this.store){
+   try{
+    const cached=await this.store.get('users/'+uid+'/liveTrades/'+hash('propdao',accountId,tradeId));
+    if(cached?.accountId===accountId&&cached.providerTradeId===tradeId){
+     const old={...cached,id:tradeId};
+     if(validTrade(old))trade=old;
+    }
+   }catch{issues.push('Firestore trade archive unavailable');}
+  }
+  if(!trade)return {available:false,accountId,tradeId,partial:true,
+   reason:'Trade not available in the latest 50 broker records or verified owner-scoped archive',issues};
+  let events=safeExecutionEvents(workerResult.status==='fulfilled'?workerResult.value?.events:null,accountId);
+  let decisions:Decision[]=workerResult.status==='fulfilled'&&Array.isArray(workerResult.value?.decisionSnapshots)?
+   workerResult.value.decisionSnapshots.filter((d:Decision)=>d.accountId===accountId).slice(-300):[];
+  if(this.store){
+   for(const [collection,type] of [['liveExecutionEvents','events'],['liveRobotDecisions','decisions']] as const){
+    try{
+     let rows:Record<string,unknown>[]=[];
+     if(this.store.page){
+      let cursor:string|undefined;
+      for(let i=0;i<5;i++){
+       const page=await this.store.page('users/'+uid+'/'+collection,'accountId',accountId,cursor,100);
+       rows.push(...page.items);
+       if(!page.next)break;
+       cursor=page.next;
+       if(i===4)issues.push(collection+' has more than 500 archived records');
+      }
+     }else rows=(await this.store.query('users/'+uid+'/'+collection,'accountId',accountId)).slice(0,500);
+     if(type==='events'){
+      const merged=new Map(events.map(e=>[e.id,e]));
+      for(const e of safeExecutionEvents(rows,accountId))if(!merged.has(e.id))merged.set(e.id,e);
+      events=[...merged.values()];
+     }else{
+      const merged=new Map(decisions.map(d=>[d.botId+':'+d.grantId+':'+d.candleClose,d]));
+      for(const raw of rows){
+       const d=raw as Decision;
+       if(d?.accountId===accountId&&validId(d.botId)&&validId(d.grantId)&&
+          Number.isFinite(d.candleClose)&&['WAIT','BUY','SELL'].includes(d.action))
+        if(!merged.has(d.botId+':'+d.grantId+':'+d.candleClose))
+         merged.set(d.botId+':'+d.grantId+':'+d.candleClose,d);
+      }
+      decisions=[...merged.values()];
+     }
+    }catch{issues.push(collection+' archive unavailable');}
+   }
+  }
+  const link=attributeTrade({...trade,accountId},events);
+  const event=link.eventId?events.find(e=>e.id===link.eventId)||null:null;
+  const decision=event?decisions.find(d=>d.botId===event.botId&&d.grantId===event.grantId&&
+   d.candleClose===event.decisionCandleClose)??null:null;
+  const result=diagnoseBrokerTrade({...trade,accountId},link,event,decision);
+  return {available:true,accountId,tradeId,
+   source:direct?'Fresh authenticated PropDAO closed-trade history':
+    'Owner-scoped Firestore archive of an earlier broker observation',
+   brokerFresh:!!direct,checkedAt:new Date().toISOString(),partial:issues.length>0,
+   evidenceIssues:issues,trade:{...trade,accountId},attribution:link,
+   diagnostic:result,
+   strategyRevisionVerified:link.confidence==='verified'&&Boolean(link.strategyCodeHash),
+   safety:'Read-only. No strategy, deployment or broker order was modified.'};
+ }
  /** Read-through, account-scoped and idempotent. Does NOT place any orders. */
  async today(uid:string,now=Date.now()){
   if(typeof uid!=='string'||uid.length>256||!uid||uid.includes('/'))throw Error('Invalid owner');
