@@ -6,7 +6,7 @@ import {propDAOLiveHistoryBars,propDAOLiveHistoryStats} from './propdao-live-his
 import {TF_SECONDS} from '../shared/trading';
 import {evaluateAutonomousEquity,type EvaluationEnvelope} from '../shared/propdao-autonomous-guard';
 import {parseUpstreamJson,TemporaryReadError,retryableReadError} from './propdao-upstream-response';
-import {MAX_EXECUTION_EVENTS,type ExecutionEvent,type ExecutionStage} from '../shared/propdao-execution-journal';
+import {MAX_EXECUTION_EVENTS,requiresDurableJournal,type ExecutionEvent,type ExecutionStage} from '../shared/propdao-execution-journal';
 import {PropDAOSqlJournal,reconciliationAlarm,nextLiveArchiveAt,type SqlHandle} from './propdao-sql-journal';
 type Grant={autoPolicy?:EvaluationEnvelope;id:string;uid:string;botId:string;agentId?:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;riskReward?:number;leverage:number;issuedAt:number;expiresAt:number};
 type Status={running:boolean;paused:boolean;lastError?:string;lastEvaluation?:any;lastOrder?:any;lastAccount?:any;events:string[];lastMarketData?:any;recentDecisions?:any[];lastReconciliation?:any};
@@ -123,7 +123,11 @@ export class PropDAOLiveBot extends DurableObject<any>{
       plannedLoss:order.plannedLoss,projectedNetProfit:order.projectedNetProfit,
       riskBudgetUsd:order.riskBudgetUsd,providerStatus:order.providerStatus}}:{})}})
   }
-  catch(error){await this.ctx.storage.put('sqlTelemetryError',error instanceof Error?error.message:'SQLite event write failed')}
+  catch(error){
+   await this.ctx.storage.put('sqlTelemetryError',error instanceof Error?error.message:'SQLite event write failed');
+   if(requiresDurableJournal(stage))
+    throw Error('Critical '+stage+' evidence could not be persisted; no further orders authorized');
+  }
  }
  private async provider(grant:Grant,action:string,payload?:unknown){
   const origin=this.env.PROPDAO_CONTROL_URL;
@@ -385,7 +389,13 @@ export class PropDAOLiveBot extends DurableObject<any>{
      checks:evaluation.checks,marketSource:'Hyperliquid',
      completedCandles:Object.fromEntries(config.timeframes.map((tf:string)=>[tf,data[tf].at(-1)])),
      historyCoverage:diagnostics}})}
-   catch(error){await this.ctx.storage.put('sqlTelemetryError',error instanceof Error?error.message:'SQLite decision write failed')}
+   catch(error){
+    await this.ctx.storage.put('sqlTelemetryError',error instanceof Error?error.message:'SQLite decision write failed');
+    // A BUY/SELL must never reach the broker without its exact strategy
+    // revision and decision evidence already written durably.
+    if(evaluation.action==='BUY'||evaluation.action==='SELL')
+     throw Error('Critical trade decision could not be persisted; no order submitted');
+   }
    await this.record(`Candle ${config.executionTimeframe.toUpperCase()} · ${new Date(close*1000).toISOString()} · ${decision?.action||'WAIT'}${decision?.reason?' · '+decision.reason:''} · history ${config.timeframes.map((tf:string)=>tf.toUpperCase()+' '+diagnostics[tf].received+'/'+diagnostics[tf].requested).join(', ')}`);
    if(decision?.action!=='BUY'&&decision?.action!=='SELL'){await this.ctx.storage.delete('lastError');return;}
    intentSignal={side:decision.action,intentId:'tv-'+grant.id+'-'+close};
@@ -408,8 +418,17 @@ export class PropDAOLiveBot extends DurableObject<any>{
     await this.executionLock(grant,'release',intentId);
     throw Error('Pending order receipt could not be stored; no broker order was submitted');
    }
-   await this.journal(grant,'SUBMISSION_STARTED',{...intentSignal,
-    reason:'Broker execution requested. Fill is not yet verified.'});
+   try{
+    await this.journal(grant,'SUBMISSION_STARTED',{...intentSignal,
+     reason:'Broker execution requested. Fill is not yet verified.'});
+   }catch(error){
+    // The provider POST has not started. Revoke the account execution lock
+    // and pending receipt only after pre-submit journal failure. If cleanup
+    // itself fails, retain the pending lock and require reconciliation.
+    await this.executionLock(grant,'release',intentId);
+    await this.ctx.storage.delete('pendingIntent');
+    throw error;
+   }
    let order:any;
    try{
     order=await this.provider(grant,'execute',{symbol:grant.symbol,side:decision.action,price:last.close,stop,target,quoteTime:Date.now(),candleClose:close,intentId});
