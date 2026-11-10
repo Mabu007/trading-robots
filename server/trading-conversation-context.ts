@@ -76,3 +76,26 @@ export async function rememberInspectedTrade(store:RecordStore|null,uid:string,c
  await store.put(path(uid,conversationId),ref);
  return ref;
 }
+
+
+export type RobotReferent={robotId:string;accountId:string|null;recordedAt:number};
+/** Separate entity pointer: a bot can be under discussion before any trade
+ * exists. The caller must have obtained this ID from an owner-checked read. */
+export async function rememberRobotReferent(store:RecordStore|null,uid:string,conversationId:string,
+ robotId:string,accountId:string|null,now=Date.now()){
+ if(!store||!scope(uid,conversationId)||!id.test(robotId)||
+    (accountId!==null&&!id.test(accountId)))return false;
+ await store.put('users/'+uid+'/tradingConversationRobot/'+conversationId,{
+  robotId,accountId,recordedAt:now});
+ return true;
+}
+export async function readRobotReferent(store:RecordStore|null,uid:string,conversationId:string,now=Date.now()):
+ Promise<RobotReferent|null>{
+ if(!store||!scope(uid,conversationId))return null;
+ const value=await store.get('users/'+uid+'/tradingConversationRobot/'+conversationId);
+ if(!value||!id.test(value.robotId)||
+    (value.accountId!==null&&!id.test(value.accountId))||
+    typeof value.recordedAt!=='number'||!Number.isFinite(value.recordedAt)||
+    now-value.recordedAt>7*24*3600_000||value.recordedAt>now+300_000)return null;
+ return value as RobotReferent;
+}
