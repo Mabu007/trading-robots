@@ -272,6 +272,8 @@ export class PropDAOLiveService{
   const sources=[{uid,accountId} as PropGrant,...grants.filter(g=>g.runtimeScope==='bot')
    .map(g=>({...g,runtimeScope:'bot' as const}))];
   const gathered:ExecutionEvent[]=[],failed:string[]=[];
+  const decisionSnapshots:Array<{accountId:string;botId:string;grantId:string;codeHash:string|null;
+   candleClose:number;time:number;action:string;reason:string;checks:unknown[]}> = [];
   // Six concurrent reads at most; never query another user's account.
   for(let i=0;i<sources.length;i+=6){
    const batch=await Promise.all(sources.slice(i,i+6).map(async(grant)=>{
@@ -289,6 +291,16 @@ export class PropDAOLiveService{
     if(!Array.isArray(state.executionEvents)&&
        (state.grant||(Array.isArray(state.events)&&state.events.length>0)))
      failed.push(grant.botId||'legacy');
+    if(grant.botId&&state.grant?.botId===grant.botId&&Array.isArray(state.recentDecisions)){
+     for(const decision of state.recentDecisions.slice(-24)){
+      if(!decision||!Number.isFinite(decision.candleClose)||!['WAIT','BUY','SELL'].includes(decision.action))continue;
+      decisionSnapshots.push({accountId,botId:grant.botId,grantId:grant.id,
+       codeHash:typeof grant.codeHash==='string'?grant.codeHash:null,
+       candleClose:decision.candleClose,time:Number.isFinite(decision.time)?decision.time:0,
+       action:decision.action,reason:typeof decision.reason==='string'?decision.reason.slice(0,240):'',
+       checks:Array.isArray(decision.checks)?decision.checks.slice(0,16):[]});
+     }
+    }
     const structured=safeExecutionEvents(state.executionEvents,accountId);
     const old=oldWorkerEvents(state.events,accountId);
     // Never attribute old free-text Worker events to an active bot.
@@ -302,7 +314,7 @@ export class PropDAOLiveService{
   const events=[...byId.values()].sort((a,b)=>b.time-a.time).slice(0,100);
   return {accountId,checkedAt,available:failed.length===0,partial:failed.length>0,
    ...(failed.length?{error:'Worker activity is incomplete for '+failed.length+' scope(s).',unverifiedScopes:failed}:{}),
-   events,retainedLimit:100,historyIsBounded:true,
+   events,decisionSnapshots:decisionSnapshots.slice(-300),retainedLimit:100,historyIsBounded:true,
    source:'Per-robot Cloudflare Durable Objects and legacy account runtime',
    caveat:'Signals and submissions are not broker fills. Confirm live exposure and closed trades using PropDAO.'};
  }
