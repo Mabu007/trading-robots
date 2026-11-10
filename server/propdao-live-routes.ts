@@ -248,6 +248,9 @@ export class PropDAOLiveService{
     if(grant.accountId===accountId)grants.push(grant);
    }
   }catch{return unavailable('Owned deployment records could not be verified')}
+  // A dashboard refresh must not spawn a potentially unbounded chain of
+  // remote Durable Object status reads. Return an explicit incomplete result.
+  if(grants.length>18)return unavailable('More than 18 robot deployments for this account. Execution coverage requires paginated inspection; no absence-of-trades claim can be made.');
   const sources=[{uid,accountId} as PropGrant,...grants.map(g=>({...g,runtimeScope:'bot' as const}))];
   const gathered:ExecutionEvent[]=[],failed:string[]=[];
   // Six concurrent reads at most; never query another user's account.

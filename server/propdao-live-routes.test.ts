@@ -79,6 +79,24 @@ describe('PropDAO live execution authorization',()=>{
   expect(result).toMatchObject({available:false,partial:true});
   expect(result.error).toContain('incomplete');
  });
+ it('bounds historical per-bot Worker reads instead of creating unbounded dashboard work',async()=>{
+  vi.stubEnv('PROPDAO_LIVE_ENABLED','true');
+  vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');
+  vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
+  const {svc,fetcher,saved}=setup();
+  const prefix='propdao-live/v1/'+(process.env.VERCEL_ENV||'development')+'/'+Buffer.from('alice').toString('base64url')+'/';
+  for(let n=0;n<19;n++){
+   const botId='bot-'+n;
+   saved.set(prefix+botId+'.json',JSON.stringify({id:'grant_'+n,uid:'alice',botId,accountId:'prop-1',
+    runtimeScope:'bot'}));
+  }
+  fetcher.mockResolvedValue(Response.json({ready:true}));
+  const activity=await svc.executionHistory('alice','prop-1');
+  expect(activity.available).toBe(false);
+  expect(activity.events).toBeNull();
+  expect(activity.error).toMatch(/more than 18/i);
+  expect(fetcher).toHaveBeenCalledTimes(1); // health only; no 19 remote status calls
+ });
  it('is fail-closed without a verified Cloudflare Worker and secret',async()=>{
   const {svc,fetcher}=setup();
   vi.stubEnv('PROPDAO_LIVE_ENABLED','false');
