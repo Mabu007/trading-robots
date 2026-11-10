@@ -8,6 +8,7 @@ import {PropDAOAccounts,PropDAONoSubmissionError} from './propdao-account.ts';
 import type {AgentRegistry} from './agent-registry.ts';
 import type {AgentBot} from './agent-registry.ts';
 import {venueOf} from '../shared/venues.ts';
+import {safeExecutionEvents,oldWorkerEvents,type ExecutionEvent} from '../shared/propdao-execution-journal.ts';
 
 type Storage={read:(key:string)=>Promise<string|null>;write:(key:string,value:string)=>Promise<void>;remove?:(key:string)=>Promise<void>;list?:(prefix:string,limit:number)=>Promise<string[]>};
 type Dependencies=Storage&{/** Legacy unit fixtures only; never pass from HTTP routes. */unsafeLegacyDeployForTests?:boolean;uid:(req:Request,res:Response)=>Promise<string|null>;bot:(uid:string,id:string,req:Request)=>Promise<{asset:string;code:string;venue?:string;name?:string}|null>;accounts:PropDAOAccounts;agents?:AgentRegistry;request?:typeof fetch;exclusive?:<T>(uid:string,id:string,work:()=>Promise<T>)=>Promise<T>;history?:Pick<DwellirHistory,'candles'>};
@@ -218,6 +219,68 @@ export class PropDAOLiveService{
 
   }catch(e){return {configured:true,deployed:true,activeAuthorization:!grant.revokedAt&&Date.now()<grant.expiresAt,running:false,uncertain:true,authorizationRevoked:Boolean(grant.revokedAt),accountId:grant.accountId,events:[],error:e instanceof Error?e.message:'Worker unavailable. Order status is unknown.'}}
  }
+ /** Read all owned, account-bound bot-specific Durable Objects, including
+  * the legacy account Worker. An account is not the new robot runtime key.
+  * Partial outages are clearly reported rather than represented as zero trades. */
+ async executionHistory(uid:string,accountId:string){
+  if(!safeId(accountId))throw Error('Invalid account');
+  const owned=await this.deps.accounts.list(uid);
+  if(!owned.connected||!owned.accounts.some((a:{accountId:string})=>a.accountId===accountId))
+   throw Error('Broker account ownership could not be verified');
+  const checkedAt=new Date().toISOString();
+  const unavailable=(message:string)=>({accountId,checkedAt,available:false,events:null,error:message});
+  if(!this.deps.list)return unavailable('Owned robot registry is unavailable');
+  const health=await this.health();
+  if(!health.connected)return unavailable('Cloudflare runtime is not reachable');
+  const prefix='propdao-live/v1/'+(process.env.VERCEL_ENV||'development')+'/'+Buffer.from(uid).toString('base64url')+'/';
+  let keys:string[];
+  try{keys=await this.deps.list(prefix,101)}
+  catch{return unavailable('Could not enumerate owned deployment records')}
+  if(keys.length>100)return unavailable('More than 100 deployments; account history is incomplete');
+  const grants:PropGrant[]=[];
+  try{
+   for(const key of keys){
+    if(!key.startsWith(prefix)||!key.endsWith('.json'))throw Error('Unexpected registry record');
+    const raw=await this.deps.read(key);if(!raw)continue;
+    const grant=JSON.parse(raw) as PropGrant;
+    if(grant.uid!==uid||!safeId(grant.botId)||key!==this.key(uid,grant.botId))
+     throw Error('Robot ownership mismatch in the deployment registry');
+    if(grant.accountId===accountId)grants.push(grant);
+   }
+  }catch{return unavailable('Owned deployment records could not be verified')}
+  // A dashboard refresh must not spawn a potentially unbounded chain of
+  // remote Durable Object status reads. Return an explicit incomplete result.
+  if(grants.length>18)return unavailable('More than 18 robot deployments for this account. Execution coverage requires paginated inspection; no absence-of-trades claim can be made.');
+  const sources=[{uid,accountId} as PropGrant,...grants.map(g=>({...g,runtimeScope:'bot' as const}))];
+  const gathered:ExecutionEvent[]=[],failed:string[]=[];
+  // Six concurrent reads at most; never query another user's account.
+  for(let i=0;i<sources.length;i+=6){
+   const batch=await Promise.all(sources.slice(i,i+6).map(async(grant)=>{
+    try{return {grant,state:await this.runtime(grant,'status',undefined,8500)}}
+    catch{return {grant,state:null}}
+   }));
+   for(const {grant,state} of batch){
+    if(!state||state.grant?.accountId&&state.grant.accountId!==accountId||
+       grant.botId&&state.grant?.botId&&state.grant.botId!==grant.botId){
+     failed.push(grant.botId||'legacy');continue;
+    }
+    const structured=safeExecutionEvents(state.executionEvents,accountId);
+    const old=oldWorkerEvents(state.events,accountId);
+    // Never attribute old free-text Worker events to an active bot.
+    gathered.push(...structured,...old.filter(event=>!structured.some(x=>
+     x.stage===event.stage&&x.side===event.side&&
+     Math.abs(x.time-event.time)<15000)));
+   }
+  }
+  const byId=new Map<string,ExecutionEvent>();
+  for(const entry of gathered)byId.set(entry.id+':'+entry.botId,entry);
+  const events=[...byId.values()].sort((a,b)=>b.time-a.time).slice(0,100);
+  return {accountId,checkedAt,available:failed.length===0,partial:failed.length>0,
+   ...(failed.length?{error:'Worker activity is incomplete for '+failed.length+' scope(s).',unverifiedScopes:failed}:{}),
+   events,retainedLimit:100,historyIsBounded:true,
+   source:'Per-robot Cloudflare Durable Objects and legacy account runtime',
+   caveat:'Signals and submissions are not broker fills. Confirm live exposure and closed trades using PropDAO.'};
+ }
  async assertDeletable(uid:string,botId:string){
   const grant=await this.grant(uid,botId);
   if(!grant)return;
@@ -378,7 +441,7 @@ export class PropDAOLiveService{
    const state=await this.runtime(g,'stop',{}),final=await this.runtime(g,'status');
    if(final.running!==false||final.paused===true){if(bot)await this.recordAgent(uid,botId,bot,{state:'unknown',action:'stop_response_unverified',grantId:g.id,expiresAt:g.expiresAt,authorized:false,error:'Worker did not verify that execution stopped.'},true);return {...final,stopped:false,uncertain:true,authorizationRevoked:true,runtimeStopped:false,exposure:'unverified',needsReconciliation:Boolean(final.pendingIntent),error:'New-order permission revoked but Worker stop not verified. Check broker exposure.'}}
    if(final.pendingIntent){if(bot)await this.recordAgent(uid,botId,bot,{state:'unknown',action:'stop_requires_reconciliation',grantId:g.id,expiresAt:g.expiresAt,authorized:false,error:'Worker stopped but an unresolved order needs reconciliation.'},true);return {...final,running:false,deployed:false,stopped:true,needsReconciliation:true,authorizationRevoked:true,runtimeStopped:true,exposure:'unverified'}}
-   if(this.deps.remove)await this.deps.remove(this.key(uid,botId));
+   // Keep the revoked server grant for historical audit and safer account reconciliation.
    if(bot)await this.recordAgent(uid,botId,bot,{state:'stopped',action:'stop_confirmed',grantId:g.id,expiresAt:g.expiresAt,authorized:false},true);
    return {...state,running:false,paused:false,deployed:false,stopped:true,authorizationRevoked:true,runtimeStopped:true,exposure:'unverified'};
   }catch(error){const reason=error instanceof Error?error.message:'Stop outcome unknown';if(bot)await this.recordAgent(uid,botId,bot,{state:'unknown',action:'stop_outcome_unknown',grantId:g.id,expiresAt:g.expiresAt,authorized:false,error:reason},true);return {running:false,deployed:true,stopped:false,uncertain:true,authorizationRevoked:true,runtimeStopped:false,accountId:g.accountId,needsReconciliation:true,exposure:'unverified',error:'New-order authorization revoked. Worker stop and any remaining exposure are unverified: '+reason}}
@@ -404,6 +467,14 @@ export class PropDAOLiveService{
 export function propDAOLiveRoutes(app:Express,deps:Dependencies){
  const service=new PropDAOLiveService(deps);
  const route=(fn:(uid:string,id:string,req:Request)=>Promise<unknown>)=>async(req:Request,res:Response)=>{res.setHeader('Cache-Control','no-store');const uid=await deps.uid(req,res);if(!uid)return;const id=String(req.params.botId);if(!safeId(id))return res.status(400).json({error:'Invalid bot ID'});try{return res.json(await fn(uid,id,req))}catch(e){return res.status(/Unresolved prior order|reconcil|open orders or positions|already running or paused/.test(e instanceof Error?e.message:'')?409:400).json({error:e instanceof Error?e.message:'PropDAO live request failed'})}};
+ app.get('/api/venues/propdao/accounts/:accountId/robot-activity',async(req,res)=>{
+  res.setHeader('Cache-Control','private, no-store');
+  const uid=await deps.uid(req,res);if(!uid)return;
+  const accountId=String(req.params.accountId||'');
+  if(!safeId(accountId))return res.status(400).json({error:'Invalid account'});
+  try{return res.json(await service.executionHistory(uid,accountId))}
+  catch(error){return res.status(403).json({error:error instanceof Error?error.message:'Account activity unavailable'})}
+ });
  app.get('/api/venues/propdao/bots/:botId/live',route((uid,id,req)=>service.status(uid,id,typeof req.query.accountId==='string'?req.query.accountId:undefined)));
  app.get('/api/venues/propdao/bots/:botId/live/market',route((uid,id)=>service.market(uid,id)));
  app.post('/api/venues/propdao/bots/:botId/live/review',route((uid,id,req)=>deps.exclusive?deps.exclusive(uid,id,()=>service.review(uid,id,req)):service.review(uid,id,req)));

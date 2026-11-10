@@ -2,6 +2,7 @@ import {afterEach,describe,expect,it,vi} from 'vitest';
 import {PropDAOLiveService} from './propdao-live-routes.ts';
 import {starterCode} from '../src/strategy.ts';
 import {gzipSync} from 'node:zlib';
+import {createHash} from 'node:crypto';
 import {simulate} from '../src/engine.ts';
 import type {PropDAOAccounts} from './propdao-account.ts';
 
@@ -16,6 +17,7 @@ const setup=(strictReviews=false)=>{
  }
  const storage={read:vi.fn(async(k:string)=>saved.get(k)??null),write:vi.fn(async(k:string,v:string)=>{saved.set(k,v)}),remove:vi.fn(async(k:string)=>{saved.delete(k)}),list:vi.fn(async(prefix:string)=>[...saved.keys()].filter(k=>k.startsWith(prefix)))};
  const accounts={
+  list:vi.fn(async()=>({connected:true,accounts:[{accountId:'prop-1',status:'active'}]})),
   accountRisk:vi.fn(async()=>({account:{status:'active'},risk:{equity:1000,roomUsd:50,breached:false},positions:[],orders:[]})),
   getPublicMarkets:vi.fn(async()=>({data:[{symbol:'BTCUSDC',coin:'BTC',dex:null,lotStep:0.00001,maxLeverage:2}],fees:{taker:0.00045}})),
   executeOrder:vi.fn(async()=>({intentId:'test',protected:true})),
@@ -36,6 +38,64 @@ describe('PropDAO live execution authorization',()=>{
   await expect(svc.assertDeletable('alice','bot-1')).rejects.toThrow(/Stop and reconcile/);
   fetcher.mockRejectedValue(Error('offline'));
   await expect(svc.assertDeletable('alice','bot-1')).rejects.toThrow(/Stop and reconcile/);
+ });
+ it('combines two owned robot Workers and does not mix other accounts',async()=>{
+  vi.stubEnv('PROPDAO_LIVE_ENABLED','true');
+  vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');
+  vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
+  const {svc,fetcher,saved}=setup();
+  const prefix='propdao-live/v1/'+(process.env.VERCEL_ENV||'development')+'/'+Buffer.from('alice').toString('base64url')+'/';
+  const grant=(botId:string,accountId:string)=>({id:'grant_'+botId,uid:'alice',botId,accountId,symbol:'GOLDUSDC',
+   runtimeScope:'bot',issuedAt:Date.now()-1000,expiresAt:Date.now()+60000});
+  for(const [bot,account] of [['bot-1','prop-1'],['bot-2','prop-1'],['bot-3','prop-other']])
+   saved.set(prefix+bot+'.json',JSON.stringify(grant(bot,account)));
+  const key=(bot:string,account:string)=>createHash('sha256').update('alice:'+account+':'+bot).digest('hex');
+  fetcher.mockImplementation(async(url:string)=>{
+   if(String(url).endsWith('/health'))return Response.json({ready:true});
+   const scope=new URL(String(url)).pathname.split('/')[2];
+   const bot=scope===key('bot-1','prop-1')?'bot-1':
+     scope===key('bot-2','prop-1')?'bot-2':null;
+   if(!bot)return Response.json({grant:null,running:false,events:[],executionEvents:[]});
+   return Response.json({grant:{botId:bot,accountId:'prop-1'},
+    executionEvents:[{id:'event_'+bot+'_1234',time:Date.now(),accountId:'prop-1',
+     botId:bot,grantId:'grant_'+bot,symbol:'GOLDUSDC',stage:'SIGNAL',side:'SELL'}],
+    events:[]});
+  });
+  const result=await svc.executionHistory('alice','prop-1');
+  expect(result.available).toBe(true);
+  expect(result.events?.map(e=>e.botId).sort()).toEqual(['bot-1','bot-2']);
+  expect(fetcher.mock.calls.some(([url])=>String(url).includes(key('bot-3','prop-other')))).toBe(false);
+ });
+ it('reports unverified scope rather than asserting that no trading took place',async()=>{
+  vi.stubEnv('PROPDAO_LIVE_ENABLED','true');
+  vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');
+  vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
+  const {svc,fetcher,saved}=setup();
+  const prefix='propdao-live/v1/'+(process.env.VERCEL_ENV||'development')+'/'+Buffer.from('alice').toString('base64url')+'/';
+  saved.set(prefix+'bot-1.json',JSON.stringify({id:'grant-1',uid:'alice',botId:'bot-1',accountId:'prop-1',runtimeScope:'bot'}));
+  fetcher.mockImplementation(async(url:string)=>String(url).endsWith('/health')?Response.json({ready:true}):
+   Promise.reject(Error('Cloudflare unreachable')));
+  const result=await svc.executionHistory('alice','prop-1');
+  expect(result).toMatchObject({available:false,partial:true});
+  expect(result.error).toContain('incomplete');
+ });
+ it('bounds historical per-bot Worker reads instead of creating unbounded dashboard work',async()=>{
+  vi.stubEnv('PROPDAO_LIVE_ENABLED','true');
+  vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');
+  vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
+  const {svc,fetcher,saved}=setup();
+  const prefix='propdao-live/v1/'+(process.env.VERCEL_ENV||'development')+'/'+Buffer.from('alice').toString('base64url')+'/';
+  for(let n=0;n<19;n++){
+   const botId='bot-'+n;
+   saved.set(prefix+botId+'.json',JSON.stringify({id:'grant_'+n,uid:'alice',botId,accountId:'prop-1',
+    runtimeScope:'bot'}));
+  }
+  fetcher.mockResolvedValue(Response.json({ready:true}));
+  const activity=await svc.executionHistory('alice','prop-1');
+  expect(activity.available).toBe(false);
+  expect(activity.events).toBeNull();
+  expect(activity.error).toMatch(/more than 18/i);
+  expect(fetcher).toHaveBeenCalledTimes(1); // health only; no 19 remote status calls
  });
  it('is fail-closed without a verified Cloudflare Worker and secret',async()=>{
   const {svc,fetcher}=setup();
@@ -98,14 +158,15 @@ describe('PropDAO live execution authorization',()=>{
   await expect(svc.deploy('alice','bot-1',{body:{accountId:'prop-1',riskUsd:1,leverage:1,confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'}} as any)).rejects.toThrow(/unresolved order/);
   expect(saved.size).toBe(0);
  });
- it('Stop deletes the old grant and fresh Deploy creates a new identity',async()=>{
+ it('Stop preserves its revoked grant for audit and redeploy creates a new identity',async()=>{
   vi.stubEnv('PROPDAO_LIVE_ENABLED','true');vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
   const {svc,saved}=setup();
   await svc.deploy('alice','bot-1',{body:{accountId:'prop-1',riskUsd:2,leverage:1,confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'}} as any);
   const previous=JSON.parse([...saved.values()][0]);
   const stopped=await svc.stop('alice','bot-1');
   expect(stopped).toMatchObject({running:false,deployed:false,stopped:true});
-  expect(saved.size).toBe(0);
+  expect(saved.size).toBe(1);
+  expect(JSON.parse([...saved.values()][0]).revokedAt).toBeGreaterThan(0);
   await svc.deploy('alice','bot-1',{body:{accountId:'prop-1',riskUsd:2,leverage:1,confirm:'I AUTHORIZE PROPDAO SIMULATED LIVE TRADING'}} as any);
   const current=JSON.parse([...saved.values()][0]);
   expect(current.id).not.toBe(previous.id);expect(current.runtimeScope).toBe('bot');
