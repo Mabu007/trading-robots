@@ -92,7 +92,7 @@ describe('PropDAO live execution authorization',()=>{
    Response.json({grant:null,events:[],executionEvents:[]}));
   const result=await svc.executionHistory('alice','prop-1');
   expect(result).toMatchObject({available:false,partial:true});
-  expect(result.unverifiedScopes).toContain('bot-1');
+  expect(result).toHaveProperty('unverifiedScopes',['bot-1']);
  });
  it('reports unverified scope rather than asserting that no trading took place',async()=>{
   vi.stubEnv('PROPDAO_LIVE_ENABLED','true');
