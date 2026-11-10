@@ -116,3 +116,53 @@ it('uses SQL Durable Object broker evidence while a robot is running and defers 
  expect((response as any).ledger.tradeWrites).toBe(0);
  expect(store.create).not.toHaveBeenCalled();
 });
+
+describe('read-only broker trade inspection and historical attribution',()=>{
+ it('inspects an exact live broker fill and its preserved M1 stop evidence',async()=>{
+  const broker={list:async()=>({connected:true,accounts:[{accountId:'prop-1',status:'active'}]}),
+   recentTrades:async()=>[{...trade('trade-exact',-2),positionId:'pos-1'}]};
+  const when=now;
+  const event={id:'event_111111111',time:when-120_000,accountId:'prop-1',
+   botId:'bot-1',grantId:'grant-1',stage:'PROTECTED_FILL',symbol:'GOLDUSDC',
+   side:'SELL',positionId:'pos-1',quantity:0.5,entryPrice:4100,stopPrice:4104,
+   riskBudgetUsd:2,decisionCandleClose:(when-120_000)/1000,codeHash:'a'.repeat(64)};
+  const decision={accountId:'prop-1',botId:'bot-1',grantId:'grant-1',
+   candleClose:(when-120_000)/1000,codeHash:'a'.repeat(64),time:when-120_000,
+   action:'SELL',reason:'Breakout',checks:[{name:'ATR',passed:true}],
+   recentCandles:Array.from({length:20},(_,i)=>({time:when/1000-i*60,
+    open:4100,high:4102,low:4098,close:4100})),
+   executionTimeframe:'m1',marketSource:'Hyperliquid'};
+  const desk=new TradingDesk(null,broker,async()=>({
+   available:true,events:[event],decisionSnapshots:[decision]} as any));
+  const result:any=await desk.inspect('alice','prop-1','trade-exact');
+  expect(result).toMatchObject({available:true,attribution:{botId:'bot-1',
+   attribution:'exact-provider-identity',confidence:'verified'},
+   diagnostic:{stopDistance:4,atr14:4,stopDistanceAtr:1,
+    realizedR:-1,signalReason:'Breakout',exactStrategyCodeHash:'a'.repeat(64)}});
+ });
+ it('refuses unauthorized accounts before reading trades or historical data',async()=>{
+  const read=vi.fn();
+  const desk=new TradingDesk(null,{list:async()=>({connected:true,
+   accounts:[{accountId:'prop-my',status:'active'}]}),recentTrades:read});
+  expect(await desk.inspect('alice','prop-notmine','trade-1'))
+   .toMatchObject({available:false,reason:'Cannot verify ownership of this broker account'});
+  expect(read).not.toHaveBeenCalled();
+ });
+ it('recovers an archived broker record after the provider read fails without fabricating live freshness',async()=>{
+  const docs=new Map<string,any>();
+  const key=(await import('node:crypto')).createHash('sha256')
+   .update(JSON.stringify(['propdao','prop-1','trade-old'])).digest('hex').slice(0,40);
+  docs.set('users/alice/liveTrades/'+key,{...trade('trade-old',-3),
+   providerTradeId:'trade-old',accountId:'prop-1',id:undefined,source:'archive'});
+  const store={get:vi.fn(async(path:string)=>docs.get(path)||null),put:vi.fn(),
+   create:vi.fn(),query:vi.fn(async()=>[])} as unknown as RecordStore;
+  const desk=new TradingDesk(store,{list:async()=>({connected:true,
+   accounts:[{accountId:'prop-1',status:'active'}]}),
+   recentTrades:async()=>{throw Error('upstream down')}});
+  const result:any=await desk.inspect('alice','prop-1','trade-old');
+  expect(result).toMatchObject({available:true,brokerFresh:false,partial:true,
+   attribution:{confidence:'unknown',botId:null},
+   diagnostic:{atr14:null,stopDistance:null}});
+  expect(result.evidenceIssues.join(' ')).toContain('Live broker');
+ });
+});
