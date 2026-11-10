@@ -223,7 +223,15 @@ export function registerAgentTaskRoutes(app:Express,deps:Dependencies){
    return res.status(401).json({error:'Internal agent authorization required'});
   const parsed=internalLease.safeParse(req.body);
   if(!parsed.success)return res.status(400).json({error:'Invalid autonomous task lease'});
-  const {task,leaseId}=parsed.data;
+  const {leaseId}=parsed.data;
+  const validated=parsed.data.task;
+  // Zod validates a pair at runtime, but Zod 4's inferred variadic tuple
+  // can mark the two entries optional. Materialize the exact TaskQuestion
+  // tuple before passing this validated lease to autonomy services.
+  const task:TaskRecord=validated.question
+   ?{...validated,question:{...validated.question,
+     options:[validated.question.options[0]!,validated.question.options[1]!] as [string,string]}}
+   :validated;
   if(!task.autonomy?.enabled||task.leaseId!==leaseId||
    !['activating','monitoring','stopping'].includes(task.status)||Date.now()-task.updatedAt>90_000||
    (op==='activate'&&task.status!=='activating')||
