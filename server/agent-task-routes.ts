@@ -45,6 +45,17 @@ const taskSchema=z.object({
   })).max(20),lastResult:z.string().max(1400)
  })
 }).strict();
+/** Normalize Zod's runtime-validated pair to the shared fixed tuple type.
+ * Zod 4's variadic tuple inference can otherwise mark both items optional
+ * under the production TypeScript compiler even after safeParse succeeds. */
+function verifiedTaskRecord(validated:z.infer<typeof taskSchema>):TaskRecord{
+ const {question,...rest}=validated;
+ if(!question)return rest;
+ const first=question.options[0],second=question.options[1];
+ if(typeof first!=='string'||typeof second!=='string')
+  throw Error('Task runtime question requires exactly two alternatives.');
+ return {...rest,question:{...question,options:[first,second]}};
+}
 type Dependencies={
  uidOrReply:(req:Request,res:Response)=>Promise<string|null>;
  accounts:OpenRouterAccounts;market:VenueMarketData;propdao?:Pick<PropDAOAccounts,'list'|'accountRisk'>;
@@ -224,14 +235,7 @@ export function registerAgentTaskRoutes(app:Express,deps:Dependencies){
   const parsed=internalLease.safeParse(req.body);
   if(!parsed.success)return res.status(400).json({error:'Invalid autonomous task lease'});
   const {leaseId}=parsed.data;
-  const validated=parsed.data.task;
-  // Zod validates a pair at runtime, but Zod 4's inferred variadic tuple
-  // can mark the two entries optional. Materialize the exact TaskQuestion
-  // tuple before passing this validated lease to autonomy services.
-  const task:TaskRecord=validated.question
-   ?{...validated,question:{...validated.question,
-     options:[validated.question.options[0]!,validated.question.options[1]!] as [string,string]}}
-   :validated;
+  const task=verifiedTaskRecord(parsed.data.task);
   if(!task.autonomy?.enabled||task.leaseId!==leaseId||
    !['activating','monitoring','stopping'].includes(task.status)||Date.now()-task.updatedAt>90_000||
    (op==='activate'&&task.status!=='activating')||
@@ -268,7 +272,8 @@ export function registerAgentTaskRoutes(app:Express,deps:Dependencies){
   if(!validSecret(req.header('authorization'),process.env.VIBES_TASK_INTERNAL_SECRET))return res.status(401).json({error:'Internal task authorization required'});
   const parsed=z.object({task:taskSchema,leaseId:z.string().min(10).max(128)}).strict().safeParse(req.body);
   if(!parsed.success)return res.status(400).json({error:'Invalid task checkpoint'});
-  const {task,leaseId}=parsed.data;
+  const {leaseId}=parsed.data;
+  const task=verifiedTaskRecord(parsed.data.task);
   if(task.status!=='running'||task.leaseId!==leaseId||leaseId!==task.id+':'+task.iteration||
    Date.now()>task.deadlineAt||Date.now()-task.updatedAt>90_000)return res.status(409).json({error:'Stale or invalid task step lease'});
   try{
