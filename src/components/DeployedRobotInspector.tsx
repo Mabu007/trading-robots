@@ -5,6 +5,7 @@ import type {PersistentAgent} from '../agents';
 import {sharingRequest} from './BotSharing';
 import {Dialog} from './Dialog';
 import {displayTime} from '../display-time';
+import {filterReadiness} from '../strategy-check-readiness';
 import {robotDisplayState,canClearRobot} from '../robot-lifecycle';
 import './deployed-robot-inspector.css';
 import {PropDAOExecutionTimeline} from './PropDAOExecutionTimeline';
@@ -107,6 +108,8 @@ export function DeployedRobotInspector({client,agent,onClose,onRefreshAgents,onS
   }catch(cause){setStopResult('Stop could not be confirmed: '+(cause instanceof Error?cause.message:'unknown error'))}
   finally{setConfirmStop(false);setStopping(false);await refresh();}
  };
+ const readiness=filterReadiness(snapshot?.lastEvaluation?.checks);
+ const recentDecisions=Array.isArray(snapshot?.recentDecisions)?snapshot.recentDecisions.slice(-120):[];
  const side=(input:unknown)=>String(input??'—').slice(0,24);
  return <Dialog title={'Robot operations · '+agent.name} className="tv-deployed-inspector" onClose={onClose} busy={stopping}>
   <div className="tv-deployed-hero">
@@ -151,6 +154,21 @@ export function DeployedRobotInspector({client,agent,onClose,onRefreshAgents,onS
   <section className="tv-deployed-panel tv-deployed-feed"><header><Wifi size={17}/><h4>Market data sensors</h4><span>{feeds.length?'Worker-reported coverage':'No feed telemetry available'}</span></header>
    {feeds.length?<div className="tv-deployed-feeds">{feeds.map(([tf,feed])=><div key={tf}><strong>{tf.toUpperCase()}</strong><span>{feed.received??'—'} / {feed.requested??'—'} bars</span><small className={feed.ready?'ready':'not-ready'}>{feed.ready?'Ready':feed.recentGap?'Recent gap':'Incomplete / stale'}</small></div>)}</div>
    :<p>No verified candle-load metrics were returned. This is not proof that the feed is healthy.</p>}
+  </section>
+  <section className="tv-deployed-panel tv-deployed-conditions" aria-label="Entry filter progress">
+   <header><Activity size={17}/><h4>Entry conditions · latest evaluation</h4><span>{dateFrom(snapshot?.lastEvaluation?.time)}</span></header>
+   {readiness.reported?<>
+    <p>{readiness.passed} / {readiness.reportedCount} reported checks passed, {readiness.failed} waiting, {readiness.unknown} unknown. Conditions are observations, not trade predictions.</p>
+    <div className="tv-deployed-checks">{readiness.checks.map((check,i)=><article key={check.name+':'+i}>
+     <strong>{check.passed===true?'✓':check.passed===false?'○':'?'} {check.name}</strong>
+     <span>{check.actual!==null&&check.threshold!==null&&check.operator?
+      String(check.actual)+' '+(check.unit||'')+' '+check.operator+' '+String(check.threshold)+' '+(check.unit||''):
+      check.passed===true?'Met':check.passed===false?'Not yet met':'Not measured'}</span>
+     {check.gap!==null&&check.gap>0&&<small>Remaining: {Number(check.gap.toPrecision(6))} {check.unit||''}{check.progressPercent!==null?' · '+check.progressPercent.toFixed(0)+'% of minimum reached':''}</small>}
+     {check.progressPercent!==null&&<div className="tv-deployed-check-track"><span style={{width:check.progressPercent+'%'}}/></div>}
+    </article>)}</div>
+   </>:<p>The deployed strategy did not report individual filter checks. A WAIT alone does not reveal which EMA, ATR, RSI or structure threshold failed. Future saved strategy revisions can emit verified checks.</p>}
+   <small>{recentDecisions.length?'Worker retained '+recentDecisions.length+' evaluated decisions ('+recentDecisions.filter((v:any)=>v?.action==='WAIT').length+' WAIT). This is not a complete broker trade history.':'No individual decision history returned by this Worker version. New Worker code must be deployed separately.'}</small>
   </section>
   <PropDAOExecutionTimeline events={journal} accountId={accountId}
     title="This robot's signals and execution outcomes" max={25}/>

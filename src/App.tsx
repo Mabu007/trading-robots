@@ -1,6 +1,7 @@
 import {LandingPage} from './components/LandingPage';
 import {displayTime} from './display-time';
 import {chatBacktestDates} from './chat-backtest-dates';
+import {explicitActionRequest,explicitBacktestRequest,isPendingCreateAnswer,isPendingRobotChoice,needsLiveBotContext} from './chat-action-boundary';
 import {ChatEvidence} from './components/ChatEvidence';
 import {WatchOutputFields,type MonitorOutput} from './components/WatchOutputFields';
 import {updateToolTrace,type ToolTrace} from './tool-trace';
@@ -472,9 +473,12 @@ function App(){
    if(/^(?:cancel|never mind|nevermind|forget it|abort)(?: the task)?[.! ]*$/i.test(submittedMessage)&&assistantTask){
     setAssistantTask(null);setChat([...next,{role:'assistant',content:'Cancelled this request. Your saved robots and broker connections are unchanged.'}]);return;
    }
-   const startCreate=isNewRobotRequest(submittedMessage);
-   const anotherAction=/^\s*(?:backtest|retest|deploy|stop|check status|inspect|analyse|analyze)\b/i.test(submittedMessage);
-   if(startCreate||(assistantTask?.kind==='create'&&!anotherAction)){
+   const startCreate=isNewRobotRequest(submittedMessage)&&explicitActionRequest(submittedMessage);
+   const anotherAction=explicitActionRequest(submittedMessage);
+   // Previously selected tasks never interpret unrelated conversation as form answers.
+   const continuingCreate=assistantTask?.kind==='create'&&isPendingCreateAnswer(submittedMessage);
+   if(assistantTask?.kind==='create'&&!continuingCreate&&!startCreate)setAssistantTask(null);
+   if(startCreate||continuingCreate){
     const working=createTaskFromMessage(submittedMessage,startCreate?null:assistantTask,tradingPreferences,prior);
     if(!createReady(working)){
      setAssistantTask(working);
@@ -484,16 +488,18 @@ function App(){
     message=completeCreatePrompt(working,tradingPreferences);
    }
    if(assistantTask?.kind==='backtest'&&!startCreate){
-    const manualDates=chatBacktestDates(submittedMessage);
+    const dateReply=/^\s*\d{4}-\d\d-\d\d(?:\s+(?:to|through|-)\s+\d{4}-\d\d-\d\d)?\s*$/i.test(submittedMessage);
+    const manualDates=dateReply||explicitBacktestRequest(submittedMessage)?chatBacktestDates(submittedMessage):null;
     if(manualDates){
      forcedCommand='backtest';forcedBotId=assistantTask.botId;setAssistantTask(null);
      message='Backtest "'+assistantTask.botName+'" from '+manualDates.from+' to '+manualDates.to;
-    }else if(!anotherAction){
-     setChat([...next,{role:'assistant',content:'Choose the historical From and To dates in the card below. I’ll use that range for **'+assistantTask.botName+'**.'}]);return;
-    }else setAssistantTask(null);
+    }else{
+     // Asking about live trades or correcting the AI cancels an old date choice.
+     setAssistantTask(null);
+    }
    }
-   if(assistantTask?.kind==='choose-robot'){
-    const direct=resolveCodeReference(submittedMessage,cloudBots)?.bot;
+   if(assistantTask?.kind==='choose-robot'&&isPendingRobotChoice(submittedMessage,cloudBots.filter(bot=>assistantTask.robotIds.includes(bot.id)).map(bot=>bot.name))){
+    const direct=cloudBots.find(bot=>assistantTask.robotIds.includes(bot.id)&&bot.name.trim().toLowerCase()===submittedMessage.trim().toLowerCase());
     const clicked=submittedMessage.startsWith('robot:')?cloudBots.find(bot=>bot.id===submittedMessage.slice(6)):null;
     const chosen=clicked||direct;
     if(!chosen){
@@ -501,7 +507,7 @@ function App(){
     }
     forcedBotId=chosen.id;forcedCommand=assistantTask.action;message=assistantTask.action+' "'+chosen.name+'"';
     setAssistantTask(null);
-   }
+   }else if(assistantTask?.kind==='choose-robot')setAssistantTask(null);
 
   let focusedCode:{bot:CloudBot;source:string}|null=null;
   let creatingCode:{id:string;name:string;asset:string;venue:Venue;prompt:string}|null=null;
@@ -532,8 +538,19 @@ function App(){
     else if(/^\s*(?:please\s+)?(?:build|create|write|generate)\b/i.test(message)&&/\b(?:propdao|valr|hyperliquid|ctrader)\b/i.test(message)&&/\bstrategy\b/i.test(message)&&/\b(?:test|backtest|replay)\b/i.test(message)){command='create'}
     else if(referenced&&/^\s*(?:please\s+)?(?:make (?:it|this|the robot|a) (?:a )?better version|improve (?:it|this|the robot)|rewrite (?:it|this|the robot)|update (?:it|this|the robot)|change (?:it|this|the robot))\b/i.test(message)){command='edit'}
      else if(referenced&&/^\s*(?:please\s+)?(?:backtest|retest)\b/i.test(message)){command='backtest'}
-    else if(referenced&&/^\s*(?:please\s+)?(?:explain|describe|inspect|review|what does)\b/i.test(message)){command='find_code'}
-    else if(directWatch){command='watch'}else if(directMarketAnalysis){command='analyze_market'}else if(/\b(backtest|retest|run|deploy|stop|pause|status|create|build|write|generate|edit|update|modify|change|rename|delete|remove|add|skill|personality|connect|disconnect|broker|find|code|strategy|robot|bot)\b/i.test(message)){const planned=await request<{tool:string|null;args?:Record<string,unknown>}>(sdkPrimary?'/api/chat/sdk-plan':'/api/chat/plan','POST',{message,skills:skills.map(s=>s.name),personality,...(conversationModel?{model:conversationModel}:{})});checkpoint();command=planned.tool;planArgs=planned.args||{};}
+    else if(referenced&&/^\s*(?:please\s+)?(?:explain|describe|inspect|review|what does)\b/i.test(message)&&explicitActionRequest(message)){command='find_code'}
+    else if(directWatch&&explicitActionRequest(message)){command='watch'}
+    else if(directMarketAnalysis&&explicitActionRequest(message)){command='analyze_market'}
+    else if(explicitActionRequest(submittedMessage)){
+     const planned=await request<{tool:string|null;args?:Record<string,unknown>}>(sdkPrimary?'/api/chat/sdk-plan':'/api/chat/plan','POST',{
+      message:submittedMessage,
+      recentConversation:prior.slice(-6).map(item=>({role:item.role,content:item.content.slice(0,1200)})),
+      skills:skills.map(s=>s.name),personality,...(conversationModel?{model:conversationModel}:{})
+     });
+     checkpoint();command=planned.tool;planArgs=planned.args||{};
+     // AI can propose a simulation only after an explicit user request to RUN it.
+     if(command==='backtest'&&!explicitBacktestRequest(submittedMessage))command=null;
+    }
    }
   }catch(error){checkpoint();const reason=err(error);setAiError(reason);setChat([...next,{role:'assistant',content:'Could not prepare this request: '+reason}]);setBusy('');return;}
    if(command==='edit_personality'&&!/\b(personality|profile|speaking style|conversation tone|chat personality)\b/i.test(submittedMessage)){
@@ -678,7 +695,12 @@ function App(){
    /\b(no trades?|no signals?|no entries|idle|not trading|bot doing|robot doing|agent doing|bot up to|how(?:'s| is) (?:my |the )?(?:bot|robot|agent)|why (?:isn't|is not|hasn't|has not|didn't|did not).{0,70}(?:trade|signal)|market (?:right now|specifically now|suitable for)|live logs?)\b/i.test(message)
    &&command!=='stop'&&command!=='deploy');
   if(robotInsightIntent&&command!=='stop'&&command!=='deploy')command=null;
-  const insightBot=robotInsightIntent?(referenced?.bot?.venue==='propdao'?referenced.bot:created&&venue==='propdao'?cloudBots.find(bot=>bot.id===draftId):undefined):undefined;
+  const wantsLiveEvidence=needsLiveBotContext(submittedMessage)||
+   Boolean(referenced?.bot&&/\b(?:now|today|yet|currently|what's|whats|how's|hows|still|anything new)\b/i.test(submittedMessage));
+  const insightBot=((command===null||command==='status')&&!attachedContext&&wantsLiveEvidence&&
+   !/\b(?:saved backtest|historical backtest|backtest results?|code review|explain the source)\b/i.test(submittedMessage)&&(
+    referenced?.bot?.venue==='propdao'||(created&&venue==='propdao')
+   ))?(referenced?.bot?.venue==='propdao'?referenced.bot:cloudBots.find(bot=>bot.id===draftId)):undefined;
   let insightCard:ChatContext|undefined;
   if(command&&command!=='edit'&&command!=='create'){
    setChatInput('');setAiError('');
@@ -798,7 +820,7 @@ function App(){
   const requestedEditor={draftId,code};
   setChatInput('');setAiError('');setChat([...next,{role:'assistant',content:wantsCode?'Preparing a strategy edit…':'Thinking…'}]);setBusy('chat');
   try{
-   const appContext=sdkBacktestId?'Report the verified historical simulation tool result for strategy '+sdkBacktestId+' and its limitations.':sdkStrategyId?'Use the saved strategy tool result for this question. The requested strategy ID is '+sdkStrategyId+'.':focusedCode?'Retrieved saved code: '+focusedCode.bot.name+' on '+focusedCode.bot.asset+' · '+venueLabel[focusedCode.bot.venue||'valr']+'\nSaved backtest summary for THIS robot: '+JSON.stringify(focusedCode.bot.lastBacktest||'No saved backtest summary available.')+'\nExact saved source:\n'+focusedCode.source.slice(0,200000)+(focusedCode.source.length>200000?'\n[Source capped at 200,000 characters; file is incomplete. Report it clearly. Do not describe omitted code.]':''):command==='create'?'NEW strategy.js request for venue '+String(creatingCode?.venue||'propdao')+', market '+String(creatingCode?.asset||'GOLDUSDC')+'. User-confirmed original task and preferences: '+String(creatingCode?.prompt||message).slice(0,4000)+'. Produce a complete strategy implementing config and onCandle. This is not an edit of existing source.':created?`Bot: ${name||'Untitled'}
+   const appContext=insightBot?('CURRENT LIVE BOT: '+insightBot.name+' ('+insightBot.asset+' / PropDAO). This turn is about current runtime and broker execution. Never substitute saved backtest trade count or R-multiple metrics for live activity. The server performs an owner-checked runtime, broker and optional market read; if they fail say so.'):sdkBacktestId?'Report the verified historical simulation tool result for strategy '+sdkBacktestId+' and its limitations.':sdkStrategyId?'Use the saved strategy tool result for this question. The requested strategy ID is '+sdkStrategyId+'.':focusedCode?'Retrieved saved code: '+focusedCode.bot.name+' on '+focusedCode.bot.asset+' · '+venueLabel[focusedCode.bot.venue||'valr']+'\nSaved backtest summary for THIS robot: '+JSON.stringify(focusedCode.bot.lastBacktest||'No saved backtest summary available.')+'\nExact saved source:\n'+focusedCode.source.slice(0,200000)+(focusedCode.source.length>200000?'\n[Source capped at 200,000 characters; file is incomplete. Report it clearly. Do not describe omitted code.]':''):command==='create'?'NEW strategy.js request for venue '+String(creatingCode?.venue||'propdao')+', market '+String(creatingCode?.asset||'GOLDUSDC')+'. User-confirmed original task and preferences: '+String(creatingCode?.prompt||message).slice(0,4000)+'. Produce a complete strategy implementing config and onCandle. This is not an edit of existing source.':created?`Bot: ${name||'Untitled'}
 Asset: ${asset}
 Available price timeframes: ${selectedMarket?.timeframes.join(', ')||'unknown'}
 Current JavaScript strategy (authoritative):
@@ -806,7 +828,7 @@ ${attachedContext?.kind==='trade-audit'?'[Included in the attached audit context
 Latest backtest errors or output:
 ${logs.slice(-8).join('\n')||'None'}
 Latest backtest metrics: ${result?JSON.stringify(result.metrics):'No completed backtest yet'}`:'No agent selected. The user can learn and converse without a strategy. Do not describe starter code as their strategy.';
-   const system=`ROBOT OBSERVABILITY: For deployed PropDAO questions, use the server's owner-checked getPropDAORobotOperations read. A running Worker proves scheduling, not broker fills, market-feed health or successful signals. WAIT without an explicit reason does not reveal which EMA, RSI, ATR or structure threshold failed. Do not invent condition readings or claim low volatility without measured data. Explain current facts with timestamps, verified exposure and the difference between reference candles and broker execution. Answer the user directly before offering follow-ups.
+   const system=`ROBOT OBSERVABILITY: For deployed PropDAO questions, use the server's owner-checked getPropDAORobotOperations read. A running Worker proves scheduling, not broker fills, market-feed health or successful signals. Broker closed trades are account-scoped: never attribute one to this robot without matched execution evidence. A saved backtest with 205 trades establishes zero verified live trades by itself. WAIT without an explicit reason does not reveal which EMA, RSI, ATR or structure threshold failed. Do not invent condition readings or claim low volatility without measured data. Explain current facts with timestamps, verified exposure and the difference between reference candles and broker execution. Answer the user directly before offering follow-ups.
 
 CONVERSATION ROBOT TARGET: ${focusedCode?'Robot '+focusedCode.bot.name+', saved robot ID '+focusedCode.bot.id+', venue '+focusedCode.bot.venue+', market '+focusedCode.bot.asset+' (not the editor bot '+name+')':'No verified named robot loaded; never assume the current editor is the robot the user refers to.'}. Never confuse two saved robot identities. An edit proposal and Apply button must name this exact robot; no code changes are saved until approved.
 SAVED TRADING PREFERENCES (user-controlled defaults, not trade authorization): ${JSON.stringify(tradingPreferences)}. Reuse the user's known market, venue, timeframe and backtest preferences when reasonable. New explicit instructions always override preferences. Do not repeatedly ask details already established in this chat or saved defaults. If a necessary target is ambiguous, ask one short, concrete question; for supported robot workflows the interface supplies two selectable options and a third custom answer. Never announce an action as completed without a confirmed result.

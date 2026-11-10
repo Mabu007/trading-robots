@@ -31,6 +31,18 @@ const actionSchemas:Partial<Record<ChatTool,Record<string,unknown>>> = {
  delete_code:{type:'object',properties:{name:stringField},required:['name'],additionalProperties:false},
  manage_broker:{type:'object',properties:{action:{type:'string',enum:['connect','inspect','disconnect']},broker:{type:'string',enum:['propdao','ctrader','valr']}},required:['action','broker'],additionalProperties:false}
 };
+const plannerPolicy=[
+ 'Choose a tool only if the LATEST user message expressly requests that ACTION.',
+ 'Read-only conversation, live bot trades, runtime status, market conditions and debugging questions require NO action tool; the main AI chat can read tools.',
+ '"Any trades yet?" means LIVE broker activity, NEVER backtesting.',
+ 'Mentioning a backtest, correcting the AI, or asking why the bot has not traded is not permission to run a historical simulation.',
+ 'Choose backtest ONLY when the user explicitly asks to execute or run a backtest.',
+ 'A pending historical date question must never consume unrelated conversation. Every deployment, strategy change, stop and broker change requires separate platform validation and user approval.'
+].join(' ');
+function boundedHistory(input:unknown){
+ return Array.isArray(input)?input.slice(-6).filter(x=>x&&['user','assistant'].includes(x.role)&&typeof x.content==='string')
+  .map(x=>({role:x.role as 'user'|'assistant',content:x.content.slice(0,1200)})):[];
+}
 export const toolDefinitions=chatTools.map(name=>({type:'function',function:{name,description:descriptions[name],parameters:actionSchemas[name]||{type:'object',properties:{},additionalProperties:false}}}));
 type Planned={tool:ChatTool|null;args:Record<string,unknown>};
 export function parsePlannedAction(message:any):Planned{
@@ -67,7 +79,7 @@ export function chatToolRoutes(app:Express,accounts:OpenRouterAccounts,authentic
  app.post('/api/chat/sdk-plan',async(req,res)=>{
   res.setHeader('Cache-Control','no-store');
   const uid=await authenticate(req,res);if(!uid)return;
-  const {message,model,skills,personality}=req.body||{};
+  const {message,model,skills,personality,recentConversation}=req.body||{};
   if(typeof message!=='string'||!message.trim()||message.length>12000)return res.status(400).json({error:'Send a message under 12,000 characters.'});
   if(model!==undefined&&(typeof model!=='string'||!/^[a-zA-Z0-9_.:/-]{1,200}$/.test(model)))return res.status(400).json({error:'Choose a valid OpenRouter model.'});
   const skillNames=Array.isArray(skills)?skills.filter((v:unknown)=>typeof v==='string'&&v.length<=80).slice(0,50):[];
@@ -81,8 +93,8 @@ export function chatToolRoutes(app:Express,accounts:OpenRouterAccounts,authentic
    res.once('close',()=>abort.abort());
    if(res.destroyed)return;
    const result=await generateText({model:provider.chatModel(model||account.model),temperature:0,maxOutputTokens:1800,maxRetries:0,
-    instructions:'Select a tool only when the user explicitly requests that action. General education and explanation need no tool, except use find_code for questions about named saved source. Never claim an action happened or infer approval. Changes to skills, personality, code or brokers require a review; never execute them. Skill names: '+JSON.stringify(skillNames)+'. Existing personality: '+JSON.stringify(profile),
-    prompt:message,tools,toolChoice:'auto',abortSignal:AbortSignal.any([abort.signal,AbortSignal.timeout(30000)])});
+    instructions:plannerPolicy+' Skill names: '+JSON.stringify(skillNames)+'. Existing personality: '+JSON.stringify(profile),
+    messages:[...boundedHistory(recentConversation),{role:'user' as const,content:message}],tools,toolChoice:'auto',abortSignal:AbortSignal.any([abort.signal,AbortSignal.timeout(30000)])});
    const calls=result.toolCalls.map(call=>({type:'function',function:{name:call.toolName,arguments:JSON.stringify(call.input)}}));
    const plan=parsePlannedAction({tool_calls:calls});
    return res.json({tool:plan.tool,...(Object.keys(plan.args).length?{args:plan.args}:{}),requiresConfirmation:['deploy','stop','edit','create','manage_skill','edit_personality','rename_code','delete_code','manage_broker'].includes(plan.tool||'')});
@@ -91,7 +103,7 @@ export function chatToolRoutes(app:Express,accounts:OpenRouterAccounts,authentic
  app.post('/api/chat/plan',async(req,res)=>{
   res.setHeader('Cache-Control','no-store');
   const uid=await authenticate(req,res);if(!uid)return;
-  const {message,model,skills,personality}=req.body||{};
+  const {message,model,skills,personality,recentConversation}=req.body||{};
   if(typeof message!=='string'||!message.trim()||message.length>12000)return res.status(400).json({error:'Send a message under 12,000 characters.'});
   if(model!==undefined&&(typeof model!=='string'||!/^[a-zA-Z0-9_.:/-]{1,200}$/.test(model)))return res.status(400).json({error:'Choose a valid OpenRouter model.'});
   const skillNames=Array.isArray(skills)?skills.filter((v:unknown)=>typeof v==='string'&&v.length<=80).slice(0,50):[];
@@ -99,7 +111,7 @@ export function chatToolRoutes(app:Express,accounts:OpenRouterAccounts,authentic
   try{
    const account=await accounts.load(uid);if(!account)return res.status(409).json({error:'Connect OpenRouter in Apps.'});
    if(model&&!(await accounts.models()).some(m=>m.id===model))return res.status(400).json({error:'This model is not in the current OpenRouter catalogue.'});
-   const response=await request('https://openrouter.ai/api/v1/chat/completions',{method:'POST',headers:{Authorization:`Bearer ${account.apiKey}`,'Content-Type':'application/json'},body:JSON.stringify({model:model||account.model,temperature:0,max_tokens:1800,parallel_tool_calls:false,tools:toolDefinitions,tool_choice:'auto',messages:[{role:'system',content:'Select a tool only when the user explicitly requests that action. General education and explanation need no tool, except use find_code for questions about named saved source. Never claim an action happened or infer approval. For changes to skills, personality, code or brokers, propose a review; do not execute. Skill names: '+JSON.stringify(skillNames)+'. Existing personality: '+JSON.stringify(profile)},{role:'user',content:message}]}),signal:AbortSignal.timeout(30000)});
+   const response=await request('https://openrouter.ai/api/v1/chat/completions',{method:'POST',headers:{Authorization:`Bearer ${account.apiKey}`,'Content-Type':'application/json'},body:JSON.stringify({model:model||account.model,temperature:0,max_tokens:1800,parallel_tool_calls:false,tools:toolDefinitions,tool_choice:'auto',messages:[{role:'system',content:plannerPolicy+' Skill names: '+JSON.stringify(skillNames)+'. Existing personality: '+JSON.stringify(profile)},...boundedHistory(recentConversation),{role:'user',content:message}]}),signal:AbortSignal.timeout(30000)});
    if(!response.ok){const failure=plannerFailure(response.status);return res.status(failure.status).json({error:failure.error})}
    const body=await response.json() as any;
    if(!body.choices?.[0]?.message)throw Error('Missing model response');
