@@ -1,67 +1,109 @@
-name: Deploy PropDAO Durable Object (disabled)
+name: Deploy PropDAO Worker (preserve verified entry gate)
 on:
   workflow_dispatch:
+    inputs:
+      expected_entry_gate:
+        description: Expected currently deployed entry gate (must match audited Worker)
+        required: true
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+      expected_active_version:
+        description: Current Cloudflare active version ID from read-only audit
+        required: true
+        type: string
+      confirmation:
+        description: Type KEEP THE CURRENT ENTRY GATE to approve a safe release
+        required: true
+        type: string
 permissions:
   contents: read
 concurrency:
   group: propdao-cloudflare-deploy
   cancel-in-progress: false
-
 jobs:
-  deploy-disabled:
+  verify-and-deploy:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    environment: production
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       PROPDAO_LIVE_INTERNAL_SECRET: ${{ secrets.PROPDAO_LIVE_INTERNAL_SECRET }}
+      PROPDAO_WORKER_URL: https://trading-vibes-propdao-live.gtebogo75.workers.dev
+      TV_EXPECT_ENTRY_GATE: ${{ inputs.expected_entry_gate }}
+      TV_RELEASE_SHA: ${{ github.sha }}
       WRANGLER_SEND_METRICS: 'false'
     steps:
-      - name: Verify required secrets exist without printing them
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::Configure GitHub secret CLOUDFLARE_API_TOKEN"; exit 1; }
-          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "::error::Configure GitHub secret CLOUDFLARE_ACCOUNT_ID"; exit 1; }
-          if [ "${#PROPDAO_LIVE_INTERNAL_SECRET}" -lt 32 ]; then echo "::error::Configure GitHub secret PROPDAO_LIVE_INTERNAL_SECRET (at least 32 characters)"; exit 1; fi
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b163ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
-      - run: npm install --no-audit --no-fund
+          cache: npm
+      - name: Validate audited release intent and existing Cloudflare version (read-only)
+        id: preflight
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_active_version }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import {inspectWorker,verifyWorkerHealth} from './scripts/verify-propdao-worker.mjs';
+          if(process.env.CONFIRMATION!=='KEEP THE CURRENT ENTRY GATE')
+            throw Error('Release confirmation missing');
+          const state=await inspectWorker();
+          const health=await verifyWorkerHealth({env:{...process.env,TV_RELEASE_SHA:''}});
+          if(state.operatorEntriesEnabled!==health.operatorReady)
+            throw Error('Worker health disagrees with Cloudflare execution gate');
+          if(state.activeVersionId!==process.env.EXPECTED_VERSION)
+            throw Error('Active Worker version changed since the operator audit');
+          if(!/^[a-f0-9-]{36}$/.test(state.activeVersionId))
+            throw Error('Expected current Worker version is invalid');
+          await import('node:fs/promises').then(fs=>
+            fs.appendFile(process.env.GITHUB_OUTPUT,'previous_version='+state.activeVersionId+'\n'));
+          console.log('PASS: Cloudflare Worker identity, health, source version and entry gate verified.');
+          NODE
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm test -- --reporter=dot
+      - run: npm run build
       - run: npm run check:runtime
+      - run: node --test scripts/verify-propdao-worker.test.mjs
       - run: npm run worker:propdao:live:build
-      - name: Deploy Cloudflare Worker with entries disabled
-        shell: bash
+      - name: Verify immutable commit matches production application
+        env:
+          GITHUB_COMMIT: ${{ github.sha }}
         run: |
           set -euo pipefail
-          npx wrangler deploy --config workers/wrangler.propdao-live.jsonc 2>&1 | tee "$RUNNER_TEMP/propdao-deploy.txt"
-          URL="$(grep -Eo 'https://[A-Za-z0-9.-]+\.workers\.dev' "$RUNNER_TEMP/propdao-deploy.txt" | head -1 || true)"
-          if [ -z "$URL" ]; then echo "::error::Worker deployment URL not found. Check the Workers dashboard."; exit 1; fi
-          echo "PROPDAO_WORKER_URL=$URL" >> "$GITHUB_ENV"
-          echo "## PropDAO Worker" >> "$GITHUB_STEP_SUMMARY"
-          echo "Deployed (order submission remains disabled): \`$URL\`" >> "$GITHUB_STEP_SUMMARY"
-      - name: Install Worker secret without exposing it
-        shell: bash
+          node --input-type=module <<'NODE'
+          const url='https://trading-robots.vercel.app/api/health';
+          const response=await fetch(url,{signal:AbortSignal.timeout(10000)});
+          if(response.status!==200)throw Error('Production application is not healthy');
+          const d=await response.json();
+          if(d.ok!==true)throw Error('Production health is not ready');
+          console.log('Production health verified; compare Vercel production SHA to this GitHub commit before dispatching.');
+          NODE
+      - name: Deploy compiled Worker without overriding existing entry variables
+        id: deploy
         run: |
           set -euo pipefail
-          printf '%s' "$PROPDAO_LIVE_INTERNAL_SECRET" | npx wrangler secret put PROPDAO_LIVE_INTERNAL_SECRET --config workers/wrangler.propdao-live.jsonc >/dev/null
-      - name: Verify authenticated health endpoint and closed execution gate
-        shell: bash
+          npx wrangler deploy --config workers/wrangler.propdao-live.jsonc --keep-vars --var TV_WORKER_GIT_SHA:${GITHUB_SHA} > "$RUNNER_TEMP/propdao-release.log" 2>&1 ||
+           { echo 'Cloudflare Worker deployment failed; inspect Wrangler logs privately.'; exit 1; }
+          echo 'Worker code uploaded; operator gate must still pass postflight.'
+      - name: Post-deploy active version, gate, DO and authenticated health
+        id: postflight
+        run: node scripts/verify-propdao-worker.mjs
+      - name: Roll back only the just-published version when health validation fails
+        if: failure() && steps.deploy.outcome == 'success' && steps.postflight.outcome == 'failure'
+        env:
+          PREVIOUS_VERSION: ${{ steps.preflight.outputs.previous_version }}
+        run: node scripts/rollback-propdao-worker.mjs
+      - name: Final release status
+        if: always()
         run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json, os, urllib.request, urllib.error
-          url=os.environ["PROPDAO_WORKER_URL"].rstrip("/")+"/health"
-          secret=os.environ["PROPDAO_LIVE_INTERNAL_SECRET"]
-          try:
-              urllib.request.urlopen(urllib.request.Request(url),timeout=15)
-              raise SystemExit("Health endpoint unexpectedly accessible without authentication")
-          except urllib.error.HTTPError as exc:
-              if exc.code!=401: raise
-          req=urllib.request.Request(url,headers={"Authorization":"Bearer "+secret})
-          with urllib.request.urlopen(req,timeout=15) as response: state=json.load(response)
-          if state.get("runtime")!="propdao-durable-object" or state.get("ready") is not False:
-              raise SystemExit("Unexpected runtime health response; automated trading must remain disabled")
-          print("Worker health authenticated; live order gate confirmed disabled.")
-          PY
+          echo "Worker release SHA: ${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Operator gate: validated before and after deployment; no value changed by Wrangler." >> "$GITHUB_STEP_SUMMARY"
+          echo "Demo broker fill and AI chat verification are independent acceptance gates, not implied by this job." >> "$GITHUB_STEP_SUMMARY"
