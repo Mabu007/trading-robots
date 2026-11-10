@@ -143,25 +143,75 @@ export class PropDAOAccounts {
   if(!Array.isArray(body?.data)||!Number.isFinite(body?.fees?.taker))throw Error('Invalid PropDAO market metadata');
   return body;
  }
+ /** Normalize broker-reported closed trades without synthesizing missing identity.
+  * A trade has a broker trade ID, but may not include position or intent IDs. */
+ private normalizeTrades(rows:unknown[]){
+  const number=(value:unknown)=>value===undefined||value===null||value===''?null:Number(value);
+  const trades=rows.map((t:any)=>({
+   id:String(t?.id||''),symbol:String(t?.symbol||''),side:t?.side,
+   qty:number(t?.qty),entry:number(t?.entry),exit:number(t?.exit),
+   pnl:number(t?.pnl),openedAt:number(t?.openedAt),closedAt:number(t?.closedAt),
+   reason:String(t?.reason||''),fee:number(t?.fee),
+   positionId:validId(t?.positionId)?t.positionId:null,
+   intentId:validId(t?.intentId)?t.intentId:null,
+   orderId:validId(t?.orderId)?t.orderId:null
+  }));
+  if(trades.some((t:any)=>!t.id||!t.symbol||!['BUY','SELL'].includes(t.side)||
+   [t.qty,t.entry,t.exit,t.pnl].some(v=>typeof v!=='number'||!Number.isFinite(v))||
+   [t.openedAt,t.closedAt,t.fee].some(v=>v!==null&&!Number.isFinite(v))))
+   throw Error('Invalid PropDAO trade history');
+  // The runtime validator above establishes these numeric broker fields;
+  // preserve nullable timestamps and optional provider link identifiers.
+  return trades as Array<{id:string;symbol:string;side:'BUY'|'SELL';
+   qty:number;entry:number;exit:number;pnl:number;
+   openedAt:number|null;closedAt:number|null;reason:string;fee:number|null;
+   positionId:string|null;intentId:string|null;orderId:string|null}>;
+ }
+ /** Lightweight live-reconciliation read. DO alarms must NOT page history. */
  async recentTrades(uid:string,id:string){
   if(!validId(id))throw Error('Invalid PropDAO account');
   const apiKey=await this.load(uid);if(!apiKey)throw Error('Connect your PropDAO key first');
   const body=await this.get(apiKey,`/accounts/${encodeURIComponent(id)}/trades?limit=50`);
   if(!Array.isArray(body?.data))throw Error('Invalid PropDAO trade history');
-  const number=(value:unknown)=>value===undefined||value===null||value===''?null:Number(value);
-  const trades=body.data.slice(0,50).map((t:any)=>({
-   id:String(t.id||''),symbol:String(t.symbol||''),side:t.side,qty:number(t.qty),entry:number(t.entry),
-   exit:number(t.exit),pnl:number(t.pnl),openedAt:number(t.openedAt),closedAt:number(t.closedAt),
-   reason:String(t.reason||''),fee:number(t.fee),
-   // Provider identity fields are optional. Never infer them from price or time.
-   positionId:validId(t.positionId)?t.positionId:null,
-   intentId:validId(t.intentId)?t.intentId:null,
-   orderId:validId(t.orderId)?t.orderId:null
-  }));
-  if(trades.some((t:any)=>!t.id||!t.symbol||!['BUY','SELL'].includes(t.side)||
-   [t.qty,t.entry,t.exit,t.pnl].some(v=>typeof v!=='number'||!Number.isFinite(v))||
-   [t.openedAt,t.closedAt,t.fee].some(v=>v!==null&&!Number.isFinite(v))))throw Error('Invalid PropDAO trade history');
-  return trades;
+  return this.normalizeTrades(body.data.slice(0,50));
+ }
+ /** Explicit historical investigation only. Bounded pagination is separate
+  * from the M1 Worker alarm path. Never report coverage complete if an API
+  * page fails or the cap is reached before the requested cutoff. */
+ async tradesSince(uid:string,id:string,closedAfterMs:number,maxRecords=500){
+  if(!validId(id)||!Number.isFinite(closedAfterMs)||closedAfterMs<0||
+    !Number.isInteger(maxRecords)||maxRecords<1||maxRecords>500)
+   throw Error('Invalid bounded broker history request');
+  const apiKey=await this.load(uid);if(!apiKey)throw Error('Connect your PropDAO key first');
+  const limit=Math.min(100,maxRecords);
+  const collected:Awaited<ReturnType<PropDAOAccounts['recentTrades']>>=[];
+  let pages=0,providerTotal:number|null=null,reachedCutoff=false,complete=false;
+  const seen=new Set<string>();
+  while(collected.length<maxRecords&&pages<10){
+   const offset=pages*limit;
+   const response=await this.get(apiKey,`/accounts/${encodeURIComponent(id)}/trades?limit=${limit}&offset=${offset}`);
+   const rows=response?.data;
+   if(!Array.isArray(rows)||rows.length>limit)throw Error('Invalid paginated PropDAO trade response');
+   pages++;
+   if(Number.isSafeInteger(response.total)&&response.total>=0)providerTotal=response.total;
+   const normalized=this.normalizeTrades(rows);
+   let older=0;
+   for(const t of normalized){
+    const time=t.closedAt===null?null:(t.closedAt>1e11?t.closedAt:t.closedAt*1000);
+    if(time!==null&&time<closedAfterMs){older++;continue}
+    if(seen.has(t.id))continue;
+    seen.add(t.id);collected.push(t);
+   }
+   // A full page older than the cutoff proves the requested window has
+   // been traversed only when the provider's newest-first contract holds.
+   if(normalized.length>0&&older===normalized.length){reachedCutoff=true;complete=true;break;}
+   if(rows.length<limit||(providerTotal!==null&&offset+rows.length>=providerTotal)){
+    complete=true;break;
+   }
+  }
+  if(reachedCutoff&&collected.length>=maxRecords)complete=false;
+  return {trades:collected.slice(0,maxRecords),complete,capped:!complete,
+   pages,providerTotal,cutoffMs:closedAfterMs,maxRecords};
  }
  /**
   * Read-only two-stage operator reconciliation. Never retries the ambiguous order.

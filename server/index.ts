@@ -7,6 +7,7 @@ import {completedMarketEvidence} from '../src/market-condition-evidence.ts';
 import {wantsLiveTradeEvidence} from '../src/live-trade-intent.ts';
 import {analyzeLiveTradeLosses} from './live-trade-analysis.ts';
 import {TradingDesk} from './trading-desk.ts';
+import {evaluatePropDAOReleaseGate} from './propdao-release-acceptance.ts';
 import {watchOutputs} from './watch-outputs.ts';
 import {ChatToolReceipt,chatIdPattern,receiptIdPattern} from './chat-tool-receipts.ts';
 import {readTradingReferent,rememberDeskTrade,rememberInspectedTrade,readRobotReferent,rememberRobotReferent} from './trading-conversation-context.ts';
@@ -41,7 +42,7 @@ import {venueOf} from '../shared/venues.ts';
 import 'dotenv/config';
 import {requestLimit} from './request-limits.ts';
 import express from 'express';
-import { createPublicKey, randomUUID, verify as verifySignature } from 'node:crypto';
+import { createHash, createPublicKey, randomUUID, verify as verifySignature } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
 import { deleteR2Object, getR2Config, listR2Objects, readR2Object, writeR2Object } from './r2.ts';
 import {recordAIUsage} from './usage.ts';
@@ -112,6 +113,7 @@ async function verifyFirebaseUser(authorization: string | undefined): Promise<{u
 
 app.get('/api/health', (_req, res) => res.json({
  ok:true,
+ releaseCommit:process.env.VERCEL_GIT_COMMIT_SHA||process.env.TV_RELEASE_SHA||null,
  firebase:{clientConfigured:Boolean(process.env.VITE_FIREBASE_API_KEY&&process.env.VITE_FIREBASE_PROJECT_ID&&process.env.VITE_FIREBASE_APP_ID),serverConfigured:FirestoreStore.configured()},
  ai:{provider:'OpenRouter',credentialMode:'user-managed',byoAvailable:Boolean(process.env.AI_CREDENTIAL_ENCRYPTION_KEY),sharedFallbackEnabled:process.env.ALLOW_SHARED_OPENROUTER_KEY==='true'&&Boolean(process.env.OPENROUTER_API_KEY?.trim())},
  aiConfigured:process.env.ALLOW_SHARED_OPENROUTER_KEY==='true'&&Boolean(process.env.OPENROUTER_API_KEY?.trim())
@@ -236,6 +238,72 @@ const tradingDesk=new TradingDesk(FirestoreStore.configured()?marketplace.store:
   new Promise<{available:false;error:string;events:null}>(resolve=>
    setTimeout(()=>resolve({available:false,error:'Worker history timeout; broker history remains authoritative',events:null}),3500))
  ]));
+/** Owner-authenticated, read-only production release acceptance. An actual
+ * demo broker closed fill and completed model conversation are required;
+ * this endpoint never sends broker orders or charges inference credits. */
+app.post('/api/trading-desk/release-acceptance',async(req,res)=>{
+ res.setHeader('Cache-Control','private, no-store');
+ const uid=await firebaseUidOrReply(req,res);if(!uid)return;
+ const {accountId,tradeId,conversationId,receiptId}=req.body||{};
+ const valid=(v:unknown)=>typeof v==='string'&&/^[A-Za-z0-9_-]{1,100}$/.test(v);
+ if(!valid(accountId)||!valid(tradeId)||!valid(conversationId)||
+    (receiptId!==undefined&&(typeof receiptId!=='string'||!receiptIdPattern.test(receiptId))))
+  return res.status(400).json({passed:false,error:'Exact account, closed trade and conversation IDs required; receipt ID must be valid when supplied'});
+ if(!FirestoreStore.configured())
+  return res.status(503).json({passed:false,error:'Firebase server archival unavailable'});
+ const hashId=(...parts:string[])=>createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0,40);
+ try{
+  const owned=await propdaoAccounts.list(uid);
+  const ownedDemoAccount=owned.connected===true&&owned.accounts.some((a:any)=>
+   a.accountId===accountId&&['active','funded'].includes(a.status));
+  if(!ownedDemoAccount)return res.status(403).json({passed:false,error:'PropDAO demo account ownership cannot be verified'});
+  const investigation=await tradingDesk.inspect(uid,accountId,tradeId);
+  const link=investigation?.available?investigation.attribution:null;
+  const ownerRoot='users/'+uid+'/';
+  const chatProof=await marketplace.store.get(ownerRoot+'aiChatProofs/'+conversationId).catch(()=>null);
+  const resolvedReceiptId=receiptId??(typeof chatProof?.receiptId==='string'&&
+   receiptIdPattern.test(chatProof.receiptId)?chatProof.receiptId:null);
+  const [archivedTrade,archivedFill,revision,chatTrace,personalAI]=await Promise.all([
+   marketplace.store.get(ownerRoot+'liveTrades/'+hashId('propdao',accountId,tradeId)).catch(()=>null),
+   link?.botId&&link?.eventId?marketplace.store.get(ownerRoot+'liveExecutionEvents/'+
+    hashId('propdao-event',accountId,link.botId,link.eventId)).catch(()=>null):Promise.resolve(null),
+   link?.botId&&link?.grantId?propdaoLiveService.revision(uid,link.botId,link.grantId)
+    .catch(()=>({available:false})):Promise.resolve({available:false}),
+   resolvedReceiptId?ChatToolReceipt.read(marketplace.store,uid,conversationId,resolvedReceiptId).catch(()=>null):Promise.resolve(null),
+   openRouterAccounts.load(uid).catch(()=>null)
+  ]);
+  const workerOrigin=process.env.PROPDAO_LIVE_RUNTIME_URL;
+  const secret=process.env.PROPDAO_LIVE_INTERNAL_SECRET;
+  let workerHealth:any=null;
+  if(workerOrigin&&secret&&secret.length>=32){
+   const url=new URL(workerOrigin);
+   if(url.protocol==='https:'&&url.hostname.endsWith('.workers.dev')&&!url.pathname.replace(/\//g,'')){
+    try{
+     const response=await fetch(new URL('/health',workerOrigin),{
+      headers:{Authorization:'Bearer '+secret},signal:AbortSignal.timeout(12000)});
+     if(response.ok)workerHealth=await response.json();
+    }catch{/* Failed Worker health is reported as unverified; no broker writes. */}
+   }
+  }
+  // The selected AI model can be per-chat, not only the account default.
+  // Validate the actual completed provider model against the fresh catalogue.
+  let configuredModel:string|null=null;
+  if(personalAI?.apiKey&&typeof chatProof?.model==='string'){
+   try{
+    const models=await openRouterAccounts.models();
+    if(models.some(item=>item.id===chatProof.model))configuredModel=chatProof.model;
+   }catch{/* Missing catalogue verification keeps the acceptance gate closed. */}
+  }
+  const report=evaluatePropDAOReleaseGate({ownerUid:uid,accountId,tradeId,
+   ownedDemoAccount,investigation,archivedTrade,archivedFill,revision,
+   chatProof,chatTrace,workerHealth,
+   productionSha:process.env.VERCEL_GIT_COMMIT_SHA||process.env.TV_RELEASE_SHA||null,
+   configuredModel,receiptId:resolvedReceiptId??'',conversationId});
+  return res.status(report.passed?200:409).json(report);
+ }catch(error){
+  return res.status(503).json({passed:false,error:error instanceof Error?error.message:'Release evidence unavailable'});
+ }
+});
 app.get('/api/trading-desk/trades/:accountId/:tradeId',async(req,res)=>{
  res.setHeader('Cache-Control','private, no-store');
  const uid=await firebaseUidOrReply(req,res);if(!uid)return;
@@ -1257,9 +1325,11 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
       res.once('drain',resume);res.once('close',resume);
      });
     };
+    let streamedChars=0;
     for await (const part of result.fullStream){
       if(clientAbort.signal.aborted)break;
       if(part.type==='text-delta'){
+        streamedChars+=part.text.length;
         const event='data: '+JSON.stringify({choices:[{delta:{content:part.text}}]})+'\n\n';
         await sendEvent(event);
       } else if(part.type==='tool-call'||part.type==='tool-result'){
@@ -1270,7 +1340,8 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     }
     clientAbort.signal.throwIfAborted();
     if(webSources.size)await runRead('getWebResearchSources',{},async()=>({sources:[...webSources.values()]}));
-    if(receipt&&await receipt.save(marketplace.store).catch(()=>false)){
+    const receiptSaved=Boolean(receipt&&await receipt.save(marketplace.store).catch(()=>false));
+    if(receiptSaved&&receipt){
      console.info('chat-tool-receipt saved',{receiptId:receipt.id});
      res.write('data: '+JSON.stringify({tvTool:{type:'receipt',receiptId:receipt.id}})+'\n\n');
     }
@@ -1279,6 +1350,16 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     const usage=await result.usage;
     measuredUsage={prompt_tokens:usage.inputTokens,completion_tokens:usage.outputTokens};
     usageStatus=finishReason==='length'?'interrupted':'completed';
+    // Save a minimal, signed-in user/conversation-scoped proof only after a
+    // genuine OpenRouter stream completed AND its evidence receipt persisted.
+    // This is not a fabricated model answer or a broker order authorization.
+    if(receiptSaved&&receipt&&conversationId&&usageStatus==='completed'&&
+       streamedChars>0&&FirestoreStore.configured()){
+     await marketplace.store.put('users/'+uid+'/aiChatProofs/'+conversationId,{
+      ownerUid:uid,conversationId,receiptId:receipt.id,model,completed:true,
+      streamedChars,recordedAt:Date.now()
+     }).catch(()=>console.warn('AI chat completion proof unavailable'));
+    }
     res.write('data: '+JSON.stringify({choices:[{delta:{},finish_reason:finishReason}]})+'\n\n');
     res.write('data: [DONE]\n\n');
     return res.end();

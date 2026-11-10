@@ -166,3 +166,44 @@ describe('read-only broker trade inspection and historical attribution',()=>{
   expect(result.evidenceIssues.join(' ')).toContain('Live broker');
  });
 });
+
+it('includes older intraday broker losses from bounded pagination beyond the first 50',async()=>{
+ const recent=vi.fn(async()=>[]);
+ const paged=vi.fn(async()=>({trades:Array.from({length:75},(_,i)=>
+  trade('older-'+i,-1)),complete:true,capped:false,pages:2,providerTotal:75}));
+ const desk=new TradingDesk(null,{list:async()=>({connected:true,
+  accounts:[{accountId:'prop-1',status:'active'}]}),
+  recentTrades:recent,tradesSince:paged});
+ const r:any=await desk.today('alice',now);
+ expect(r).toMatchObject({closedTradesToday:75,losses:75,reportedPnl:-75});
+ expect(paged).toHaveBeenCalledTimes(1);
+ expect(recent).not.toHaveBeenCalled();
+});
+it('marks broker history partial when pagination is capped',async()=>{
+ const desk=new TradingDesk(null,{list:async()=>({connected:true,
+  accounts:[{accountId:'prop-1',status:'active'}]}),
+  recentTrades:async()=>[],
+  tradesSince:async()=>({trades:[trade('hist-1',-3)],complete:false,capped:true,pages:5,providerTotal:1000})});
+ const r:any=await desk.today('alice',now);
+ expect(r.partial).toBe(true);
+ expect(r.historyCapped.join(' ')).toContain('pagination');
+});
+it('searches paginated history for a named old trade instead of inventing a robot match',async()=>{
+ const paged=vi.fn(async()=>({trades:[trade('hist-old',-4)],
+  complete:false,capped:true,pages:5,providerTotal:2000}));
+ const desk=new TradingDesk(null,{list:async()=>({connected:true,
+  accounts:[{accountId:'prop-1',status:'active'}]}),
+  recentTrades:async()=>[],tradesSince:paged});
+ const r:any=await desk.inspect('alice','prop-1','hist-old');
+ expect(r).toMatchObject({available:true,brokerFresh:true,
+  attribution:{botId:null,confidence:'unknown'}});
+ expect(r.evidenceIssues.join(' ')).toContain('capped');
+ expect(paged).toHaveBeenCalledWith('alice','prop-1',0,500);
+});
+it('recognizes the documented PropDAO Stop Loss reason without inventing stop tightness',()=>{
+ const r:any=summarizeDay([{...trade('hist-stop',-4),reason:'Stop Loss',accountId:'prop-1',
+  botId:null,attribution:'unattributed'}],'2026-11-10',
+  {accountsChecked:1,failures:[],capped:[],journalWarnings:[],
+   ledgerAvailable:true,writeFailures:0});
+ expect(r.stopLossCount).toBe(1);
+});
