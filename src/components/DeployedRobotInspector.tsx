@@ -134,7 +134,7 @@ export function DeployedRobotInspector({client,agent,onClose,onRefreshAgents,onS
      <dl><div><dt>Last strategy decision</dt><dd>{value(snapshot?.lastEvaluation?.action)}</dd></div>
      <div><dt>Decision reason</dt><dd>{snapshot?.lastEvaluation?.reason?value(snapshot.lastEvaluation.reason):'Strategy did not provide a reason'}</dd></div>
      <div><dt>Last evaluated</dt><dd>{dateFrom(snapshot?.lastEvaluation?.time)}</dd></div>
-     <div><dt>Next Worker check</dt><dd>{dateFrom(snapshot?.nextAlarm??snapshot?.nextCheck)}</dd></div>
+     <div><dt>{snapshot?.running?'Next strategy evaluation':'Next data reconciliation (no new entries)'}</dt><dd>{dateFrom(snapshot?.nextAlarm??snapshot?.nextCheck)}</dd></div>
      <div><dt>Last broker-confirmed order</dt><dd>{snapshot?.lastOrder?.providerStatus?value(snapshot.lastOrder.providerStatus)+' · '+dateFrom(snapshot.lastOrder.time):'No confirmed order result retained'}</dd></div>
      <div><dt>Latest signal outcome</dt><dd>{lastOutcome?lastOutcome.stage.replaceAll('_',' '):'No outcome recorded for that signal'}</dd></div>
      <div><dt>Order intent</dt><dd>{snapshot?.pendingIntent?'Unresolved; reconciliation required':'No unresolved intent reported'}</dd></div>
@@ -151,6 +151,23 @@ export function DeployedRobotInspector({client,agent,onClose,onRefreshAgents,onS
     </dl>
    </section>
   </div>
+  <section className="tv-deployed-panel" aria-label="Durable trading journal and Firebase reconciliation">
+   <header><Activity size={17}/><h4>Trading data · Durable SQL / Firebase</h4></header>
+   {snapshot?.sqlJournal?<>
+    <p>Cloudflare SQL retains observed broker trades, execution events and decision checks while the robot operates.
+     After stop, outstanding records transfer to Firebase with explicit acknowledgement. Stopping does not close broker exposure.</p>
+    <dl>
+     <div><dt>Broker trade rows retained</dt><dd>{value(snapshot.sqlJournal.counts?.trade?.total)}</dd></div>
+     <div><dt>Execution events retained</dt><dd>{value(snapshot.sqlJournal.counts?.event?.total)}</dd></div>
+     <div><dt>Decision snapshots retained</dt><dd>{value(snapshot.sqlJournal.counts?.decision?.total)}</dd></div>
+     <div><dt>Pending Firebase archive records</dt><dd>{value(snapshot.sqlJournal.pending)}</dd></div>
+     <div><dt>Last authenticated broker reconciliation</dt><dd>{dateFrom(snapshot.sqlJournal.brokerSync?.time)}</dd></div>
+     <div><dt>Broker history sample capped</dt><dd>{snapshot.sqlJournal.brokerSync?.capped?'Yes — coverage may be incomplete':'Not reported at cap'}</dd></div>
+     <div><dt>Last acknowledged Firebase transfer</dt><dd>{dateFrom(snapshot.sqlJournal.lastArchive?.time)}</dd></div>
+    </dl>
+    {snapshot.sqlJournal.pending>0&&<p className="tv-deployed-note">Transfer pending. The Durable Object retains unacknowledged SQL records and retries on its reconciliation alarm.</p>}
+   </>:<p>SQL journal telemetry has not been returned by this Worker version. Live trade history may still be available directly from PropDAO.</p>}
+  </section>
   <section className="tv-deployed-panel tv-deployed-feed"><header><Wifi size={17}/><h4>Market data sensors</h4><span>{feeds.length?'Worker-reported coverage':'No feed telemetry available'}</span></header>
    {feeds.length?<div className="tv-deployed-feeds">{feeds.map(([tf,feed])=><div key={tf}><strong>{tf.toUpperCase()}</strong><span>{feed.received??'—'} / {feed.requested??'—'} bars</span><small className={feed.ready?'ready':'not-ready'}>{feed.ready?'Ready':feed.recentGap?'Recent gap':'Incomplete / stale'}</small></div>)}</div>
    :<p>No verified candle-load metrics were returned. This is not proof that the feed is healthy.</p>}

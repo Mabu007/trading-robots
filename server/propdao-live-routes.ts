@@ -11,7 +11,7 @@ import {venueOf} from '../shared/venues.ts';
 import {safeExecutionEvents,oldWorkerEvents,type ExecutionEvent} from '../shared/propdao-execution-journal.ts';
 
 type Storage={read:(key:string)=>Promise<string|null>;write:(key:string,value:string)=>Promise<void>;remove?:(key:string)=>Promise<void>;list?:(prefix:string,limit:number)=>Promise<string[]>};
-type Dependencies=Storage&{/** Legacy unit fixtures only; never pass from HTTP routes. */unsafeLegacyDeployForTests?:boolean;uid:(req:Request,res:Response)=>Promise<string|null>;bot:(uid:string,id:string,req:Request)=>Promise<{asset:string;code:string;venue?:string;name?:string}|null>;accounts:PropDAOAccounts;agents?:AgentRegistry;request?:typeof fetch;exclusive?:<T>(uid:string,id:string,work:()=>Promise<T>)=>Promise<T>;history?:Pick<DwellirHistory,'candles'>};
+type Dependencies=Storage&{archive?:(uid:string,botId:string,accountId:string,grantId:string,rows:any[])=>Promise<{acknowledged:string[]}>;/** Legacy unit fixtures only; never pass from HTTP routes. */unsafeLegacyDeployForTests?:boolean;uid:(req:Request,res:Response)=>Promise<string|null>;bot:(uid:string,id:string,req:Request)=>Promise<{asset:string;code:string;venue?:string;name?:string}|null>;accounts:PropDAOAccounts;agents?:AgentRegistry;request?:typeof fetch;exclusive?:<T>(uid:string,id:string,work:()=>Promise<T>)=>Promise<T>;history?:Pick<DwellirHistory,'candles'>};
 export type PropGrant={autoPolicy?:{demoOnly:true;taskId:string;policyFingerprint:string;maxDailyLossPct:number;maxDrawdownPct:number;startingEquity:number};id:string;uid:string;botId:string;agentId?:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;riskReward?:number;leverage:number;issuedAt:number;expiresAt:number;revokedAt?:number;runtimeScope?:'bot'|'lock'};
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 const safeId=(value:string)=>/^[A-Za-z0-9_-]{1,128}$/.test(value);
@@ -138,13 +138,13 @@ export class PropDAOLiveService{
   if(!this.deps.agents)return;
   try{await this.deps.agents.liveTransition(uid,this.agentBot(uid,botId,bot),input)}catch(error){if(!bestEffort)throw error;}
  }
- private async runtime(g:PropGrant,action:'deploy'|'stop'|'status'|'pause'|'resume'|'reconcile',body?:unknown,timeoutMs=20000){
+ private async runtime(g:PropGrant,action:'deploy'|'stop'|'status'|'ledger'|'pause'|'resume'|'reconcile',body?:unknown,timeoutMs=20000){
   const base=process.env.PROPDAO_LIVE_RUNTIME_URL,secret=process.env.PROPDAO_LIVE_INTERNAL_SECRET;
   if(!base||!secret||secret.length<32)throw Error('PropDAO Durable Object runtime is not configured');
   const runtimeId=g.runtimeScope==='bot'?hash(g.uid+':'+g.accountId+':'+g.botId):g.runtimeScope==='lock'?hash('propdao-execution:'+g.uid+':'+g.accountId):hash(g.uid+':'+g.accountId);
   const url=new URL(`/live/${runtimeId}/${action}`,base);
   if(url.protocol!=='https:'&&!(url.protocol==='http:'&&url.hostname==='127.0.0.1'))throw Error('Live runtime requires HTTPS');
-  const response=await this.request(url,{method:action==='status'?'GET':'POST',headers:{Authorization:`Bearer ${secret}`,'X-TV-UID':g.uid,'Content-Type':'application/json'},...(action==='status'?{}:{body:JSON.stringify(body??{})}),signal:AbortSignal.timeout(timeoutMs)});
+  const response=await this.request(url,{method:action==='status'||action==='ledger'?'GET':'POST',headers:{Authorization:`Bearer ${secret}`,'X-TV-UID':g.uid,'Content-Type':'application/json'},...(action==='status'||action==='ledger'?{}:{body:JSON.stringify(body??{})}),signal:AbortSignal.timeout(timeoutMs)});
   let result:any;try{result=await response.json()}catch{throw Error('Durable Object returned invalid JSON')}
   if(!response.ok)throw Error(typeof result.error==='string'?result.error:'Durable Object unavailable');
   return result;
@@ -274,24 +274,31 @@ export class PropDAOLiveService{
   const gathered:ExecutionEvent[]=[],failed:string[]=[];
   const decisionSnapshots:Array<{accountId:string;botId:string;grantId:string;codeHash:string|null;
    candleClose:number;time:number;action:string;reason:string;checks:unknown[]}> = [];
+  const sqlBrokerTrades=new Map<string,any>();
+  const sqlCoverage:Array<{botId:string;running:boolean;brokerSync:any;counts:any}> = [];
   // Six concurrent reads at most; never query another user's account.
   for(let i=0;i<sources.length;i+=6){
    const batch=await Promise.all(sources.slice(i,i+6).map(async(grant)=>{
-    try{return {grant,state:await this.runtime(grant,'status',undefined,8500)}}
-    catch{return {grant,state:null}}
+    const [status,sql]=await Promise.allSettled([
+     this.runtime(grant,'status',undefined,8500),
+     this.runtime(grant,'ledger',undefined,8500)
+    ]);
+    return {grant,state:status.status==='fulfilled'?status.value:null,
+     ledger:sql.status==='fulfilled'?sql.value:null};
    }));
-   for(const {grant,state} of batch){
-    if(!state||(state.grant?.accountId&&state.grant.accountId!==accountId)||
-       (grant.botId&&(!state.grant||state.grant.botId!==grant.botId||
-        state.grant.accountId!==accountId))){
-     failed.push(grant.botId||'legacy');continue;
-    }
+   for(const {grant,state,ledger} of batch){
+    const stateVerified=!!state&&(!state.grant?.accountId||state.grant.accountId===accountId)&&
+     (!grant.botId||(state.grant?.botId===grant.botId&&state.grant.accountId===accountId));
+    const ledgerVerified=!!ledger&&ledger.source==='durable-object-sql'&&
+     ledger.accountId===accountId&&(!grant.botId||ledger.botId===grant.botId);
+    if(!stateVerified&&!ledgerVerified){failed.push(grant.botId||'legacy');continue}
+    if(!stateVerified)failed.push(grant.botId||'legacy:status-unavailable');
     // A Worker running the old code cannot produce structured order outcomes.
     // Display its retained text events, but do not call this complete coverage.
-    if(!Array.isArray(state.executionEvents)&&
+    if(stateVerified&&!Array.isArray(state.executionEvents)&&
        (state.grant||(Array.isArray(state.events)&&state.events.length>0)))
      failed.push(grant.botId||'legacy');
-    if(grant.botId&&state.grant?.botId===grant.botId&&Array.isArray(state.recentDecisions)){
+    if(stateVerified&&grant.botId&&state.grant?.botId===grant.botId&&Array.isArray(state.recentDecisions)){
      for(const decision of state.recentDecisions.slice(-24)){
       if(!decision||!Number.isFinite(decision.candleClose)||!['WAIT','BUY','SELL'].includes(decision.action))continue;
       decisionSnapshots.push({accountId,botId:grant.botId,grantId:grant.id,
@@ -301,8 +308,36 @@ export class PropDAOLiveService{
        checks:Array.isArray(decision.checks)?decision.checks.slice(0,16):[]});
      }
     }
-    const structured=safeExecutionEvents(state.executionEvents,accountId);
-    const old=oldWorkerEvents(state.events,accountId);
+    if(ledgerVerified){
+     sqlCoverage.push({botId:String(ledger.botId),running:ledger.running===true,
+      brokerSync:ledger.brokerSync||null,counts:ledger.counts||null});
+     if(Array.isArray(ledger.trades)){
+      for(const row of ledger.trades.slice(0,60)){
+       const t=row?.payload;
+       if(t&&typeof t.id==='string'&&t.id.length<=160&&t.symbol&&
+        Number.isFinite(t.pnl)&&Number.isFinite(t.qty))
+        sqlBrokerTrades.set(accountId+':'+t.id,{...t,accountId,
+         source:'durable-object-sql-broker-observation',observedAt:ledger.brokerSync?.time||null,
+         attribution:'unattributed'});
+      }
+     }
+     if(Array.isArray(ledger.decisions)){
+      for(const entry of ledger.decisions.slice(0,60)){
+       const d=entry?.payload;
+       if(d&&d.accountId===accountId&&d.botId===ledger.botId&&
+         Number.isFinite(d.candleClose)&&['WAIT','BUY','SELL'].includes(d.action))
+        decisionSnapshots.push({accountId,botId:d.botId,grantId:String(d.grantId),
+         codeHash:typeof d.codeHash==='string'?d.codeHash:null,
+         candleClose:d.candleClose,time:d.time,action:d.action,reason:d.reason||'',
+         checks:Array.isArray(d.checks)?d.checks.slice(0,16):[]});
+      }
+     }
+     if(Array.isArray(ledger.events)){
+      gathered.push(...safeExecutionEvents(ledger.events.map((row:any)=>row?.payload),accountId));
+     }
+    }
+    const structured=safeExecutionEvents(stateVerified?state.executionEvents:null,accountId);
+    const old=oldWorkerEvents(stateVerified?state.events:null,accountId);
     // Never attribute old free-text Worker events to an active bot.
     gathered.push(...structured,...old.filter(event=>!structured.some(x=>
      x.stage===event.stage&&x.side===event.side&&
@@ -314,7 +349,10 @@ export class PropDAOLiveService{
   const events=[...byId.values()].sort((a,b)=>b.time-a.time).slice(0,100);
   return {accountId,checkedAt,available:failed.length===0,partial:failed.length>0,
    ...(failed.length?{error:'Worker activity is incomplete for '+failed.length+' scope(s).',unverifiedScopes:failed}:{}),
-   events,decisionSnapshots:decisionSnapshots.slice(-300),retainedLimit:100,historyIsBounded:true,
+   events,decisionSnapshots:decisionSnapshots.slice(-300),
+   liveTrades:[...sqlBrokerTrades.values()].slice(0,250),
+   sqlCoverage,sqlLiveAvailable:sqlCoverage.length>0,
+   retainedLimit:100,historyIsBounded:true,
    source:'Per-robot Cloudflare Durable Objects and legacy account runtime',
    caveat:'Signals and submissions are not broker fills. Confirm live exposure and closed trades using PropDAO.'};
  }
@@ -485,6 +523,21 @@ export class PropDAOLiveService{
    return {...state,running:false,paused:false,deployed:false,stopped:true,authorizationRevoked:true,runtimeStopped:true,exposure:'unverified'};
   }catch(error){const reason=error instanceof Error?error.message:'Stop outcome unknown';if(bot)await this.recordAgent(uid,botId,bot,{state:'unknown',action:'stop_outcome_unknown',grantId:g.id,expiresAt:g.expiresAt,authorized:false,error:reason},true);return {running:false,deployed:true,stopped:false,uncertain:true,authorizationRevoked:true,runtimeStopped:false,accountId:g.accountId,needsReconciliation:true,exposure:'unverified',error:'New-order authorization revoked. Worker stop and any remaining exposure are unverified: '+reason}}
  }
+ async archiveScope(uid:string,botId:string,accountId:string,grantId:string){
+  if(!safeId(botId)||!safeId(accountId)||typeof grantId!=='string'||grantId.length>120)
+   throw Error('Invalid archival identity');
+  const grant=await this.grant(uid,botId);
+  if(!grant||grant.uid!==uid||grant.botId!==botId)
+   throw Error('Archive robot does not match owner');
+  // A revoked historical grant can be superseded or point to an older
+  // account. The signed Worker supplies the original grant identity; the
+  // server independently verifies BOTH bot ownership and account ownership.
+  // This is read-only archival, never order authorization.
+  const owned=await this.deps.accounts.list(uid);
+  if(!owned.connected||!owned.accounts.some((a:{accountId:string})=>a.accountId===accountId))
+   throw Error('Archive broker account ownership not verified');
+  return grant;
+ }
  async provider(input:any){
   const {uid,botId,grantId,action,payload}=input??{};
   if(typeof uid!=='string'||!safeId(botId)||typeof grantId!=='string')throw Error('Invalid provider authorization');
@@ -493,7 +546,20 @@ export class PropDAOLiveService{
     throw Error('Reconciliation account identity is invalid');
    return this.deps.accounts.verifyFlatReconciliation(uid,payload.accountId,payload.pendingIntent);
   }
-  const grant=await this.grant(uid,botId);if(!grant||grant.revokedAt||grant.id!==grantId||Date.now()>=grant.expiresAt)throw Error('Live authorization expired');
+  const grant=await this.grant(uid,botId);
+  if(!grant||grant.id!==grantId)throw Error('Provider grant identity mismatch');
+  if(action==='history'){
+   // Read-only broker reconciliation remains authorized after entry permission
+   // is revoked, so positions closing after stop can still be observed.
+   const trades=await this.deps.accounts.recentTrades(uid,grant.accountId);
+   let exposure:{verified:boolean;positions:number|null;orders:number|null}={verified:false,positions:null,orders:null};
+   try{
+    const risk=await this.deps.accounts.accountRisk(uid,grant.accountId);
+    exposure={verified:true,positions:risk.positions.length,orders:risk.orders.length};
+   }catch{/* Broker history remains useful when exposure verification fails. */}
+   return {trades,exposure,source:'owner-verified-propdao',checkedAt:Date.now()};
+  }
+  if(grant.revokedAt||Date.now()>=grant.expiresAt)throw Error('Live authorization expired');
   if(action==='snapshot')return this.deps.accounts.accountRisk(uid,grant.accountId);
   if(action==='execute'){
    if(!this.configured())throw Error('Live execution disabled');
@@ -521,6 +587,19 @@ export function propDAOLiveRoutes(app:Express,deps:Dependencies){
   const work=()=>req.body?.action==='deploy'?service.deploy(uid,id,req):req.body?.action==='stop'?service.stop(uid,id,req):req.body?.action==='pause'?service.pause(uid,id,req):req.body?.action==='resume'?service.resume(uid,id,req):req.body?.action==='reconcile'?service.reconcile(uid,id,req):Promise.reject(Error('Unknown action'));
   return deps.exclusive?deps.exclusive(uid,id,work):work();
  }));
+ app.post('/api/internal/propdao/archive',async(req,res)=>{
+  res.setHeader('Cache-Control','no-store');
+  const secret=process.env.PROPDAO_LIVE_INTERNAL_SECRET,header=req.header('authorization')||'';
+  if(!secret||secret.length<32||header.length>512||
+   !timingSafeEqual(Buffer.from(hash(header)),Buffer.from(hash('Bearer '+secret))))
+   return res.status(401).json({error:'Internal authorization required'});
+  const {uid,botId,accountId,grantId,rows}=req.body||{};
+  if(!deps.archive)return res.status(503).json({error:'Firebase archive ingestion is unavailable'});
+  try{
+   await service.archiveScope(uid,botId,accountId,grantId);
+   return res.json(await deps.archive(uid,botId,accountId,grantId,rows));
+  }catch(e){return res.status(503).json({error:e instanceof Error?e.message:'Archive not acknowledged'})}
+ });
  app.post('/api/internal/propdao/provider',async(req,res)=>{
   res.setHeader('Cache-Control','no-store');
   const secret=process.env.PROPDAO_LIVE_INTERNAL_SECRET,header=req.header('authorization')||'';

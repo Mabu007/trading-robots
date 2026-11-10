@@ -451,3 +451,18 @@ it('denies another user access to a prior deployment trade history',async()=>{
  expect(report).toMatchObject({available:false,accountId:null});
  expect(accounts.recentTrades).not.toHaveBeenCalled();
 });
+
+it('permits authenticated read-only broker history after robot authorization is revoked',async()=>{
+ const {svc,saved,accounts}=setup();
+ const prefix='propdao-live/v1/'+(process.env.VERCEL_ENV||'development')+'/'+Buffer.from('alice').toString('base64url')+'/';
+ saved.set(prefix+'bot-1.json',JSON.stringify({id:'grant-stop-1',uid:'alice',botId:'bot-1',
+  accountId:'prop-1',symbol:'BTCUSDC',expiresAt:Date.now()-1000,revokedAt:Date.now()-2000}));
+ accounts.recentTrades.mockResolvedValueOnce([{id:'close-001',symbol:'BTCUSDC',side:'BUY',
+  qty:1,entry:100,exit:98,pnl:-2,fee:.1,openedAt:Date.now()-1000,closedAt:Date.now(),reason:'SL'}] as never);
+ const observed=await svc.provider({uid:'alice',botId:'bot-1',grantId:'grant-stop-1',action:'history'});
+ expect(observed).toMatchObject({source:'owner-verified-propdao',trades:[{id:'close-001',pnl:-2}],
+  exposure:{verified:true,positions:0,orders:0}});
+ expect(accounts.executeOrder).not.toHaveBeenCalled();
+ await expect(svc.provider({uid:'alice',botId:'bot-1',grantId:'grant-stop-1',action:'execute',payload:{}}))
+  .rejects.toThrow(/expired/i);
+});

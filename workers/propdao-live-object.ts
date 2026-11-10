@@ -7,11 +7,75 @@ import {TF_SECONDS} from '../shared/trading';
 import {evaluateAutonomousEquity,type EvaluationEnvelope} from '../shared/propdao-autonomous-guard';
 import {parseUpstreamJson,TemporaryReadError,retryableReadError} from './propdao-upstream-response';
 import {MAX_EXECUTION_EVENTS,type ExecutionEvent,type ExecutionStage} from '../shared/propdao-execution-journal';
+import {PropDAOSqlJournal,reconciliationAlarm,type SqlHandle} from './propdao-sql-journal';
 type Grant={autoPolicy?:EvaluationEnvelope;id:string;uid:string;botId:string;agentId?:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;riskReward?:number;leverage:number;issuedAt:number;expiresAt:number};
 type Status={running:boolean;paused:boolean;lastError?:string;lastEvaluation?:any;lastOrder?:any;lastAccount?:any;events:string[];lastMarketData?:any;recentDecisions?:any[];lastReconciliation?:any};
 const interval:Record<string,string>={m1:'1m',m5:'5m',m15:'15m',m30:'30m',h1:'1h',h4:'4h',d1:'1d'};
 async function hash(s:string){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s)))).map(v=>v.toString(16).padStart(2,'0')).join('')}
 export class PropDAOLiveBot extends DurableObject<any>{
+ private sqlLedger:PropDAOSqlJournal|undefined;
+ private ledger(){return this.sqlLedger??(this.sqlLedger=new PropDAOSqlJournal(this.ctx.storage.sql as SqlHandle));}
+ private async syncBroker(grant:Grant,force=false){
+  const now=Date.now(),last=await this.ctx.storage.get<number>('lastSqlBrokerCheck')||0;
+  if(!force&&now-last<60000)return;
+  const data=await this.provider(grant,'history');
+  if(!Array.isArray(data?.trades))throw Error('Authenticated broker trade history invalid');
+  let seen=0;
+  for(const trade of data.trades.slice(0,50)){
+   if(!trade||typeof trade.id!=='string'||!trade.id||trade.id.length>160||
+    typeof trade.symbol!=='string'||!['BUY','SELL'].includes(trade.side)||
+    !Number.isFinite(trade.pnl)||!Number.isFinite(trade.qty))continue;
+   // A broker trade is account-wide. DO NOT misattribute it to this bot.
+   this.ledger().put({kind:'trade',key:grant.accountId+':'+trade.id,
+    grantId:grant.id,accountId:grant.accountId,botId:grant.botId,
+    time:Number.isFinite(trade.closedAt)?(trade.closedAt>1e11?trade.closedAt:trade.closedAt*1000):now,
+    payload:{...trade,source:'authenticated-propdao-broker',attribution:'unattributed',
+     observedViaBot:grant.botId,accountId:grant.accountId}});
+   seen++;
+  }
+  const flatVerified=data.exposure?.verified===true&&data.exposure.positions===0&&data.exposure.orders===0;
+  const previously=await this.ctx.storage.get<{flatVerified?:boolean;flatConfirmations?:number}>('brokerSync');
+  const notTrading=(await this.ctx.storage.get<boolean>('running'))!==true;
+  const flatConfirmations=notTrading&&flatVerified?
+   Math.min(10,previously?.flatVerified?Number(previously.flatConfirmations||0)+1:1):0;
+  await this.ctx.storage.put('lastSqlBrokerCheck',now);
+  await this.ctx.storage.put('brokerSync',{time:now,seen,capped:data.trades.length>=50,
+   flatVerified,flatConfirmations,
+   positions:data.exposure?.verified?data.exposure.positions:null,orders:data.exposure?.verified?data.exposure.orders:null,
+   error:null});
+ }
+ private async archiveSql(grant:Grant){
+  const candidate=this.ledger().pending(60);
+  if(!candidate.length)return {pending:0,uploaded:0};
+  // One signed archive batch belongs to ONE original bot/grant/account.
+  // Durable Objects may retain old revisions (or legacy account scopes).
+  const first=candidate[0];
+  const rows=candidate.filter(r=>r.accountId===first.accountId&&
+   r.botId===first.botId&&r.grantId===first.grantId);
+  const secret=this.env.PROPDAO_LIVE_INTERNAL_SECRET;
+  if(typeof secret!=='string'||secret.length<32)throw Error('Worker archival credential missing');
+  const response=await fetch(new URL('/api/internal/propdao/archive',this.env.PROPDAO_CONTROL_URL),{
+   method:'POST',headers:{Authorization:'Bearer '+secret,'Content-Type':'application/json'},
+   body:JSON.stringify({uid:grant.uid,botId:first.botId,accountId:first.accountId,
+    grantId:first.grantId,rows}),signal:AbortSignal.timeout(12000)
+  });
+  if(!response.ok)throw Error('Firebase archive did not acknowledge: '+response.status);
+  const body=await response.json() as {acknowledged?:string[]};
+  if(!Array.isArray(body?.acknowledged)||body.acknowledged.length!==rows.length||
+   !rows.every(row=>body.acknowledged?.includes(row.kind+':'+row.key)))
+   throw Error('Firebase archival acknowledgement incomplete');
+  this.ledger().acknowledge(rows.map(r=>({kind:r.kind,key:r.key})));
+  await this.ctx.storage.put('lastSqlArchive',{time:Date.now(),uploaded:rows.length});
+  return {pending:this.ledger().pendingCount(),uploaded:rows.length};
+ }
+ private async archiveAll(grant:Grant){
+  let uploaded=0;
+  for(let i=0;i<5;i++){
+   const result=await this.archiveSql(grant);uploaded+=result.uploaded;
+   if(result.pending===0)return {pending:0,uploaded};
+  }
+  return {pending:this.ledger().pendingCount(),uploaded};
+ }
  private tail:Promise<unknown>=Promise.resolve();
  private serial<T>(fn:()=>Promise<T>):Promise<T>{const next=this.tail.then(fn,fn);this.tail=next.catch(()=>{});return next}
  private async state():Promise<Status>{return {running:(await this.ctx.storage.get<boolean>('running'))===true,paused:(await this.ctx.storage.get<boolean>('paused'))===true,lastError:await this.ctx.storage.get<string>('lastError'),lastEvaluation:await this.ctx.storage.get('lastEvaluation'),recentDecisions:await this.ctx.storage.get<any[]>('recentDecisions')||[],lastOrder:await this.ctx.storage.get('lastOrder'),lastAccount:await this.ctx.storage.get('lastAccount'),lastMarketData:await this.ctx.storage.get('lastMarketData'),lastReconciliation:await this.ctx.storage.get('lastReconciliation'),events:(await this.ctx.storage.get<string[]>('events'))||[]};}
@@ -26,6 +90,19 @@ export class PropDAOLiveBot extends DurableObject<any>{
     reason:details.reason.replace(/[\r\n\t]/g,' ').slice(0,180)}:{})};
   const prior=(await this.ctx.storage.get<ExecutionEvent[]>('executionEvents'))||[];
   await this.ctx.storage.put('executionEvents',[...prior,event].slice(-MAX_EXECUTION_EVENTS));
+  // Durable SQLite records survive runtime restart and are not truncated with
+  // the legacy UI event ring; telemetry failure must not submit or repeat orders.
+  try{
+   const order=stage==='PROTECTED_FILL'?await this.ctx.storage.get<any>('lastOrder'):null;
+   this.ledger().put({kind:'event',key:grant.id+':'+event.id,grantId:grant.id,
+    accountId:grant.accountId,botId:grant.botId,time:event.time,
+    payload:{...event,codeHash:grant.codeHash,riskUsd:grant.riskUsd,
+     riskReward:grant.riskReward??null,
+     ...(order?{execution:{stop:order.stop,target:order.target,quantity:order.quantity,
+      plannedLoss:order.plannedLoss,projectedNetProfit:order.projectedNetProfit,
+      riskBudgetUsd:order.riskBudgetUsd,providerStatus:order.providerStatus}}:{})}})
+  }
+  catch(error){await this.ctx.storage.put('sqlTelemetryError',error instanceof Error?error.message:'SQLite event write failed')}
  }
  private async provider(grant:Grant,action:string,payload?:unknown){
   const origin=this.env.PROPDAO_CONTROL_URL;
@@ -76,15 +153,53 @@ export class PropDAOLiveBot extends DurableObject<any>{
  }
  private async schedule(){
   const grant=await this.ctx.storage.get<Grant>('grant');
-  if(!grant||!(await this.ctx.storage.get<boolean>('running'))){await this.ctx.storage.deleteAlarm();return}
+  if(!grant){await this.ctx.storage.deleteAlarm();return}
+  const running=(await this.ctx.storage.get<boolean>('running'))===true;
+  if(!running){
+   const paused=(await this.ctx.storage.get<boolean>('paused'))===true;
+   if(!paused&&!(await this.ctx.storage.get<number>('stoppedAt')))
+    await this.ctx.storage.put('stoppedAt',Date.now());
+   const broker=await this.ctx.storage.get<{flatVerified?:boolean;flatConfirmations?:number}>('brokerSync');
+   const stoppingAt=await this.ctx.storage.get<number>('stoppedAt')||Date.now();
+   // Two fresh, separate flat broker observations and a five-minute
+   // post-stop settling interval prevent premature archival completion.
+   const settled=broker?.flatVerified===true&&Number(broker.flatConfirmations||0)>=2&&
+    Date.now()-stoppingAt>=300000;
+   const next=reconciliationAlarm({running:false,paused,pendingArchive:this.ledger().pendingCount(),
+    flatVerified:settled,
+    unresolvedIntent:Boolean(await this.ctx.storage.get('pendingIntent')),now:Date.now()});
+   if(next!==null)await this.ctx.storage.setAlarm(next);
+   else await this.ctx.storage.deleteAlarm();
+   return;
+  }
   const timeframe=parseStrategyConfig(grant.code).executionTimeframe,period=TF_SECONDS[timeframe]*1000,now=Date.now();
   const next=(Math.floor((now-6000)/period)+1)*period+6000;
-  await this.ctx.storage.setAlarm(Math.max(now+1000,Math.min(next,grant.expiresAt)));
+  const planned=reconciliationAlarm({running:true,paused:false,pendingArchive:0,flatVerified:false,
+   unresolvedIntent:false,now,nextTradingCandle:Math.min(next,grant.expiresAt)});
+  if(planned!==null)await this.ctx.storage.setAlarm(planned);
  }
  async fetch(req:Request){return this.serial(async()=>{try{
   const action=new URL(req.url).pathname.slice(1),existing=await this.ctx.storage.get<Grant>('grant');
   if(existing&&existing.uid!==req.headers.get('X-TV-UID'))return Response.json({error:'Deployment ownership mismatch'},{status:403});
-  if(action==='status'&&req.method==='GET')return Response.json({grant:existing?{id:existing.id,botId:existing.botId,agentId:existing.agentId||null,accountId:existing.accountId,symbol:existing.symbol,expiresAt:existing.expiresAt}:null,...await this.state(),nextAlarm:await this.ctx.storage.getAlarm(),pendingIntent:await this.ctx.storage.get('pendingIntent'),executionEvents:(await this.ctx.storage.get<ExecutionEvent[]>('executionEvents'))||[],accountLock:await this.ctx.storage.get('accountExecutionLock')});
+  if(action==='ledger'&&req.method==='GET'){
+   if(!existing)return Response.json({error:'No deployed robot'},{status:404});
+   const sql=this.ledger(),broker=await this.ctx.storage.get('brokerSync');
+   return Response.json({source:'durable-object-sql',accountId:existing.accountId,
+    botId:existing.botId,grantId:existing.id,running:await this.ctx.storage.get('running')===true,
+    paused:await this.ctx.storage.get('paused')===true,brokerSync:broker||null,
+    trades:sql.read('trade',60),events:sql.read('event',80),decisions:sql.read('decision',60),
+    counts:sql.counts(),lastArchive:await this.ctx.storage.get('lastSqlArchive')||null,
+    error:await this.ctx.storage.get('sqlTelemetryError')||null});
+  }
+  if(action==='status'&&req.method==='GET')return Response.json({
+   sqlJournal:existing?{source:'durable-object-sql',counts:this.ledger().counts(),
+    brokerSync:await this.ctx.storage.get('brokerSync')||null,
+    lastArchive:await this.ctx.storage.get('lastSqlArchive')||null,
+    pending:this.ledger().pendingCount(),
+    completed:(await this.ctx.storage.get<boolean>('running'))!==true&&
+     this.ledger().pendingCount()===0&&
+     Number((await this.ctx.storage.get<{flatVerified?:boolean;flatConfirmations?:number}>('brokerSync'))?.flatConfirmations||0)>=2}:null,
+   grant:existing?{id:existing.id,botId:existing.botId,agentId:existing.agentId||null,accountId:existing.accountId,symbol:existing.symbol,expiresAt:existing.expiresAt}:null,...await this.state(),nextAlarm:await this.ctx.storage.getAlarm(),pendingIntent:await this.ctx.storage.get('pendingIntent'),executionEvents:(await this.ctx.storage.get<ExecutionEvent[]>('executionEvents'))||[],accountLock:await this.ctx.storage.get('accountExecutionLock')});
   if(req.method!=='POST')return Response.json({error:'POST required'},{status:405});
   const input=await req.json<any>();
   if(action==='acquire'||action==='release'){
@@ -128,6 +243,7 @@ export class PropDAOLiveBot extends DurableObject<any>{
    // Existing positions remain visible and are guarded at order entry; they
    // must not stop independent strategies from scheduling observations.
    await this.ctx.storage.put('grant',grant);await this.ctx.storage.put('running',true);await this.ctx.storage.put('paused',false);
+   await this.ctx.storage.delete('stoppedAt');
    await Promise.all(['lastError','lastEvaluation','lastOrder','lastAccount'].map(key=>this.ctx.storage.delete(key)));
    // Retain the previous runtime events and execution trail across revisions.
    await this.record(`Deployed ${grant.symbol} · risk $${grant.riskUsd} · simulated funds`);
@@ -156,8 +272,18 @@ export class PropDAOLiveBot extends DurableObject<any>{
    await this.record(`Operator-verified flat account · unlocked pending order ${pending.intentId}`);
    return Response.json({reconciled:true,...await this.state(),pendingIntent:null,lastReconciliation:record});
   }
-  if(action==='stop'){await this.ctx.storage.put('running',false);await this.ctx.storage.put('paused',false);await this.ctx.storage.deleteAlarm();await this.record('Stopped automatic entries. Existing positions remain with PropDAO.');return Response.json({running:false,events:(await this.state()).events})}
-  if(action==='pause'){if(!(await this.ctx.storage.get<boolean>('running'))&&!(await this.ctx.storage.get<boolean>('paused')))throw Error('Stopped or halted deployment cannot be paused or resumed. Deploy again.');await this.ctx.storage.put('running',false);await this.ctx.storage.put('paused',true);await this.ctx.storage.deleteAlarm();await this.record('Paused automatic entries. Existing positions remain with PropDAO.');return Response.json({running:false,paused:true,events:(await this.state()).events})}
+  if(action==='stop'){
+   // Revoke entries immediately. Do not hold up the stop acknowledgement on
+   // broker/API/Firebase availability; a durable alarm performs the transfer.
+   const wasRunning=(await this.ctx.storage.get<boolean>('running'))===true;
+   await this.ctx.storage.put('running',false);await this.ctx.storage.put('paused',false);
+   if(wasRunning||!(await this.ctx.storage.get('stoppedAt')))await this.ctx.storage.put('stoppedAt',Date.now());
+   await this.record('Stopped automatic entries. Existing positions remain with PropDAO.');
+   await this.ctx.storage.setAlarm(Date.now()+1000);
+   return Response.json({running:false,events:(await this.state()).events,
+    transfer:{status:'pending-background-reconciliation',pending:this.ledger().pendingCount()}});
+  }
+  if(action==='pause'){if(!(await this.ctx.storage.get<boolean>('running'))&&!(await this.ctx.storage.get<boolean>('paused')))throw Error('Stopped or halted deployment cannot be paused or resumed. Deploy again.');await this.ctx.storage.put('running',false);await this.ctx.storage.put('paused',true);await this.schedule();await this.record('Paused automatic entries. Existing positions remain with PropDAO.');return Response.json({running:false,paused:true,events:(await this.state()).events})}
   if(action==='resume'){
    if(this.env.PROPDAO_LIVE_ENABLED!=='true'||!this.env.PROPDAO_LIVE_INTERNAL_SECRET)throw Error('Live runtime is disabled');
    if(Date.now()>=existing.expiresAt)throw Error('Deployment authorization expired. Deploy with new authorization.');
@@ -174,7 +300,14 @@ export class PropDAOLiveBot extends DurableObject<any>{
   throw Error('Unknown live action');
  }catch(e){return Response.json({error:e instanceof Error?e.message:'Live runtime failed'},{status:400})}})}
  async alarm(){return this.serial(async()=>{
-  const grant=await this.ctx.storage.get<Grant>('grant');if(!grant||!(await this.ctx.storage.get<boolean>('running')))return;
+  const grant=await this.ctx.storage.get<Grant>('grant');if(!grant)return;
+  if(!(await this.ctx.storage.get<boolean>('running'))){
+   try{await this.syncBroker(grant,true);
+    if(!(await this.ctx.storage.get<boolean>('paused')))await this.archiveAll(grant);
+   }catch(error){await this.ctx.storage.put('sqlTelemetryError',error instanceof Error?error.message:'Offline reconciliation unavailable')}
+   finally{await this.schedule()}
+   return;
+  }
   let intentSignal:null|{side:'BUY'|'SELL';intentId:string}=null;
   try{
    if(Date.now()>=grant.expiresAt){await this.ctx.storage.put('running',false);await this.ctx.storage.put('paused',false);await this.record('Authorization expired. New entries stopped.');return;}
@@ -214,6 +347,14 @@ export class PropDAOLiveBot extends DurableObject<any>{
    await this.ctx.storage.put('recentDecisions',[...recent.slice(-119),{
     time:evaluation.time,candleClose:close,action:evaluation.action,reason:evaluation.reason,checks:evaluation.checks
    }]);
+   try{this.ledger().put({kind:'decision',key:grant.id+':'+close,grantId:grant.id,
+    accountId:grant.accountId,botId:grant.botId,time:evaluation.time,
+    payload:{accountId:grant.accountId,botId:grant.botId,grantId:grant.id,codeHash:grant.codeHash,
+     candleClose:close,time:evaluation.time,action:evaluation.action,reason:evaluation.reason,
+     checks:evaluation.checks,marketSource:'Hyperliquid',
+     completedCandles:Object.fromEntries(config.timeframes.map((tf:string)=>[tf,data[tf].at(-1)])),
+     historyCoverage:diagnostics}})}
+   catch(error){await this.ctx.storage.put('sqlTelemetryError',error instanceof Error?error.message:'SQLite decision write failed')}
    await this.record(`Candle ${config.executionTimeframe.toUpperCase()} · ${new Date(close*1000).toISOString()} · ${decision?.action||'WAIT'}${decision?.reason?' · '+decision.reason:''} · history ${config.timeframes.map((tf:string)=>tf.toUpperCase()+' '+diagnostics[tf].received+'/'+diagnostics[tf].requested).join(', ')}`);
    if(decision?.action!=='BUY'&&decision?.action!=='SELL'){await this.ctx.storage.delete('lastError');return;}
    intentSignal={side:decision.action,intentId:'tv-'+grant.id+'-'+close};
@@ -286,6 +427,13 @@ export class PropDAOLiveBot extends DurableObject<any>{
     await this.ctx.storage.put('running',false);await this.ctx.storage.put('paused',false);await this.ctx.storage.put('lastError',error);
     await this.record('Execution halted · '+error);
    }
-  }finally{await this.schedule()}
+  }finally{
+   // Preserve order-entry timing. Historic broker reads run AFTER the strategy
+   // decision and broker execution, never in front of the M1 fill path.
+   try{await this.syncBroker(grant)}catch(error){
+    await this.ctx.storage.put('sqlTelemetryError',error instanceof Error?error.message:'Broker history unavailable');
+   }
+   await this.schedule();
+  }
  })}
 }
