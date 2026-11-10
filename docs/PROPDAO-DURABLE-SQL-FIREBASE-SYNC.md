@@ -54,8 +54,22 @@ After verified completion, the extra alarm can be removed.
   candle, reason, action, actual strategy checks, and the available
   timeframe candle snapshots for future historical diagnosis.
 
-While SQL is active, routine AI reads defer Firestore write-through.
-The Worker archives on stop, but Firestore remains a fallback for
+While SQL is active, the Cloudflare Worker now transfers pending rows to
+Firestore **while trading continues**, without needing AI calls or the user
+to be online. Each batch is at most 60 rows, idempotent and acknowledged.
+Healthy transfers run every five minutes, or every minute while a large
+backlog is draining. Failed transfers retry with exponentially increasing
+intervals, up to 30 minutes, without dropping or marking rows archived.
+
+A high-timeframe worker wakes at least every five minutes for read-only
+broker/ledger maintenance, even if the next strategy candle is hours away.
+Archival is deliberately scheduled after strategy execution, not before a
+new order. Firestore failures are visible as `sqlJournal.lastArchiveError`
+and `sqlJournal.archiveFailures`; they never become fabricated broker fills.
+
+The existing final flush and reconciliation on STOP remain in place. Routine
+AI reads still defer opportunistic Firestore write-through to avoid
+duplicating the Worker's archival writes. Firestore remains a fallback for
 older observations and when the live Worker is unavailable.
 
 ## Rollout and release gate
