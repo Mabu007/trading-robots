@@ -46,7 +46,7 @@ describe('deterministic historical trade diagnostics',()=>{
   const results=[-2,4,-3,-1,6].map((pnl,i)=>({...trade,id:'t'+i,
    pnl,closedAt:(base+i*60_000)/1000}));
   expect(summarizeDeterministicPerformance(results))
-   .toMatchObject({count:5,wins:2,losses:3,profitFactor:2,
+   .toMatchObject({count:5,wins:2,losses:3,profitFactor:1.666667,
     winRatePercent:40,expectancyReportedCurrencyPerTrade:.8,
     maxClosedTradeDrawdownReportedCurrency:4,maxConsecutiveLosses:2});
  });
