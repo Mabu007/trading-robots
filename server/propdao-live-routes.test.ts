@@ -66,6 +66,34 @@ describe('PropDAO live execution authorization',()=>{
   expect(result.events?.map(e=>e.botId).sort()).toEqual(['bot-1','bot-2']);
   expect(fetcher.mock.calls.some(([url])=>String(url).includes(key('bot-3','prop-other')))).toBe(false);
  });
+ it('reports old Worker signals as limited historical evidence, not a complete journal',async()=>{
+  vi.stubEnv('PROPDAO_LIVE_ENABLED','true');
+  vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');
+  vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
+  const {svc,fetcher,saved}=setup();
+  const prefix='propdao-live/v1/'+(process.env.VERCEL_ENV||'development')+'/'+Buffer.from('alice').toString('base64url')+'/';
+  saved.set(prefix+'bot-old.json',JSON.stringify({id:'grant-old',uid:'alice',botId:'bot-old',accountId:'prop-1'}));
+  fetcher.mockImplementation(async(url:string)=>String(url).endsWith('/health')?Response.json({ready:true}):
+   Response.json({grant:{botId:'bot-old',accountId:'prop-1'},
+    events:['2026-11-10T07:45:08.000Z · Candle M1 · 2026-11-10T07:45:00.000Z · SELL']}));
+  const result=await svc.executionHistory('alice','prop-1');
+  expect(result).toMatchObject({available:false,partial:true});
+  expect(result.events).toMatchObject([{stage:'SIGNAL',side:'SELL',botId:'unattributed'}]);
+  expect(fetcher.mock.calls.filter(([url])=>String(url).endsWith('/status'))).toHaveLength(1);
+ });
+ it('does not interpret an absent bot Worker grant as a complete empty activity log',async()=>{
+  vi.stubEnv('PROPDAO_LIVE_ENABLED','true');
+  vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');
+  vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
+  const {svc,fetcher,saved}=setup();
+  const prefix='propdao-live/v1/'+(process.env.VERCEL_ENV||'development')+'/'+Buffer.from('alice').toString('base64url')+'/';
+  saved.set(prefix+'bot-1.json',JSON.stringify({id:'grant-1',uid:'alice',botId:'bot-1',accountId:'prop-1',runtimeScope:'bot'}));
+  fetcher.mockImplementation(async(url:string)=>String(url).endsWith('/health')?Response.json({ready:true}):
+   Response.json({grant:null,events:[],executionEvents:[]}));
+  const result=await svc.executionHistory('alice','prop-1');
+  expect(result).toMatchObject({available:false,partial:true});
+  expect(result).toHaveProperty('unverifiedScopes',['bot-1']);
+ });
  it('reports unverified scope rather than asserting that no trading took place',async()=>{
   vi.stubEnv('PROPDAO_LIVE_ENABLED','true');
   vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');
