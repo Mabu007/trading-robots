@@ -3,7 +3,7 @@ import type {ToolTrace} from '../src/tool-trace.ts';
 /** Independent acceptance checks: no broker writes, no model calls, no
  * fabricated trades. This verifies evidence from actual platform sources. */
 type GateInput={
- accountId:string;tradeId:string;ownedDemoAccount:boolean;
+ ownerUid:string;accountId:string;tradeId:string;ownedDemoAccount:boolean;
  investigation:any;archivedTrade:any;archivedFill:any;
  revision:any;chatProof:any;chatTrace:ToolTrace[]|null;
  workerHealth:any;productionSha:string|null;configuredModel:string|null;
@@ -53,8 +53,8 @@ export function evaluatePropDAOReleaseGate(input:GateInput){
   Boolean(input.productionSha)&&input.workerHealth.releaseSha===input.productionSha;
  add('Cloudflare and Vercel release SHA and entry gate',Boolean(worker),
   'Authenticated Worker health SHA must match deployed production Vercel SHA with entries enabled');
- const proof=input.chatProof?.ownerUid!==undefined&&input.chatProof.ownerUid&&
-  input.chatProof.ownerUid===input.chatProof.signedInOwner&&
+ const proof=typeof input.chatProof?.ownerUid==='string'&&
+  input.chatProof.ownerUid===input.ownerUid&&
   input.chatProof.conversationId===input.conversationId&&
   input.chatProof.receiptId===input.receiptId&&
   input.chatProof.completed===true&&
