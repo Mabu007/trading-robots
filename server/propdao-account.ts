@@ -160,7 +160,12 @@ export class PropDAOAccounts {
    [t.qty,t.entry,t.exit,t.pnl].some(v=>typeof v!=='number'||!Number.isFinite(v))||
    [t.openedAt,t.closedAt,t.fee].some(v=>v!==null&&!Number.isFinite(v))))
    throw Error('Invalid PropDAO trade history');
-  return trades;
+  // The runtime validator above establishes these numeric broker fields;
+  // preserve nullable timestamps and optional provider link identifiers.
+  return trades as Array<{id:string;symbol:string;side:'BUY'|'SELL';
+   qty:number;entry:number;exit:number;pnl:number;
+   openedAt:number|null;closedAt:number|null;reason:string;fee:number|null;
+   positionId:string|null;intentId:string|null;orderId:string|null}>;
  }
  /** Lightweight live-reconciliation read. DO alarms must NOT page history. */
  async recentTrades(uid:string,id:string){
