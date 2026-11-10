@@ -7,7 +7,7 @@ import {TF_SECONDS} from '../shared/trading';
 import {evaluateAutonomousEquity,type EvaluationEnvelope} from '../shared/propdao-autonomous-guard';
 import {parseUpstreamJson,TemporaryReadError,retryableReadError} from './propdao-upstream-response';
 import {MAX_EXECUTION_EVENTS,type ExecutionEvent,type ExecutionStage} from '../shared/propdao-execution-journal';
-import {PropDAOSqlJournal,reconciliationAlarm,type SqlHandle} from './propdao-sql-journal';
+import {PropDAOSqlJournal,reconciliationAlarm,nextLiveArchiveAt,type SqlHandle} from './propdao-sql-journal';
 type Grant={autoPolicy?:EvaluationEnvelope;id:string;uid:string;botId:string;agentId?:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;riskReward?:number;leverage:number;issuedAt:number;expiresAt:number};
 type Status={running:boolean;paused:boolean;lastError?:string;lastEvaluation?:any;lastOrder?:any;lastAccount?:any;events:string[];lastMarketData?:any;recentDecisions?:any[];lastReconciliation?:any};
 const interval:Record<string,string>={m1:'1m',m5:'5m',m15:'15m',m30:'30m',h1:'1h',h4:'4h',d1:'1d'};
@@ -75,6 +75,27 @@ export class PropDAOLiveBot extends DurableObject<any>{
    if(result.pending===0)return {pending:0,uploaded};
   }
   return {pending:this.ledger().pendingCount(),uploaded};
+ }
+ /** Transfer retained SQL evidence while trading continues. This is deliberately
+  * telemetry only: failures never execute, halt or retry an order.
+  * Stop alarms still perform a final, retried archival sweep. */
+ private async archiveWhileRunning(grant:Grant){
+  const pending=this.ledger().pendingCount();
+  if(pending===0)return;
+  const now=Date.now(),lastAttempt=await this.ctx.storage.get<number>('lastSqlArchiveAttempt')||0;
+  const failures=await this.ctx.storage.get<number>('sqlArchiveFailures')||0;
+  const due=nextLiveArchiveAt(now,lastAttempt,failures,pending);
+  if(due===null||now<due)return;
+  await this.ctx.storage.put('lastSqlArchiveAttempt',now);
+  try{
+   await this.archiveSql(grant);
+   await this.ctx.storage.put('sqlArchiveFailures',0);
+   await this.ctx.storage.delete('sqlArchiveError');
+  }catch(error){
+   await this.ctx.storage.put('sqlArchiveFailures',Math.min(100,failures+1));
+   await this.ctx.storage.put('sqlArchiveError',
+    (error instanceof Error?error.message:'Firestore sync unavailable').slice(0,240));
+  }
  }
  private tail:Promise<unknown>=Promise.resolve();
  private serial<T>(fn:()=>Promise<T>):Promise<T>{const next=this.tail.then(fn,fn);this.tail=next.catch(()=>{});return next}
@@ -174,8 +195,16 @@ export class PropDAOLiveBot extends DurableObject<any>{
   }
   const timeframe=parseStrategyConfig(grant.code).executionTimeframe,period=TF_SECONDS[timeframe]*1000,now=Date.now();
   const next=(Math.floor((now-6000)/period)+1)*period+6000;
+
+  // A high-timeframe strategy still reconciles its broker and Firestore journal
+  // while the user is offline, rather than waiting hours for a trading candle.
+  const nextArchive=nextLiveArchiveAt(now,
+   await this.ctx.storage.get<number>('lastSqlArchiveAttempt')||0,
+   await this.ctx.storage.get<number>('sqlArchiveFailures')||0,this.ledger().pendingCount());
+  const nextWake=Math.min(next,grant.expiresAt,now+5*60_000,
+   nextArchive===null?Infinity:Math.max(now+1000,nextArchive));
   const planned=reconciliationAlarm({running:true,paused:false,pendingArchive:0,flatVerified:false,
-   unresolvedIntent:false,now,nextTradingCandle:Math.min(next,grant.expiresAt)});
+   unresolvedIntent:false,now,nextTradingCandle:nextWake});
   if(planned!==null)await this.ctx.storage.setAlarm(planned);
  }
  async fetch(req:Request){return this.serial(async()=>{try{
@@ -195,6 +224,8 @@ export class PropDAOLiveBot extends DurableObject<any>{
    sqlJournal:existing?{source:'durable-object-sql',counts:this.ledger().counts(),
     brokerSync:await this.ctx.storage.get('brokerSync')||null,
     lastArchive:await this.ctx.storage.get('lastSqlArchive')||null,
+    lastArchiveError:await this.ctx.storage.get('sqlArchiveError')||null,
+    archiveFailures:await this.ctx.storage.get<number>('sqlArchiveFailures')||0,
     pending:this.ledger().pendingCount(),
     completed:(await this.ctx.storage.get<boolean>('running'))!==true&&
      this.ledger().pendingCount()===0&&
@@ -432,6 +463,11 @@ export class PropDAOLiveBot extends DurableObject<any>{
    // decision and broker execution, never in front of the M1 fill path.
    try{await this.syncBroker(grant)}catch(error){
     await this.ctx.storage.put('sqlTelemetryError',error instanceof Error?error.message:'Broker history unavailable');
+   }
+   // Separate failures: an unavailable broker must not block transfer of
+   // already captured SQL evidence, or affect order execution.
+   try{await this.archiveWhileRunning(grant)}catch(error){
+    await this.ctx.storage.put('sqlArchiveError',error instanceof Error?error.message:'Live archival unavailable');
    }
    await this.schedule();
   }
