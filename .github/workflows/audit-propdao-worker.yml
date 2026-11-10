@@ -1,0 +1,35 @@
+name: PropDAO Cloudflare read-only release audit
+on:
+  push:
+    branches:
+      - feat/propdao-safe-release-gate-20261110
+    paths:
+      - 'scripts/verify-propdao-worker.mjs'
+      - 'scripts/verify-propdao-worker.test.mjs'
+      - 'workers/wrangler.propdao-live.jsonc'
+      - 'workers/propdao-live-worker.ts'
+      - '.github/workflows/audit-propdao-worker.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  read-only-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PROPDAO_LIVE_INTERNAL_SECRET: ${{ secrets.PROPDAO_LIVE_INTERNAL_SECRET }}
+      PROPDAO_WORKER_URL: https://trading-vibes-propdao-live.gtebogo75.workers.dev
+      TV_EXPECT_ENTRY_GATE: 'true'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b163ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Check audit contract without network calls
+        run: node --test scripts/verify-propdao-worker.test.mjs
+      - name: Read currently deployed Cloudflare bindings and authenticated health (NO WRITES)
+        run: node scripts/verify-propdao-worker.mjs
