@@ -247,8 +247,8 @@ app.post('/api/trading-desk/release-acceptance',async(req,res)=>{
  const {accountId,tradeId,conversationId,receiptId}=req.body||{};
  const valid=(v:unknown)=>typeof v==='string'&&/^[A-Za-z0-9_-]{1,100}$/.test(v);
  if(!valid(accountId)||!valid(tradeId)||!valid(conversationId)||
-    typeof receiptId!=='string'||!receiptIdPattern.test(receiptId))
-  return res.status(400).json({passed:false,error:'Exact account, closed trade, conversation and receipt IDs required'});
+    (receiptId!==undefined&&(typeof receiptId!=='string'||!receiptIdPattern.test(receiptId))))
+  return res.status(400).json({passed:false,error:'Exact account, closed trade and conversation IDs required; receipt ID must be valid when supplied'});
  if(!FirestoreStore.configured())
   return res.status(503).json({passed:false,error:'Firebase server archival unavailable'});
  const hashId=(...parts:string[])=>createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0,40);
@@ -260,14 +260,16 @@ app.post('/api/trading-desk/release-acceptance',async(req,res)=>{
   const investigation=await tradingDesk.inspect(uid,accountId,tradeId);
   const link=investigation?.available?investigation.attribution:null;
   const ownerRoot='users/'+uid+'/';
-  const [archivedTrade,archivedFill,revision,chatProof,chatTrace,personalAI]=await Promise.all([
+  const chatProof=await marketplace.store.get(ownerRoot+'aiChatProofs/'+conversationId).catch(()=>null);
+  const resolvedReceiptId=receiptId??(typeof chatProof?.receiptId==='string'&&
+   receiptIdPattern.test(chatProof.receiptId)?chatProof.receiptId:null);
+  const [archivedTrade,archivedFill,revision,chatTrace,personalAI]=await Promise.all([
    marketplace.store.get(ownerRoot+'liveTrades/'+hashId('propdao',accountId,tradeId)).catch(()=>null),
    link?.botId&&link?.eventId?marketplace.store.get(ownerRoot+'liveExecutionEvents/'+
     hashId('propdao-event',accountId,link.botId,link.eventId)).catch(()=>null):Promise.resolve(null),
    link?.botId&&link?.grantId?propdaoLiveService.revision(uid,link.botId,link.grantId)
     .catch(()=>({available:false})):Promise.resolve({available:false}),
-   marketplace.store.get(ownerRoot+'aiChatProofs/'+conversationId).catch(()=>null),
-   ChatToolReceipt.read(marketplace.store,uid,conversationId,receiptId).catch(()=>null),
+   resolvedReceiptId?ChatToolReceipt.read(marketplace.store,uid,conversationId,resolvedReceiptId).catch(()=>null):Promise.resolve(null),
    openRouterAccounts.load(uid).catch(()=>null)
   ]);
   const workerOrigin=process.env.PROPDAO_LIVE_RUNTIME_URL;
@@ -296,7 +298,7 @@ app.post('/api/trading-desk/release-acceptance',async(req,res)=>{
    ownedDemoAccount,investigation,archivedTrade,archivedFill,revision,
    chatProof,chatTrace,workerHealth,
    productionSha:process.env.VERCEL_GIT_COMMIT_SHA||process.env.TV_RELEASE_SHA||null,
-   configuredModel,receiptId,conversationId});
+   configuredModel,receiptId:resolvedReceiptId??'',conversationId});
   return res.status(report.passed?200:409).json(report);
  }catch(error){
   return res.status(503).json({passed:false,error:error instanceof Error?error.message:'Release evidence unavailable'});
