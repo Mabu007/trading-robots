@@ -1,11 +1,13 @@
 import {createHash} from 'node:crypto';
 import type {RecordStore} from './firestore-store.ts';
 import {safeExecutionEvents,type ExecutionEvent} from '../shared/propdao-execution-journal.ts';
+import {reconcileTradeIdentity,type BrokerTradeEvidence,type TradeLink} from './trade-attribution.ts';
+import {diagnoseBrokerTrade,summarizeDeterministicPerformance,type DecisionEvidence} from './trade-diagnostics.ts';
 
-type Trade={id:string;symbol:string;side:'BUY'|'SELL';qty:number;entry:number;exit:number;pnl:number;openedAt:number|null;closedAt:number|null;reason:string;fee:number|null;positionId?:string|null;intentId?:string|null};
+type Trade={id:string;symbol:string;side:'BUY'|'SELL';qty:number;entry:number;exit:number;pnl:number;openedAt:number|null;closedAt:number|null;reason:string;fee:number|null;positionId?:string|null;intentId?:string|null;orderId?:string|null};
 type Account={accountId:string;status:string};
 type Broker={list:(uid:string)=>Promise<{connected:boolean;accounts:Account[]}>;recentTrades:(uid:string,accountId:string)=>Promise<Trade[]>};
-type Decision={accountId:string;botId:string;grantId:string;codeHash:string|null;candleClose:number;time:number;action:string;reason:string;checks:unknown[]};
+type Decision=DecisionEvidence;
 type History=(uid:string,accountId:string)=>Promise<{available:boolean;partial?:boolean;events?:ExecutionEvent[]|null;
  decisionSnapshots?:Decision[];liveTrades?:Trade[];sqlLiveAvailable?:boolean;
  sqlCoverage?:Array<{botId:string;running:boolean;brokerSync?:{time:number;capped?:boolean}|null}>;
@@ -23,14 +25,11 @@ const validTrade=(v:any):v is Trade=>v&&typeof v.id==='string'&&v.id.length>0&&v
  [v.qty,v.entry,v.exit,v.pnl].every((x:unknown)=>typeof x==='number'&&Number.isFinite(x));
 const sum=(values:number[])=>Math.round(values.reduce((a,b)=>a+b,0)*1e6)/1e6;
 
-/** Identity attribution is PROVEN only by an exact provider position/intent ID. */
-export function attributeTrade(t:Trade,events:ExecutionEvent[]){
- const matches=events.filter(e=>e.stage==='PROTECTED_FILL'&&e.symbol===t.symbol&&e.side===t.side&&
-  ((t.positionId&&e.positionId===t.positionId)||(t.intentId&&e.intentId===t.intentId)));
- const identities=[...new Set(matches.map(e=>e.botId+':'+e.grantId))];
- if(identities.length!==1)return {botId:null,grantId:null,attribution:'unattributed'};
- const chosen=matches[0];
- return {botId:chosen.botId,grantId:chosen.grantId,attribution:'exact-provider-identity'};
+/** Existing API kept for prior callers; live callers pass authenticated accountId. */
+export function attributeTrade(t:Trade&{accountId?:string},events:ExecutionEvent[]):TradeLink{
+ const scopes=[...new Set(events.map(e=>e.accountId))];
+ const accountId=t.accountId??(scopes.length===1?scopes[0]:'');
+ return reconcileTradeIdentity({...t,accountId},events);
 }
 export function summarizeDay(trades:Array<Trade&{accountId:string;botId:string|null;attribution:string}>,day:string,coverage:{
  accountsChecked:number;failures:string[];capped:string[];journalWarnings:string[];ledgerAvailable:boolean;writeFailures:number;
@@ -40,7 +39,7 @@ export function summarizeDay(trades:Array<Trade&{accountId:string;botId:string|n
   .sort((a,b)=>(timestamp(b.closedAt)||0)-(timestamp(a.closedAt)||0));
  const losses=today.filter(t=>t.pnl<0),wins=today.filter(t=>t.pnl>0),decided=today.filter(t=>t.pnl!==0);
  const byRobot=new Map<string,{botId:string;trades:number;losses:number;pnl:number}>();
- for(const t of today){const k=t.botId||'unattributed',g=byRobot.get(k)||{botId:k,trades:0,losses:0,pnl:0};
+ for(const t of today){const k=t.attribution==='exact-provider-identity'&&t.botId?t.botId:'unattributed-or-probable',g=byRobot.get(k)||{botId:k,trades:0,losses:0,pnl:0};
   g.trades++;g.losses+=Number(t.pnl<0);g.pnl+=t.pnl;byRobot.set(k,g);}
  return {available:true,day,timeZone:'Africa/Johannesburg',window:'00:00–23:59 SAST',
   source:'Owner-authenticated PropDAO closed trades, Cloudflare journal, Firestore observation ledger',
@@ -56,13 +55,16 @@ export function summarizeDay(trades:Array<Trade&{accountId:string;botId:string|n
   worstLoss:losses.length?Math.min(...losses.map(t=>t.pnl)):null,
   avgLoss:losses.length?sum(losses.map(t=>t.pnl))/losses.length:null,
   stopLossCount:today.filter(t=>/^(?:SL|STOP[_ -]?LOSS|STOPPED[_ -]?OUT)$/i.test(t.reason)).length,
-  matchedRobotTrades:today.filter(t=>t.botId!==null).length,
-  unattributedTrades:today.filter(t=>t.botId===null).length,
+  matchedRobotTrades:today.filter(t=>t.attribution==='exact-provider-identity').length,
+  probableRobotTrades:today.filter(t=>t.attribution==='probable-entry-evidence').length,
+  conflictingTrades:today.filter(t=>t.attribution==='conflicting-evidence').length,
+  unattributedTrades:today.filter(t=>t.attribution!=='exact-provider-identity'&&t.attribution!=='probable-entry-evidence').length,
   byRobot:[...byRobot.values()].map(g=>({...g,pnl:Math.round(g.pnl*1e6)/1e6})),
   recentLosses:losses.slice(0,12).map(t=>({accountId:t.accountId,tradeId:t.id,botId:t.botId,attribution:t.attribution,
-   side:t.side,symbol:t.symbol,pnl:t.pnl,fee:t.fee,reason:t.reason,entry:t.entry,exit:t.exit,
+   side:t.side,symbol:t.symbol,pnl:t.pnl,fee:t.fee,reason:t.reason,entry:t.entry,exit:t.exit,confidence:t.attribution==='exact-provider-identity'?'verified':t.attribution==='probable-entry-evidence'?'probable':'unknown',
    openedAtUTC:timestamp(t.openedAt)!==null?new Date(timestamp(t.openedAt)!).toISOString():null,
    closedAtUTC:timestamp(t.closedAt)!==null?new Date(timestamp(t.closedAt)!).toISOString():null})),
+  performanceAllObserved:summarizeDeterministicPerformance(today.map(t=>({...t,accountId:t.accountId}))),
   limitation:'Only broker-recorded closed trades are counted. An SL reason does not prove indicator failure. Worker history can be incomplete. The broker supplies up to 50 trades per read per account. Firestore retains only trades observed by this system.'};
 }
 type ArchiveRow={kind:'trade'|'event'|'decision';key:string;grantId:string;accountId:string;botId:string;time:number;payload:Record<string,unknown>};
@@ -117,7 +119,10 @@ export class TradingDesk{
      checks:Array.isArray(v.checks)?v.checks.slice(0,16):[],
      completedCandles:v.completedCandles&&typeof v.completedCandles==='object'&&!Array.isArray(v.completedCandles)?v.completedCandles:null,
      historyCoverage:v.historyCoverage&&typeof v.historyCoverage==='object'&&!Array.isArray(v.historyCoverage)?v.historyCoverage:null,
-     marketSource:'Hyperliquid',source:'durable-object-sql-strategy-decision',
+     marketSource:'Hyperliquid',
+     executionTimeframe:typeof v.executionTimeframe==='string'?v.executionTimeframe:null,
+     recentCandles:Array.isArray(v.recentCandles)?v.recentCandles.slice(-20):[],
+     source:'durable-object-sql-strategy-decision',
      observedAt:Date.now(),ledgerVersion:1};
    }
    // create is atomic and idempotent; an existing document with the same
@@ -148,6 +153,7 @@ export class TradingDesk{
   const failures:string[]=[],capped:string[]=[],journalWarnings:string[]=[];
   let writeFailures=0,tradeWrites=0,eventWrites=0,decisionWrites=0;
   let liveSqlAccountCount=0,liveSqlTradeCount=0;
+  const allEvents=new Map<string,ExecutionEvent[]>();
   for(const accountId of accounts){
    try{
     // Worker SQL is the durable live source. Broker reads independently
@@ -174,6 +180,25 @@ export class TradingDesk{
      if(!activity.available||activity.partial)journalWarnings.push(accountId+': '+(activity.error||'Worker history incomplete'));
      if(activity.sqlCoverage?.some(x=>x.brokerSync?.capped))capped.push(accountId+': DO last broker sample capped');
     }else journalWarnings.push(accountId+': Worker journal unavailable');
+    if(this.store){
+     try{
+      let archived:Record<string,unknown>[]=[];
+      if(this.store.page){
+       let after:string|undefined;
+       for(let batch=0;batch<5;batch++){
+        const result=await this.store.page('users/'+uid+'/liveExecutionEvents','accountId',accountId,after,100);
+        archived.push(...result.items);
+        if(!result.next)break;
+        after=result.next;
+        if(batch===4)journalWarnings.push(accountId+': Archived execution evidence capped at 500 rows');
+       }
+      }else archived=(await this.store.query('users/'+uid+'/liveExecutionEvents','accountId',accountId)).slice(0,500);
+      const merged=new Map(events.map(e=>[e.id,e]));
+      for(const event of safeExecutionEvents(archived,accountId))if(!merged.has(event.id))merged.set(event.id,event);
+      events=[...merged.values()].sort((a,b)=>b.time-a.time).slice(0,500);
+     }catch{journalWarnings.push(accountId+': Archived execution journal unavailable');}
+    }
+    allEvents.set(accountId,events);
     const byTradeId=new Map<string,Trade>();
     for(const trade of doTrades)byTradeId.set(trade.id,trade);
     for(const trade of brokerTrades.filter(validTrade))byTradeId.set(trade.id,trade);
@@ -200,7 +225,7 @@ export class TradingDesk{
      }));
     }
     const documents=trades.filter(validTrade).map(t=>{
-     const scope=hash('propdao',accountId,t.id),link=attributeTrade(t,events);
+     const scope=hash('propdao',accountId,t.id),link=attributeTrade({...t,accountId},events);
      const {id:providerTradeId,...brokerFields}=t;
      const record={...brokerFields,providerTradeId,accountId,...link,
       localDay:timestamp(t.closedAt)!==null?sastDay(timestamp(t.closedAt)!):null,
@@ -249,6 +274,26 @@ export class TradingDesk{
      if(records.length>500)journalWarnings.push('Firestore daily query capped at 500 documents');
     }
    }catch{ledgerAvailable=false;journalWarnings.push('Firestore ledger read unavailable');}
+  }
+  // Archived trades are re-linked using persisted execution identities,
+  // but a prior exact match cannot be downgraded by incomplete new evidence.
+  for(const [key,t] of retained){
+   const events=allEvents.get(t.accountId);
+   if(!events?.length)continue;
+   const link=attributeTrade(t,events);
+   if(link.attribution==='exact-provider-identity'||
+      (link.attribution==='probable-entry-evidence'&&t.attribution!=='exact-provider-identity')){
+    const previous=t.attribution;
+    retained.set(key,{...t,...link});
+    if(this.store&&previous!==link.attribution){
+     try{
+      const path=root+'/'+key,prior=await this.store.get(path);
+      if(prior?.providerTradeId===t.id&&prior?.accountId===t.accountId&&
+         prior.attribution!=='exact-provider-identity')
+       await this.store.put(path,{...prior,...link});
+     }catch{writeFailures++;journalWarnings.push(t.accountId+': Attribution projection write failed');}
+    }
+   }
   }
   return {...summarizeDay([...retained.values()],day,{accountsChecked:accounts.length,failures,capped,journalWarnings,ledgerAvailable,writeFailures}),
    fetchedAt:new Date(now).toISOString(),
