@@ -11,7 +11,7 @@ export function conversationRobot(message:string,turns:Turn[],bots:CloudBot[]):C
  if(explicit.length>1)return null; // never select one of two named robots for an edit
  const direct=resolveCodeReference(message,bots);
  if(direct)return direct.bot;
- if(!/\b(robot|bot|strategy|code|script|it|that|this|improv|better|change|edit|modify|fix|backtest|explain|analy[sz]e|source|signals?|trades?|positions?|orders?|fills?|yet|now|currently|market|volatility|threshold|conditions?)\b/i.test(message))return null;
+ if(!/\b(robot|bot|strategy|code|script|it|that|this|improv|better|change|edit|modify|fix|backtest|explain|analy[sz]e|source|signals?|trades?|positions?|orders?|fills?|yet|now|currently|market|volatility|threshold|conditions?|loss(?:es)?|loses?|losing|lost|drawdown|performance|pnl|profit|stop.?out|stopped|win.?rate)\b/i.test(message))return null;
  for(const turn of turns.slice(-28).reverse()){
   if(turn.role!=='user')continue;
   const matched=resolveCodeReference(turn.content,bots);

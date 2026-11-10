@@ -2,6 +2,7 @@ import {LandingPage} from './components/LandingPage';
 import {displayTime} from './display-time';
 import {chatBacktestDates} from './chat-backtest-dates';
 import {explicitActionRequest,explicitBacktestRequest,isPendingCreateAnswer,isPendingRobotChoice,needsLiveBotContext} from './chat-action-boundary';
+import {wantsLiveTradeEvidence} from './live-trade-intent';
 import {ChatEvidence} from './components/ChatEvidence';
 import {WatchOutputFields,type MonitorOutput} from './components/WatchOutputFields';
 import {updateToolTrace,type ToolTrace} from './tool-trace';
@@ -505,7 +506,11 @@ function App(){
     if(!chosen){
      setChat([...next,{role:'assistant',content:'I could not match that name to a saved robot. Select one of the options below or type its exact name.'}]);return;
     }
-    forcedBotId=chosen.id;forcedCommand=assistantTask.action;message=assistantTask.action+' "'+chosen.name+'"';
+    forcedBotId=chosen.id;forcedCommand=assistantTask.action;
+    message=assistantTask.question?assistantTask.question+' about "'+chosen.name+'"':assistantTask.action+' "'+chosen.name+'"';
+    // Restore the original question for the model after the user selects a
+    // robot in the interactive question card. Do not erase the loss inquiry.
+    if(assistantTask.question)userMessage.content=message;
     setAssistantTask(null);
    }else if(assistantTask?.kind==='choose-robot')setAssistantTask(null);
 
@@ -514,7 +519,21 @@ function App(){
   const requestedBot=forcedBotId?cloudBots.find(bot=>bot.id===forcedBotId):requestedCode?cloudBots.find(bot=>bot.id===requestedCode.botId):undefined;
   const named=resolveCodeReference(message,cloudBots);
   const subject=requestedCode||forcedBotId?null:conversationRobot(message,prior,cloudBots);
-  const referenced=requestedBot?{bot:requestedBot,confidence:'exact' as const}:requestedCode?null:named??(subject?{bot:subject,confidence:'unique' as const}:null);
+  let referenced=requestedBot?{bot:requestedBot,confidence:'exact' as const}:requestedCode?null:named??(subject?{bot:subject,confidence:'unique' as const}:null);
+  if(!referenced&&!requestedCode&&!attachedContext&&wantsLiveTradeEvidence(message)){
+   const candidates=cloudBots.filter(bot=>bot.venue==='propdao');
+   if(candidates.length===1)referenced={bot:candidates[0],confidence:'unique' as const};
+   else if(candidates.length>1){
+    // Existing two-choice robot question UI. Do not silently choose the
+    // current editor, or replace missing live trades with backtest results.
+    setAssistantTask({kind:'choose-robot',action:'status',robotIds:candidates.slice(0,8).map(bot=>bot.id),question:message.slice(0,700)});
+    setChat([...next,{role:'assistant',content:'Which PropDAO robot should I investigate? I need the correct broker account to read recent losses. Choose a robot below; I will not run a backtest.'}]);
+    return;
+   }else{
+    setChat([...next,{role:'assistant',content:'I can investigate actual broker losses, but I cannot identify a saved PropDAO robot in your account. Which connected PropDAO account or live robot should I examine? No backtest is needed.'}]);
+    return;
+   }
+  }
   const matchingAnalysis=codeAnalyses.find(a=>message.toLowerCase().includes(a.name.toLowerCase()));
   const directWatch=/\b(track|monitor|watch|notify|alert)\b/i.test(message)&&/\b(sweep|liquidity|volatility|atr)\b/i.test(message);
   const directMarketAnalysis=(/\b(liquidity sweeps?|volatility profile|market volatility|atr\s*14|volatility of)\b/i.test(message)&&/\b(how many|today|yesterday|last|what|show|scan|calculate|run|check|analy[sz]e|find|count|profile)\b/i.test(message))||Boolean(matchingAnalysis&&/\b(run|execute|scan|check|analy[sz]e|calculate)\b/i.test(message));
@@ -691,11 +710,11 @@ function App(){
     void cloudClient?.saveTradingPreferences(learned).catch(()=>undefined);
   }
   // Read-only bot status is evidence to the model, never canned reply text.
-  const robotInsightIntent=command==='status'||(
+  const robotInsightIntent=command==='status'||wantsLiveTradeEvidence(message)||(
    /\b(no trades?|no signals?|no entries|idle|not trading|bot doing|robot doing|agent doing|bot up to|how(?:'s| is) (?:my |the )?(?:bot|robot|agent)|why (?:isn't|is not|hasn't|has not|didn't|did not).{0,70}(?:trade|signal)|market (?:right now|specifically now|suitable for)|live logs?)\b/i.test(message)
    &&command!=='stop'&&command!=='deploy');
   if(robotInsightIntent&&command!=='stop'&&command!=='deploy')command=null;
-  const wantsLiveEvidence=needsLiveBotContext(submittedMessage)||
+  const wantsLiveEvidence=needsLiveBotContext(message)||wantsLiveTradeEvidence(message)||
    Boolean(referenced?.bot&&/\b(?:now|today|yet|currently|what's|whats|how's|hows|still|anything new)\b/i.test(submittedMessage));
   const insightBot=((command===null||command==='status')&&!attachedContext&&wantsLiveEvidence&&
    !/\b(?:saved backtest|historical backtest|backtest results?|code review|explain the source)\b/i.test(submittedMessage)&&(
@@ -828,7 +847,7 @@ ${attachedContext?.kind==='trade-audit'?'[Included in the attached audit context
 Latest backtest errors or output:
 ${logs.slice(-8).join('\n')||'None'}
 Latest backtest metrics: ${result?JSON.stringify(result.metrics):'No completed backtest yet'}`:'No agent selected. The user can learn and converse without a strategy. Do not describe starter code as their strategy.';
-   const system=`ROBOT OBSERVABILITY: For deployed PropDAO questions, use the server's owner-checked getPropDAORobotOperations read. A running Worker proves scheduling, not broker fills, market-feed health or successful signals. Broker closed trades are account-scoped: never attribute one to this robot without matched execution evidence. A saved backtest with 205 trades establishes zero verified live trades by itself. WAIT without an explicit reason does not reveal which EMA, RSI, ATR or structure threshold failed. Do not invent condition readings or claim low volatility without measured data. Explain current facts with timestamps, verified exposure and the difference between reference candles and broker execution. Answer the user directly before offering follow-ups.
+   const system=`ROBOT OBSERVABILITY: For deployed PropDAO questions, use the server's owner-checked getPropDAORobotOperations read. A running Worker proves scheduling, not broker fills, market-feed health or successful signals. Broker closed trades are account-scoped: never attribute one to this robot without matched execution evidence. A saved backtest with 205 trades establishes zero verified live trades by itself. For a question about losses, extract and interpret the authenticated PropDAO closed-account-trades report and do NOT tell the user you only have saved backtests. If broker trade history cannot be verified, name the failure and ask one clear question about the target. Report broker data as account-wide until linked provider position/intent IDs identify this robot. WAIT without an explicit reason does not reveal which EMA, RSI, ATR or structure threshold failed. Do not invent condition readings or claim low volatility without measured data. Explain current facts with timestamps, verified exposure and the difference between reference candles and broker execution. Answer the user directly before offering follow-ups.
 
 CONVERSATION ROBOT TARGET: ${focusedCode?'Robot '+focusedCode.bot.name+', saved robot ID '+focusedCode.bot.id+', venue '+focusedCode.bot.venue+', market '+focusedCode.bot.asset+' (not the editor bot '+name+')':'No verified named robot loaded; never assume the current editor is the robot the user refers to.'}. Never confuse two saved robot identities. An edit proposal and Apply button must name this exact robot; no code changes are saved until approved.
 SAVED TRADING PREFERENCES (user-controlled defaults, not trade authorization): ${JSON.stringify(tradingPreferences)}. Reuse the user's known market, venue, timeframe and backtest preferences when reasonable. New explicit instructions always override preferences. Do not repeatedly ask details already established in this chat or saved defaults. If a necessary target is ambiguous, ask one short, concrete question; for supported robot workflows the interface supplies two selectable options and a third custom answer. Never announce an action as completed without a confirmed result.

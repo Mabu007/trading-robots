@@ -9,7 +9,7 @@ export const defaultTradingPreferences:TradingPreferences={
 export type ConversationTask=
  |{kind:'create';seed:string;asset?:string;venue?:Venue;name?:string}
  |{kind:'backtest';botId:string;botName:string}
- |{kind:'choose-robot';action:'edit'|'backtest'|'deploy'|'status'|'stop';robotIds:string[]};
+ |{kind:'choose-robot';action:'edit'|'backtest'|'deploy'|'status'|'stop';robotIds:string[];question?:string};
 const venues:Venue[]=['propdao','hyperliquid','valr','ctrader'];
 export function verifiedPreferences(raw:unknown):TradingPreferences{
  const o=raw&&typeof raw==='object'?raw as Record<string,unknown>:{};
@@ -78,6 +78,6 @@ export function saneTask(raw:unknown):ConversationTask|null{
  if(o.kind==='create'&&typeof o.seed==='string'&&o.seed.length<=1700)
   return {kind:'create',seed:o.seed,asset:typeof o.asset==='string'?o.asset:undefined,venue:venues.includes(o.venue as Venue)?o.venue as Venue:undefined,name:typeof o.name==='string'?o.name:undefined};
  if(o.kind==='choose-robot'&&['edit','backtest','deploy','status','stop'].includes(String(o.action))&&Array.isArray(o.robotIds))
-  return {kind:'choose-robot',action:o.action as 'edit'|'backtest'|'deploy'|'status'|'stop',robotIds:o.robotIds.filter(x=>typeof x==='string').slice(0,8)};
+  return {kind:'choose-robot',action:o.action as 'edit'|'backtest'|'deploy'|'status'|'stop',robotIds:o.robotIds.filter(x=>typeof x==='string').slice(0,8),...(typeof o.question==='string'?{question:o.question.slice(0,700)}:{})};
  return null;
 }
