@@ -1,6 +1,7 @@
 import {vibesPersona,vibesResearchStyle} from '../shared/vibes-persona.ts';
 import {validateAIMessageBudget} from './ai-message-limits.ts';
 import {intervalMs} from './market-data.ts';
+import {explicitBacktestRequest} from '../src/chat-action-boundary.ts';
 import {filterReadiness} from '../src/strategy-check-readiness.ts';
 import {completedMarketEvidence} from '../src/market-condition-evidence.ts';
 import {watchOutputs} from './watch-outputs.ts';
@@ -1050,7 +1051,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
           return readMonitorStatus(uid,monitorId,marketplace.store);
         }
       }),{query:String(lastUser?.content||''),researchMode}):{}),
-      ...(phase2FeatureEnabled(uid,'AI_SDK_SERVER_BACKTEST_ENABLED',process.env,req.headers['x-tv-phase2-qa'])&&!researchMode&&/\b(backtest|retest|replay|simulation)\b/i.test(String(lastUser?.content||''))?{
+      ...(phase2FeatureEnabled(uid,'AI_SDK_SERVER_BACKTEST_ENABLED',process.env,req.headers['x-tv-phase2-qa'])&&!researchMode&&explicitBacktestRequest(String(lastUser?.content||''))?{
         runVerifiedBacktest:ownedHyperliquidBacktest(uid)
       }:{}),
       ...(!researchMode&&/\b(brokers?|accounts?|connections?|propdao|ctrader|valr)\b/i.test(String(lastUser?.content||''))?{
