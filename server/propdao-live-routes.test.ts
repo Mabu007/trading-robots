@@ -404,6 +404,17 @@ describe('revision- and account-bound PropDAO deployment review',()=>{
   expect(lingering.activeAuthorization).toBe(true);
   expect(accounts.executeOrder).not.toHaveBeenCalled();
  });
+ it('binds R:R 1:3 to the exact review and rejects changing it to 1:2',async()=>{
+  const {svc,saved}=setupReady();
+  const reviewed=await svc.review('alice','bot-1',{body:{...requestBody,riskReward:3}} as any);
+  expect(reviewed.riskReward).toBe(3);
+  const body={...requestBody,riskReward:3,reviewId:reviewed.reviewId,expectedCodeHash:reviewed.codeHash,confirm:auth};
+  await expect(svc.deploy('alice','bot-1',{body:{...body,riskReward:2}} as any)).rejects.toThrow(/changed since review/);
+  await svc.deploy('alice','bot-1',{body} as any);
+  const grant=[...saved.entries()].find(([key])=>key.includes('propdao-live/v1/'));
+  expect(grant).toBeDefined();
+  expect(JSON.parse(grant![1])).toMatchObject({riskUsd:2,riskReward:3,leverage:1});
+ });
  it('rejects modified risk, stale source hashes, and expired reviews',async()=>{
   const {svc}=setupReady();
   const reviewed=await svc.review('alice','bot-1',{body:requestBody} as any);
