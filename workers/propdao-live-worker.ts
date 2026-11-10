@@ -1,6 +1,6 @@
 import {PropDAOLiveBot} from './propdao-live-object';
 export {PropDAOLiveBot};
-type Env={BOTS:DurableObjectNamespace;PROPDAO_LIVE_INTERNAL_SECRET:string;PROPDAO_LIVE_ENABLED:string};
+type Env={BOTS:DurableObjectNamespace;PROPDAO_LIVE_INTERNAL_SECRET:string;PROPDAO_LIVE_ENABLED:string;TV_WORKER_GIT_SHA?:string};
 async function authorized(header:string,secret:string){
  if(!secret||secret.length<32||header.length>512)return false;
  const k=await crypto.subtle.importKey('raw',new TextEncoder().encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
@@ -10,7 +10,7 @@ async function authorized(header:string,secret:string){
 }
 export default {async fetch(req:Request,env:Env){
  if(!(await authorized(req.headers.get('Authorization')||'',env.PROPDAO_LIVE_INTERNAL_SECRET)))return Response.json({error:'Internal authorization required'},{status:401});
- if(new URL(req.url).pathname==='/health'&&req.method==='GET')return Response.json({ready:Boolean(env.PROPDAO_LIVE_INTERNAL_SECRET&&env.PROPDAO_LIVE_INTERNAL_SECRET.length>=32&&env.PROPDAO_LIVE_ENABLED==='true'),runtime:'propdao-durable-object',version:2});
+ if(new URL(req.url).pathname==='/health'&&req.method==='GET')return Response.json({ready:Boolean(env.PROPDAO_LIVE_INTERNAL_SECRET&&env.PROPDAO_LIVE_INTERNAL_SECRET.length>=32&&env.PROPDAO_LIVE_ENABLED==='true'),runtime:'propdao-durable-object',version:3,releaseSha:env.TV_WORKER_GIT_SHA||null});
  const parts=new URL(req.url).pathname.split('/').filter(Boolean);
  if(parts.length!==3||parts[0]!=='live'||!/^[a-f0-9]{64}$/.test(parts[1])||!['deploy','stop','status','ledger','pause','resume','reconcile'].includes(parts[2]))return Response.json({error:'Unknown live route'},{status:404});
  const uid=req.headers.get('X-TV-UID');if(!uid||uid.length>128)return Response.json({error:'Missing user identity'},{status:403});
