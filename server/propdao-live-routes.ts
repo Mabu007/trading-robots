@@ -459,7 +459,13 @@ export class PropDAOLiveService{
    codeHash:grant.codeHash,code:grant.code,capturedAt:now}));
   await this.deps.write(this.key(uid,botId),JSON.stringify(grant));
   try{await this.recordAgent(uid,botId,bot,{state:'deployment_pending',action:'deployment_authorized',grantId:grant.id,expiresAt:grant.expiresAt,codeHash:grant.codeHash,limits:{riskUsd:grant.riskUsd,riskReward,leverage:grant.leverage},authorized:true})}
-  catch(error){if(existing)await this.deps.write(this.key(uid,botId),JSON.stringify(existing));else if(this.deps.remove)await this.deps.remove(this.key(uid,botId));else await this.deps.write(this.key(uid,botId),JSON.stringify({...grant,revokedAt:Date.now()}));throw error}
+  catch(error){
+   if(existing)await this.deps.write(this.key(uid,botId),JSON.stringify(existing));
+   else if(this.deps.remove)await this.deps.remove(this.key(uid,botId));
+   else await this.deps.write(this.key(uid,botId),JSON.stringify({...grant,revokedAt:Date.now()}));
+   if(this.deps.remove)await this.deps.remove(revisionKey).catch(()=>undefined);
+   throw error;
+  }
   try{
    const result=await this.runtime(grant,'deploy',grant);
    // Deployment acknowledgement omits the grant identity. A status read must
@@ -478,6 +484,9 @@ export class PropDAOLiveService{
     if(existing)await this.deps.write(this.key(uid,botId),JSON.stringify(existing));
     else if(this.deps.remove)await this.deps.remove(this.key(uid,botId));
     else await this.deps.write(this.key(uid,botId),JSON.stringify({...grant,revokedAt:Date.now()}));
+    // Only a definite non-submission permits deletion of this candidate
+    // revision. Retain snapshots for ambiguous outcomes and possible fills.
+    if(this.deps.remove)await this.deps.remove(revisionKey).catch(()=>undefined);
     await this.recordAgent(uid,botId,bot,{state:'stopped',action:'deployment_rejected',grantId:existing?.id,expiresAt:existing?.expiresAt,authorized:false,error:reason},true);
    }else{
     // A timeout or malformed response is an unknown outcome. Keep the
