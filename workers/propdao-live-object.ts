@@ -103,10 +103,11 @@ export class PropDAOLiveBot extends DurableObject<any>{
  private async record(message:string){const events=(await this.ctx.storage.get<string[]>('events'))||[];events.push(`${new Date().toISOString()} · ${message.slice(0,240)}`);await this.ctx.storage.put('events',events.slice(-100));}
  /** Account-owned durable trail. A signal must never be represented as a fill. */
  private async journal(grant:Grant,stage:ExecutionStage,details:Partial<Pick<ExecutionEvent,
-  'side'|'intentId'|'quantity'|'positionId'|'reason'>>={}){
+  'side'|'intentId'|'quantity'|'positionId'|'brokerOrderId'|'entryPrice'|'filledAt'|
+  'stopPrice'|'targetPrice'|'riskBudgetUsd'|'decisionCandleClose'|'reason'>>={}){
   const event:ExecutionEvent={id:'event_'+crypto.randomUUID().replace(/-/g,''),
    time:Date.now(),accountId:grant.accountId,botId:grant.botId,
-   grantId:grant.id,symbol:grant.symbol,stage,
+   grantId:grant.id,symbol:grant.symbol,stage,codeHash:grant.codeHash,
    ...details,...(typeof details.reason==='string'?{
     reason:details.reason.replace(/[\r\n\t]/g,' ').slice(0,180)}:{})};
   const prior=(await this.ctx.storage.get<ExecutionEvent[]>('executionEvents'))||[];
@@ -388,6 +389,8 @@ export class PropDAOLiveBot extends DurableObject<any>{
      candleClose:close,time:evaluation.time,action:evaluation.action,reason:evaluation.reason,
      checks:evaluation.checks,marketSource:'Hyperliquid',
      completedCandles:Object.fromEntries(config.timeframes.map((tf:string)=>[tf,data[tf].at(-1)])),
+     recentCandles:execution.slice(-20),
+     executionTimeframe:config.executionTimeframe,
      historyCoverage:diagnostics}})}
    catch(error){
     await this.ctx.storage.put('sqlTelemetryError',error instanceof Error?error.message:'SQLite decision write failed');
@@ -449,10 +452,16 @@ export class PropDAOLiveBot extends DurableObject<any>{
    if(order.filled===true&&order.protected!==true)throw Error('Fill has no confirmed protective bracket');
    await this.ctx.storage.put('lastOrder',{time:Date.now(),intentId,side:decision.action,
     quantity:order.quantity,positionId:order.positionId||null,plannedLoss:order.plannedLoss,projectedNetProfit:order.projectedNetProfit,riskBudgetUsd:order.riskBudgetUsd,riskReward:order.riskReward,stop:order.stop,target:order.target,
+    entryPrice:order.entryPrice??null,brokerOrderId:order.brokerOrderId??null,filledAt:order.filledAt??null,
     protected:order.protected===true,filled:order.filled===true,
     providerStatus:order.providerStatus||(order.filled?'PROTECTED_FILL':'CANCELLED_UNFILLED')});
    await this.journal(grant,order.filled?'PROTECTED_FILL':'CANCELLED_UNFILLED',{
     ...intentSignal,quantity:order.quantity,
+    decisionCandleClose:close,stopPrice:stop,targetPrice:order.target??target,
+    riskBudgetUsd:order.riskBudgetUsd??grant.riskUsd,
+    ...(Number.isFinite(order.entryPrice)&&order.entryPrice>0?{entryPrice:order.entryPrice}:{}),
+    ...(Number.isFinite(order.filledAt)?{filledAt:order.filledAt}:{}),
+    ...(typeof order.brokerOrderId==='string'?{brokerOrderId:order.brokerOrderId}:{}),
     ...(typeof order.positionId==='string'?{positionId:order.positionId}:{}),
     reason:order.filled?'Broker confirmed protected position':'Unfilled entry cancelled by broker'});
    await this.executionLock(grant,'release',intentId);
