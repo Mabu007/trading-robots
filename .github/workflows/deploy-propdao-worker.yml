@@ -1,9 +1,6 @@
-name: One-time PropDAO live Worker deployment
+name: Deploy PropDAO Durable Object (disabled)
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - ops/propdao-live-worker-once-20261110
 permissions:
   contents: read
 concurrency:
@@ -11,7 +8,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy-once:
+  deploy-disabled:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -34,19 +31,22 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npm run check:runtime
       - run: npm run worker:propdao:live:build
-      - name: Deploy reviewed Cloudflare Worker with entries enabled
+      - name: Deploy Cloudflare Worker with entries disabled
         shell: bash
         run: |
           set -euo pipefail
-          grep -Eq '"PROPDAO_LIVE_ENABLED"[[:space:]]*:[[:space:]]*"true"' workers/wrangler.propdao-live.jsonc || { echo "::error::Worker entries must be explicitly enabled by the authorized release config."; exit 1; }
           npx wrangler deploy --config workers/wrangler.propdao-live.jsonc 2>&1 | tee "$RUNNER_TEMP/propdao-deploy.txt"
           URL="$(grep -Eo 'https://[A-Za-z0-9.-]+\.workers\.dev' "$RUNNER_TEMP/propdao-deploy.txt" | head -1 || true)"
           if [ -z "$URL" ]; then echo "::error::Worker deployment URL not found. Check the Workers dashboard."; exit 1; fi
           echo "PROPDAO_WORKER_URL=$URL" >> "$GITHUB_ENV"
           echo "## PropDAO Worker" >> "$GITHUB_STEP_SUMMARY"
-          echo "Deployed (order submission enabled; existing broker positions unchanged): \`$URL\`" >> "$GITHUB_STEP_SUMMARY"
-      # Retain existing Cloudflare Worker internal secret; never rotate it as part of this rollout.
-      - name: Verify authenticated health endpoint and enabled execution gate
+          echo "Deployed (order submission remains disabled): \`$URL\`" >> "$GITHUB_STEP_SUMMARY"
+      - name: Install Worker secret without exposing it
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$PROPDAO_LIVE_INTERNAL_SECRET" | npx wrangler secret put PROPDAO_LIVE_INTERNAL_SECRET --config workers/wrangler.propdao-live.jsonc >/dev/null
+      - name: Verify authenticated health endpoint and closed execution gate
         shell: bash
         run: |
           set -euo pipefail
@@ -61,7 +61,7 @@ jobs:
               if exc.code!=401: raise
           req=urllib.request.Request(url,headers={"Authorization":"Bearer "+secret})
           with urllib.request.urlopen(req,timeout=15) as response: state=json.load(response)
-          if state.get("runtime")!="propdao-durable-object" or state.get("ready") is not True:
+          if state.get("runtime")!="propdao-durable-object" or state.get("ready") is not False:
               raise SystemExit("Unexpected runtime health response; automated trading must remain disabled")
-          print("Worker health authenticated; live order gate confirmed enabled.")
+          print("Worker health authenticated; live order gate confirmed disabled.")
           PY
