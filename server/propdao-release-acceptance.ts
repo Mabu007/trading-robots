@@ -58,6 +58,9 @@ export function evaluatePropDAOReleaseGate(input:GateInput){
   input.chatProof.conversationId===input.conversationId&&
   input.chatProof.receiptId===input.receiptId&&
   input.chatProof.completed===true&&
+  typeof input.chatProof.recordedAt==='number'&&
+  input.chatProof.recordedAt<=Date.now()+300_000&&
+  Date.now()-input.chatProof.recordedAt<15*60_000&&
   input.chatProof.streamedChars>0&&
   input.chatProof.model===input.configuredModel;
  const tool=Array.isArray(input.chatTrace)&&input.chatTrace.some(t=>
