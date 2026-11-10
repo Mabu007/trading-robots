@@ -1,10 +1,6 @@
 name: Deploy PropDAO Durable Object (disabled)
 on:
   workflow_dispatch:
-  # One-time disabled-gate deployment from a dedicated branch. Do not merge this trigger.
-  push:
-    branches:
-      - deploy/propdao-disabled-20261110
 permissions:
   contents: read
 concurrency:
