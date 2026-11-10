@@ -71,7 +71,7 @@ jobs:
       - run: npm test -- --reporter=dot
       - run: npm run build
       - run: npm run check:runtime
-      - run: node --test scripts/verify-propdao-worker.test.mjs
+      - run: node --test scripts/verify-propdao-worker.test.mjs scripts/rollback-propdao-worker.test.mjs
       - run: npm run worker:propdao:live:build
       - name: Verify immutable commit matches production application
         env:
