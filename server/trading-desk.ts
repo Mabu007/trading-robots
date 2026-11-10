@@ -173,7 +173,16 @@ export class TradingDesk{
   if(brokerResult.status==='rejected')issues.push('Live broker closed-trade read unavailable');
   if(workerResult.status==='rejected'||!workerResult.value?.available)
    issues.push('Worker execution history partially unavailable');
-  const direct=brokerResult.status==='fulfilled'?brokerResult.value.find(t=>t.id===tradeId):null;
+  let direct=brokerResult.status==='fulfilled'?brokerResult.value.find(t=>t.id===tradeId):null;
+  // A named historical trade can be older than the Worker M1 broker poll.
+  // Query bounded provider pages before falling back to a retained observation.
+  if(!direct&&this.broker.tradesSince){
+   try{
+    const historical=await this.broker.tradesSince(uid,accountId,0,500);
+    direct=historical.trades.find(t=>t.id===tradeId);
+    if(!historical.complete)issues.push('Broker historical search capped at 500 trades');
+   }catch{issues.push('Paginated broker history unavailable');}
+  }
   let trade:Trade|null=direct&&validTrade(direct)?direct:null;
   if(!trade&&this.store){
    try{
@@ -185,7 +194,7 @@ export class TradingDesk{
    }catch{issues.push('Firestore trade archive unavailable');}
   }
   if(!trade)return {available:false,accountId,tradeId,partial:true,
-   reason:'Trade not available in the latest 50 broker records or verified owner-scoped archive',issues};
+   reason:'Trade not available in bounded broker history or verified owner-scoped archive',issues};
   let events=safeExecutionEvents(workerResult.status==='fulfilled'?workerResult.value?.events:null,accountId);
   let decisions:Decision[]=workerResult.status==='fulfilled'&&Array.isArray(workerResult.value?.decisionSnapshots)?
    workerResult.value.decisionSnapshots.filter((d:Decision)=>d.accountId===accountId).slice(-300):[];
