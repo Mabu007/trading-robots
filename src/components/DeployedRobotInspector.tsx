@@ -7,6 +7,8 @@ import {Dialog} from './Dialog';
 import {displayTime} from '../display-time';
 import {robotDisplayState,canClearRobot} from '../robot-lifecycle';
 import './deployed-robot-inspector.css';
+import {PropDAOExecutionTimeline} from './PropDAOExecutionTimeline';
+import {safeExecutionEvents,oldWorkerEvents} from '../../shared/propdao-execution-journal';
 
 type Snapshot=Record<string,any>;
 const dateFrom=(value:unknown)=>{
@@ -16,6 +18,17 @@ const dateFrom=(value:unknown)=>{
 };
 const count=(v:unknown)=>Array.isArray(v)?v.length:'Unknown';
 const amount=(v:unknown)=>typeof v==='number'&&Number.isFinite(v)?new Intl.NumberFormat('en-US',{maximumFractionDigits:2,minimumFractionDigits:2}).format(v):'Unavailable';
+export function describeRuntimeEvent(input:unknown){
+ if(typeof input==='string'){
+  const m=/^(\d{4}-\d\d-\d\dT[\d:.]+Z) · (.*)$/.exec(input);
+  return {time:m?Date.parse(m[1]):null,kind:'Worker activity',text:(m?.[2]||input).slice(0,220)};
+ }
+ const e=(input&&typeof input==='object'?input:{}) as Record<string,unknown>;
+ const raw=e.time??e.timestamp??e.at;
+ return {time:typeof raw==='number'&&Number.isFinite(raw)?raw:null,
+  kind:String(e.kind??e.type??e.action??'Runtime event').slice(0,45),
+  text:String(e.reason??e.message??e.outcome??'No detail').slice(0,220)};
+}
 const value=(v:unknown)=>typeof v==='string'&&v.trim()?v.trim():typeof v==='number'&&Number.isFinite(v)?String(v):'Not reported';
 const stateName=(s:Snapshot|null,agent:PersistentAgent)=>{
  if(!s)return 'Not verified';
@@ -26,11 +39,12 @@ const stateName=(s:Snapshot|null,agent:PersistentAgent)=>{
  if(s.deployed)return 'Stopped';
  return agent.state==='unknown'?'Status unknown':'No active authorization';
 };
-export function DeployedRobotInspector({client,agent,onClose,onRefreshAgents,onStop,onRestart,onClear}:{
+export function DeployedRobotInspector({client,agent,onClose,onRefreshAgents,onStop,onRestart,onClear,onViewAccountTrades}:{
  client:CloudClient;agent:PersistentAgent;onClose:()=>void;
  onRefreshAgents:()=>Promise<void>|void;
  onStop:(agent:PersistentAgent,action:'status'|'stop')=>Promise<any>;
  onRestart?:(agent:PersistentAgent)=>void;onClear?:(agent:PersistentAgent)=>void;
+  onViewAccountTrades?:(accountId:string)=>void;
 }){
  const [snapshot,setSnapshot]=useState<Snapshot|null>(null);
  const [loading,setLoading]=useState(true);
@@ -60,11 +74,21 @@ export function DeployedRobotInspector({client,agent,onClose,onRefreshAgents,onS
   return()=>window.clearInterval(id);
  },[agent.venue,refresh,stopping]);
  const stopped=robotDisplayState(agent)==='stopped';
- const state=stopped?'Stopped · new entries disabled':stateName(snapshot,agent);
+ const state=snapshot?stateName(snapshot,agent):stopped?'Stopped record · runtime unverified':'Status unknown';
  const verified=Boolean(snapshot&&!snapshot.uncertain&&!snapshot.statusUnavailable&&snapshot.connected);
  const exposureVerified=verified&&snapshot?.brokerExposureVerified===true;
  const exposure=exposureVerified?String(snapshot?.brokerExposure||'verified'):'Unknown / not independently verified';
- const events=Array.isArray(snapshot?.events)?snapshot.events.slice(-10).reverse():[];
+ const events=Array.isArray(snapshot?.events)?snapshot.events.slice(-10).reverse().map(describeRuntimeEvent):[];
+  const accountId=String(snapshot?.accountId??agent.deployment?.limits?.accountId??'');
+  const structured=Array.isArray(snapshot?.executionEvents)?
+   safeExecutionEvents(snapshot.executionEvents,accountId):null;
+  const legacy=accountId&&Array.isArray(snapshot?.events)?oldWorkerEvents(snapshot.events,accountId):[];
+  const journal=structured===null?legacy:structured.concat(legacy).filter((event,index,all)=>
+   !all.some((prior,j)=>j<index&&prior.stage===event.stage&&prior.side===event.side&&
+    Math.abs(prior.time-event.time)<15000));
+  const lastSignal=journal.filter(e=>e.stage==='SIGNAL').sort((a,b)=>b.time-a.time)[0];
+  const lastOutcome=lastSignal?.intentId&&journal.filter(e=>e.intentId===lastSignal.intentId&&
+   e.stage!=='SIGNAL'&&e.stage!=='SUBMISSION_STARTED').sort((a,b)=>b.time-a.time)[0];
  const feeds=snapshot?.lastMarketData?.timeframes&&typeof snapshot.lastMarketData.timeframes==='object'?
    Object.entries(snapshot.lastMarketData.timeframes) as [string,{received?:number;requested?:number;ready?:boolean;recentGap?:boolean}][]
    :[];
@@ -103,10 +127,13 @@ export function DeployedRobotInspector({client,agent,onClose,onRefreshAgents,onS
   </div>
   <div className="tv-deployed-grid">
    <section className="tv-deployed-panel"><header><Zap size={17}/><h4>What the robot is doing</h4></header>
-    <dl><div><dt>Last decision</dt><dd>{value(snapshot?.lastEvaluation?.action)}</dd></div>
-     <div><dt>Decision reason</dt><dd>{value(snapshot?.lastEvaluation?.reason)}</dd></div>
+    <p className="tv-deployed-note">A strategy signal is not a broker fill. Consult the execution outcome and account history.</p>
+     <dl><div><dt>Last strategy decision</dt><dd>{value(snapshot?.lastEvaluation?.action)}</dd></div>
+     <div><dt>Decision reason</dt><dd>{snapshot?.lastEvaluation?.reason?value(snapshot.lastEvaluation.reason):'Strategy did not provide a reason'}</dd></div>
      <div><dt>Last evaluated</dt><dd>{dateFrom(snapshot?.lastEvaluation?.time)}</dd></div>
      <div><dt>Next Worker check</dt><dd>{dateFrom(snapshot?.nextAlarm??snapshot?.nextCheck)}</dd></div>
+     <div><dt>Last broker-confirmed order</dt><dd>{snapshot?.lastOrder?.providerStatus?value(snapshot.lastOrder.providerStatus)+' · '+dateFrom(snapshot.lastOrder.time):'No confirmed order result retained'}</dd></div>
+     <div><dt>Latest signal outcome</dt><dd>{lastOutcome?lastOutcome.stage.replaceAll('_',' '):'No outcome recorded for that signal'}</dd></div>
      <div><dt>Order intent</dt><dd>{snapshot?.pendingIntent?'Unresolved; reconciliation required':'No unresolved intent reported'}</dd></div>
      <div><dt>Runtime authorization</dt><dd>{snapshot?.authorizationRevoked?'New entries revoked':snapshot?.deployed?'Authorized / status above':'Not verified'}</dd></div>
     </dl>
@@ -125,8 +152,11 @@ export function DeployedRobotInspector({client,agent,onClose,onRefreshAgents,onS
    {feeds.length?<div className="tv-deployed-feeds">{feeds.map(([tf,feed])=><div key={tf}><strong>{tf.toUpperCase()}</strong><span>{feed.received??'—'} / {feed.requested??'—'} bars</span><small className={feed.ready?'ready':'not-ready'}>{feed.ready?'Ready':feed.recentGap?'Recent gap':'Incomplete / stale'}</small></div>)}</div>
    :<p>No verified candle-load metrics were returned. This is not proof that the feed is healthy.</p>}
   </section>
+  <PropDAOExecutionTimeline events={journal} accountId={accountId}
+    title="This robot's signals and execution outcomes" max={25}/>
   <section className="tv-deployed-panel"><header><Activity size={17}/><h4>Latest runtime events</h4><span>{events.length} recent</span></header>
-   {events.length?<div className="tv-deployed-events">{events.map((event:any,index:number)=><article key={String(event?.id??index)}><span>{dateFrom(event?.time??event?.timestamp??event?.at)}</span><strong>{side(event?.type??event?.kind??event?.action??event?.state??'Runtime event')}</strong><small>{side(event?.reason??event?.message??event?.outcome??'No further details supplied')}</small></article>)}</div>
+   {events.length?<div className="tv-deployed-events">{events.map((event,index)=><article key={String(event.time??index)+':'+index}>
+    <span>{dateFrom(event.time)}</span><strong>{event.kind}</strong><small>{event.text}</small></article>)}</div>
    :<p>There are no recent events in the current Worker response. This does not prove the robot has never traded.</p>}
   </section>
   {exposureVerified&&(Array.isArray(snapshot?.positions)&&snapshot.positions.length>0||Array.isArray(snapshot?.pendingOrders)&&snapshot.pendingOrders.length>0)&&
@@ -142,6 +172,8 @@ export function DeployedRobotInspector({client,agent,onClose,onRefreshAgents,onS
     <div><dt>AI tokens / compute usage</dt><dd>Not metered per robot in this response</dd></div>
    </dl>
   </section>
+  {onViewAccountTrades&&accountId&&<button type="button" className="tv-deployed-secondary"
+    onClick={()=>onViewAccountTrades(accountId)}><Activity size={15}/> View Trades for {accountId}</button>}
   <div className="tv-deployed-footnote"><AlertTriangle size={15}/> Stopping a robot revokes authorization for new entries. It does not guarantee existing positions or resting orders are closed. Inspect your broker separately.</div>
   <div className="tv-deployed-actions">{stopped&&onRestart&&<button type="button" className="tv-deployed-secondary" onClick={()=>onRestart(agent)}><Play size={15}/> Start Bot</button>}
    {stopped&&onClear&&canClearRobot(agent)&&<button type="button" className="tv-deployed-secondary" onClick={()=>onClear(agent)}><Trash2 size={15}/> Clear</button>}

@@ -184,9 +184,11 @@ export function propDAORoutes(app:Express,accounts:PropDAOAccounts,uid:(req:Requ
   const accountId=String(req.params.accountId);
   const snapshot=await accounts.accountRisk(id,accountId);
   let trades:Awaited<ReturnType<PropDAOAccounts['recentTrades']>>|null=null;
-  try{trades=await accounts.recentTrades(id,accountId)}catch{}
+  let tradeHistoryError:string|null=null;
+  try{trades=await accounts.recentTrades(id,accountId)}
+  catch(error){tradeHistoryError=error instanceof Error?error.message:'Broker history unavailable'}
   const pick=(item:any,fields:string[])=>Object.fromEntries(fields.filter(field=>['string','number','boolean'].includes(typeof item?.[field])||item?.[field]===null).map(field=>[field,item[field]]));
-  return {account:snapshot.account,risk:pick(snapshot.risk,['equity','balance','roomUsd','breached']),positions:snapshot.positions.slice(0,100).map((item:any)=>pick(item,['id','symbol','side','qty','entry','mark','unrealizedPnl','slPrice','tpPrice','openedAt'])),orders:snapshot.orders.slice(0,100).map((item:any)=>pick(item,['id','orderId','symbol','side','qty','quantity','price','limitPrice','status','type','orderType','createdAt'])),trades,historyAvailable:trades!==null,checkedAt:new Date().toISOString()};
+  return {account:snapshot.account,risk:pick(snapshot.risk,['equity','balance','roomUsd','breached']),positions:snapshot.positions.slice(0,100).map((item:any)=>pick(item,['id','symbol','side','qty','entry','mark','unrealizedPnl','slPrice','tpPrice','openedAt'])),orders:snapshot.orders.slice(0,100).map((item:any)=>pick(item,['id','orderId','symbol','side','qty','quantity','price','limitPrice','status','type','orderType','createdAt'])),trades,historyAvailable:trades!==null,tradeHistoryError,historyLimit:50,checkedAt:new Date().toISOString()};
  }));
  app.post('/api/venues/propdao/disconnect',handle(async id=>{if(beforeChange)await beforeChange(id);return accounts.disconnect(id)}));
 }

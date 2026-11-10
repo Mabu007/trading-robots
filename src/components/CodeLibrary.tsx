@@ -30,6 +30,7 @@ type Props={
  onRunAnalysis:(asset:CodeAnalysis)=>void; onWatch:(asset:CodeAnalysis)=>void; onStopWatch:(asset:CodeAnalysis)=>void;
  onDeploy:(bot:CloudBot,riskPercent:number,codeHash?:string)=>void; deploymentError?:string; onRefreshDeployments:()=>Promise<void>|void;
  onManageDeployment:(agent:PersistentAgent,action:'status'|'stop')=>Promise<any>;
+ onViewBrokerTrades?:(accountId:string)=>void;
 };
 export function codeState(bot:CloudBot,agents:PersistentAgent[],states:Record<string,Runtime>):'Running'|'Paused'|'Stopped'|'Checking'|'Saved'{
  const agent=agents.find(a=>a.botId===bot.id&&a.mode==='live');
@@ -41,7 +42,7 @@ export function codeState(bot:CloudBot,agents:PersistentAgent[],states:Record<st
  if(live.state==='paused')return 'Paused';
  return live.state==='stopped'||live.state==='not-deployed'?'Stopped':'Checking';
 }
-export function CodeLibrary({client,bots,current,analyses,watches,agents,runtimeStates,onAsk,onSaved,onRenameBot,onDeleteBot,onRenameAnalysis,onDeleteAnalysis,onRunAnalysis,onWatch,onStopWatch,onDeploy,deploymentError,onRefreshDeployments,onManageDeployment,onAuditTrade,onConnectBroker,theme}:Props){
+export function CodeLibrary({client,bots,current,analyses,watches,agents,runtimeStates,onAsk,onSaved,onRenameBot,onDeleteBot,onRenameAnalysis,onDeleteAnalysis,onRunAnalysis,onWatch,onStopWatch,onDeploy,deploymentError,onRefreshDeployments,onManageDeployment,onAuditTrade,onConnectBroker,onViewBrokerTrades,theme}:Props){
  const deployments=agents.filter(agent=>agent.mode==='live'&&agent.deployment?.grantId&&!agent.archivedAt).sort((a,b)=>(b.deployment?.authorizedAt||0)-(a.deployment?.authorizedAt||0));
  const activeDeployments=deployments.filter(agent=>robotDisplayState(agent,runtimeStates[agent.id])!=='stopped');
  const stoppedDeployments=deployments.filter(agent=>robotDisplayState(agent,runtimeStates[agent.id])==='stopped');
@@ -170,7 +171,9 @@ export function CodeLibrary({client,bots,current,analyses,watches,agents,runtime
    {selectedDeployment&&client&&typeof document!=='undefined'&&createPortal(
     <DeployedRobotInspector key={selectedDeployment.id} client={client}
      agent={selectedDeployment} onClose={()=>setSelectedDeployment(null)}
-     onRefreshAgents={onRefreshDeployments} onStop={onManageDeployment} onRestart={restart} onClear={agent=>setClearTarget(agent)}/>,document.body)}
+     onRefreshAgents={onRefreshDeployments} onStop={onManageDeployment}
+      onViewAccountTrades={accountId=>{setSelectedDeployment(null);onViewBrokerTrades?.(accountId)}}
+      onRestart={restart} onClear={agent=>setClearTarget(agent)}/>,document.body)}
    {localDeploy&&client&&typeof document!=='undefined'&&createPortal(
    <PropDAODeployDialog key={localDeploy.bot.id+':'+(localDeploy.codeHash||'saved')} client={client}
     botId={localDeploy.bot.id} expectedCodeHash={localDeploy.codeHash}

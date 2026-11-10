@@ -1,0 +1,7 @@
+.tv-execution-timeline .tv-desk-section-heading h2{display:flex;align-items:center;gap:8px}
+.tv-execution-stage{font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
+.tv-execution-stage.danger{color:#e09644;font-weight:600}
+.tv-execution-stage.confirmed{color:#28a27b;font-weight:600}
+.tv-execution-detail{min-width:170px;max-width:270px;white-space:normal;font-size:12px;overflow-wrap:anywhere}
+.tv-execution-detail small{display:block;opacity:.65;margin-top:4px;font-size:10px}
+.tv-execution-footnote{opacity:.7;font-size:12px;line-height:1.5;padding:8px 0}
