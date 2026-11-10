@@ -7,7 +7,7 @@ import {TF_SECONDS} from '../shared/trading';
 import {evaluateAutonomousEquity,type EvaluationEnvelope} from '../shared/propdao-autonomous-guard';
 import {parseUpstreamJson,TemporaryReadError,retryableReadError} from './propdao-upstream-response';
 import {MAX_EXECUTION_EVENTS,type ExecutionEvent,type ExecutionStage} from '../shared/propdao-execution-journal';
-type Grant={autoPolicy?:EvaluationEnvelope;id:string;uid:string;botId:string;agentId?:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;leverage:number;issuedAt:number;expiresAt:number};
+type Grant={autoPolicy?:EvaluationEnvelope;id:string;uid:string;botId:string;agentId?:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;riskReward?:number;leverage:number;issuedAt:number;expiresAt:number};
 type Status={running:boolean;paused:boolean;lastError?:string;lastEvaluation?:any;lastOrder?:any;lastAccount?:any;events:string[];lastMarketData?:any;lastReconciliation?:any};
 const interval:Record<string,string>={m1:'1m',m5:'5m',m15:'15m',m30:'30m',h1:'1h',h4:'4h',d1:'1d'};
 async function hash(s:string){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s)))).map(v=>v.toString(16).padStart(2,'0')).join('')}
@@ -116,6 +116,7 @@ export class PropDAOLiveBot extends DurableObject<any>{
     !Number.isFinite(grant.autoPolicy.maxDailyLossPct)||grant.autoPolicy.maxDailyLossPct>2||
     !Number.isFinite(grant.autoPolicy.maxDrawdownPct)||grant.autoPolicy.maxDrawdownPct>5))
     throw Error('Invalid autonomous demo risk limits');
+   if(grant.riskReward!==undefined&&(!Number.isFinite(grant.riskReward)||grant.riskReward<1||grant.riskReward>5))throw Error('Invalid deployment reward ratio');
    if(await hash(grant.code)!==grant.codeHash)throw Error('Strategy identity mismatch');
    if(existing?.uid&&existing.uid!==grant.uid)throw Error('This account belongs to another identity');
    if(existing&&(await this.ctx.storage.get<boolean>('running')))throw Error('Account already has a running robot');
@@ -250,7 +251,7 @@ export class PropDAOLiveBot extends DurableObject<any>{
    if(order.filled!==true&&order.filled!==false)throw Error('Provider did not confirm a fill outcome');
    if(order.filled===true&&order.protected!==true)throw Error('Fill has no confirmed protective bracket');
    await this.ctx.storage.put('lastOrder',{time:Date.now(),intentId,side:decision.action,
-    quantity:order.quantity,positionId:order.positionId||null,plannedLoss:order.plannedLoss,
+    quantity:order.quantity,positionId:order.positionId||null,plannedLoss:order.plannedLoss,projectedNetProfit:order.projectedNetProfit,riskBudgetUsd:order.riskBudgetUsd,riskReward:order.riskReward,stop:order.stop,target:order.target,
     protected:order.protected===true,filled:order.filled===true,
     providerStatus:order.providerStatus||(order.filled?'PROTECTED_FILL':'CANCELLED_UNFILLED')});
    await this.journal(grant,order.filled?'PROTECTED_FILL':'CANCELLED_UNFILLED',{
