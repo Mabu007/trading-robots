@@ -23,5 +23,5 @@ export function isPendingRobotChoice(message:string,names:string[]):boolean{
  return /^robot:[A-Za-z0-9_-]{1,150}$/.test(m)||(m.length<=80&&names.some(name=>name.trim().toLowerCase()===m.toLowerCase()));
 }
 export function needsLiveBotContext(message:string):boolean{
- return /\b(?:trades?|positions?|orders?|fills?|bot|robot|agent|signals?|conditions?|thresholds?|entry|entries|stop[- ]loss|exits?|live|runtime|running|wait|market|price|volatility|ema|rsi|atr|yet|now|currently|today|still|updates?|anything new)\b/i.test(message);
+ return /\b(?:trades?|positions?|orders?|fills?|bot|robot|agent|signals?|conditions?|thresholds?|entry|entries|stop[- ]loss|exits?|live|runtime|running|wait|market|price|volatility|ema|rsi|atr|yet|now|currently|today|still|updates?|anything new|loss(?:es)?|loses?|losing|lost|drawdown|performance|pnl|profit|stop.?out|win.?rate)\b/i.test(message);
 }

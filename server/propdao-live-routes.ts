@@ -162,6 +162,20 @@ export class PropDAOLiveService{
    return {configured:enabled,connected:true,error:enabled?undefined:'Runtime connected. Automated trading is disabled.'};
   }catch(e){return {configured:false,connected:false,error:e instanceof Error?e.message:'Cloudflare Worker unavailable'}}
  }
+ /** Broker history is independent of Cloudflare Worker health.
+  * The bound account comes from an owner-verified saved deployment grant and
+  * is re-checked against the signed-in user's connected PropDAO account. */
+ async accountTradeHistory(uid:string,botId:string){
+  const grant=await this.grant(uid,botId);
+  if(!grant)return {available:false,accountId:null,botId,trades:null,reason:'No saved owner-scoped PropDAO deployment for this robot. Choose a connected broker account.'};
+  try{
+   await this.deps.accounts.accountRisk(uid,grant.accountId);
+   const trades=await this.deps.accounts.recentTrades(uid,grant.accountId);
+   return {available:true,source:'Authenticated PropDAO /accounts/:id/trades, not Cloudflare Worker',accountId:grant.accountId,botId,trades,checkedAt:Date.now()};
+  }catch(error){
+   return {available:false,accountId:grant.accountId,botId,trades:null,reason:error instanceof Error?error.message:'Authenticated broker history unavailable'};
+  }
+ }
  async status(uid:string,botId:string,selectedAccount?:string){
   const grant=await this.grant(uid,botId);const health=await this.health();const configured=health.configured;
   if(!grant){

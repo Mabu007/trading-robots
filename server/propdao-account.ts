@@ -149,7 +149,10 @@ export class PropDAOAccounts {
   const trades=body.data.slice(0,50).map((t:any)=>({
    id:String(t.id||''),symbol:String(t.symbol||''),side:t.side,qty:number(t.qty),entry:number(t.entry),
    exit:number(t.exit),pnl:number(t.pnl),openedAt:number(t.openedAt),closedAt:number(t.closedAt),
-   reason:String(t.reason||''),fee:number(t.fee)
+   reason:String(t.reason||''),fee:number(t.fee),
+   // Provider identity fields are optional. Never infer them from price or time.
+   positionId:validId(t.positionId)?t.positionId:null,
+   intentId:validId(t.intentId)?t.intentId:null
   }));
   if(trades.some((t:any)=>!t.id||!t.symbol||!['BUY','SELL'].includes(t.side)||
    [t.qty,t.entry,t.exit,t.pnl].some(v=>typeof v!=='number'||!Number.isFinite(v))||

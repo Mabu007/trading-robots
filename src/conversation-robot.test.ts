@@ -20,3 +20,10 @@ it('keeps the user-named robot for natural live follow-ups',()=>{
  expect(conversationRobot('any trades yet?',turns,bots)?.id).toBe('a');
  expect(conversationRobot('what conditions are missing?',turns,bots)?.id).toBe('a');
 });
+
+it('links a live losing-trades complaint to the last user-named robot',()=>{
+ const turns=[{role:'user',content:'I have been working with ai 2 on GOLDUSDC'},{role:'assistant',content:'The backtest had 205 trades'}];
+ expect(conversationRobot('why m i incurring so many loses',turns,bots)?.id).toBe('a');
+ expect(conversationRobot('why am I losing so many trades?',turns,bots)?.id).toBe('a');
+ expect(conversationRobot('how is my live pnl?',turns,bots)?.id).toBe('a');
+});

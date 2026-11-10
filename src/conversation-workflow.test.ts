@@ -20,3 +20,8 @@ describe('durable AI conversation tasks',()=>{
   expect(saneTask({kind:'backtest',botId:'abc',botName:'ai 2'})).toMatchObject({kind:'backtest',botId:'abc'});
  });
 });
+it('preserves an original live-loss question across an ambiguous robot-selection card',()=>{
+ const raw={kind:'choose-robot',action:'status',robotIds:['bot-ai1','bot-ai2'],question:'Why am I losing so many trades?'};
+ expect(saneTask(raw)).toMatchObject(raw);
+ expect(saneTask({...raw,question:'x'.repeat(900)})?.kind).toBe('choose-robot');
+});

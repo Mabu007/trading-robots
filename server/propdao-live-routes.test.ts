@@ -428,3 +428,26 @@ describe('revision- and account-bound PropDAO deployment review',()=>{
   }finally{vi.useRealTimers()}
  });
 });
+
+it('reads owned recent PropDAO broker history even if the Cloudflare Worker is unreachable',async()=>{
+ const {svc,accounts,saved,fetcher}=setup();
+ vi.stubEnv('PROPDAO_LIVE_ENABLED','false');
+ const prefix='propdao-live/v1/'+(process.env.VERCEL_ENV||'development')+'/'+Buffer.from('alice').toString('base64url')+'/';
+ saved.set(prefix+'bot-1.json',JSON.stringify({id:'grant-1',uid:'alice',botId:'bot-1',accountId:'prop-1',symbol:'BTCUSDC'}));
+ accounts.recentTrades.mockResolvedValueOnce([{id:'trade-one',symbol:'BTCUSDC',side:'BUY',qty:1,entry:100,exit:99,pnl:-1}] as never);
+ fetcher.mockRejectedValue(Error('Worker unreachable'));
+ const report=await svc.accountTradeHistory('alice','bot-1');
+ expect(report).toMatchObject({available:true,accountId:'prop-1',botId:'bot-1'});
+ expect(report.trades).toHaveLength(1);
+ expect(accounts.accountRisk).toHaveBeenCalledWith('alice','prop-1');
+ expect(accounts.recentTrades).toHaveBeenCalledWith('alice','prop-1');
+ expect(fetcher).not.toHaveBeenCalled();
+});
+it('denies another user access to a prior deployment trade history',async()=>{
+ const {svc,saved,accounts}=setup();
+ const prefix='propdao-live/v1/'+(process.env.VERCEL_ENV||'development')+'/'+Buffer.from('alice').toString('base64url')+'/';
+ saved.set(prefix+'bot-1.json',JSON.stringify({id:'grant-1',uid:'alice',botId:'bot-1',accountId:'prop-1'}));
+ const report=await svc.accountTradeHistory('bob','bot-1');
+ expect(report).toMatchObject({available:false,accountId:null});
+ expect(accounts.recentTrades).not.toHaveBeenCalled();
+});
