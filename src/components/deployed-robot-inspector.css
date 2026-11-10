@@ -101,3 +101,10 @@ html[data-theme="light"] .tv-deployed-inspector .app-dialog-header button{
 html[data-theme="light"] .tv-deployed-inspector .app-dialog-header button:hover{
  background:#e6f1ea!important;
 }
+
+.tv-deployed-conditions .tv-deployed-checks{display:grid;gap:9px;margin:13px 0}
+.tv-deployed-checks article{display:grid;gap:5px;padding:12px;background:var(--operations-soft);border:1px solid var(--operations-border);border-radius:10px}
+.tv-deployed-checks strong{font-size:11px;color:var(--operations-ink)}
+.tv-deployed-checks span,.tv-deployed-checks small{font-size:11px;color:var(--operations-muted)}
+.tv-deployed-check-track{height:5px;background:var(--operations-border);overflow:hidden;border-radius:5px}
+.tv-deployed-check-track>span{display:block;height:100%;background:var(--operations-accent)}

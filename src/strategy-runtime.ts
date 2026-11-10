@@ -32,7 +32,9 @@ export async function evaluate(loadStrategy, code, datasets, config) {
       name:item.name.slice(0,60),
       passed:typeof item.passed==='boolean'?item.passed:null,
       actual:typeof item.actual==='number'&&Number.isFinite(item.actual)?item.actual:null,
-      threshold:typeof item.threshold==='number'&&Number.isFinite(item.threshold)?item.threshold:null
+      threshold:typeof item.threshold==='number'&&Number.isFinite(item.threshold)?item.threshold:null,
+      operator:['>=','>','<=','<','=='].includes(item.operator)?item.operator:null,
+      unit:typeof item.unit==='string'?item.unit.slice(0,16):null
     })):[];
     decisions.push({action:decision.action,stopLoss:decision.stopLoss,takeProfit:decision.takeProfit,reason:typeof decision.reason==='string'?decision.reason.slice(0,300):'',checks});
   }

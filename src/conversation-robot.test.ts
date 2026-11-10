@@ -14,3 +14,9 @@ it('does not select one of two robots explicitly named in an ambiguous request',
 it('refuses to guess a saved bot from AI speech alone',()=>{
  expect(conversationRobot('make a better version',[{role:'assistant',content:'Gold Digger would be good'}],bots)).toBeNull();
 });
+
+it('keeps the user-named robot for natural live follow-ups',()=>{
+ const turns=[{role:'user',content:'How is ai 2 doing?'},{role:'assistant',content:'ai 2 is running'}];
+ expect(conversationRobot('any trades yet?',turns,bots)?.id).toBe('a');
+ expect(conversationRobot('what conditions are missing?',turns,bots)?.id).toBe('a');
+});

@@ -29,14 +29,14 @@ it('has no network or host environment and interrupts a looping strategy',async(
 
 it('preserves bounded truthful strategy condition diagnostics in isolated live evaluation',async()=>{
  const vm=await getQuickJSWASMModule();
- const source=`export const config={};export function onCandle(ctx){return {action:'WAIT',reason:'ATR threshold not met',checks:[{name:'ATR above threshold',passed:false,actual:0.51,threshold:0.78},{name:'EMA alignment',passed:true,actual:1,threshold:1},{name:'bad',passed:'fake',actual:'unverified',threshold:NaN}]}}`;
+ const source=`export const config={};export function onCandle(ctx){return {action:'WAIT',reason:'ATR threshold not met',checks:[{name:'ATR above threshold',passed:false,actual:0.51,threshold:0.78,operator:null,unit:null},{name:'EMA alignment',passed:true,actual:1,threshold:1,operator:null,unit:null},{name:'bad',passed:'fake',actual:'unverified',threshold:NaN}]}}`;
  const decisions=evaluateStrategyInSandbox(vm,source,datasets,config) as any[];
  expect(decisions.at(-1).action).toBe('WAIT');
  expect(decisions.at(-1).reason).toBe('ATR threshold not met');
  expect(decisions.at(-1).checks).toEqual([
-  {name:'ATR above threshold',passed:false,actual:0.51,threshold:0.78},
-  {name:'EMA alignment',passed:true,actual:1,threshold:1},
-  {name:'bad',passed:null,actual:null,threshold:null}
+  {name:'ATR above threshold',passed:false,actual:0.51,threshold:0.78,operator:null,unit:null},
+  {name:'EMA alignment',passed:true,actual:1,threshold:1,operator:null,unit:null},
+  {name:'bad',passed:null,actual:null,threshold:null,operator:null,unit:null}
  ]);
 });
 it('does not fabricate failed filters for a WAIT without user-supplied diagnostics',async()=>{
