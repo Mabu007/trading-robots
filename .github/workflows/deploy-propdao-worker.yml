@@ -84,7 +84,9 @@ jobs:
           if(response.status!==200)throw Error('Production application is not healthy');
           const d=await response.json();
           if(d.ok!==true)throw Error('Production health is not ready');
-          console.log('Production health verified; compare Vercel production SHA to this GitHub commit before dispatching.');
+          if(d.releaseCommit!==process.env.GITHUB_COMMIT)
+            throw Error('Vercel production SHA is not the release commit: do not deploy Worker before Vercel is ready');
+          console.log('Production health and exact Git SHA are verified.');
           NODE
       - name: Deploy compiled Worker without overriding existing entry variables
         id: deploy
