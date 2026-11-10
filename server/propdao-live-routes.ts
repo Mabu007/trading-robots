@@ -23,6 +23,23 @@ export class PropDAOLiveService{
 
  private reviewKey(uid:string,botId:string,id:string){return `propdao-live-reviews/v1/${process.env.VERCEL_ENV||'development'}/${Buffer.from(uid).toString('base64url')}/${botId}/${id}.json`}
  private backtestKey(uid:string,botId:string){return `user-bots/${Buffer.from(uid).toString('base64url')}/${botId}/backtest.json`}
+ private revisionKey(uid:string,botId:string,grantId:string){
+  return `propdao-live-revisions/v1/${process.env.VERCEL_ENV||'development'}/${Buffer.from(uid).toString('base64url')}/${botId}/${grantId}.json`;
+ }
+ /** Immutable owner- and deployment-scoped code snapshot, not the current
+  * editable strategy.js. Older deployments without snapshots remain unknown. */
+ async revision(uid:string,botId:string,grantId:string){
+  if(!safeId(botId)||!safeId(grantId)||!uid||uid.includes('/'))throw Error('Invalid revision identity');
+  const raw=await this.deps.read(this.revisionKey(uid,botId,grantId));
+  if(!raw)return {available:false,reason:'This historical deployment predates immutable strategy snapshots'};
+  const record=JSON.parse(raw);
+  if(record?.version!==1||record.uid!==uid||record.botId!==botId||record.grantId!==grantId||
+   typeof record.code!=='string'||hash(record.code)!==record.codeHash)
+   throw Error('Stored strategy revision identity mismatch');
+  return {available:true,source:'Immutable owner-verified PropDAO deployment snapshot',
+   botId,grantId,accountId:record.accountId,codeHash:record.codeHash,
+   capturedAt:record.capturedAt,code:record.code};
+ }
  /** A read-only, expiring review of the exact source, account, market and risk. */
  async review(uid:string,botId:string,req:Request){
   const accountId=req.body?.accountId,riskUsd=Number(req.body?.riskUsd),leverage=Number(req.body?.leverage??1);
@@ -273,7 +290,8 @@ export class PropDAOLiveService{
    .map(g=>({...g,runtimeScope:'bot' as const}))];
   const gathered:ExecutionEvent[]=[],failed:string[]=[];
   const decisionSnapshots:Array<{accountId:string;botId:string;grantId:string;codeHash:string|null;
-   candleClose:number;time:number;action:string;reason:string;checks:unknown[]}> = [];
+   candleClose:number;time:number;action:string;reason:string;checks:unknown[];
+   recentCandles?:any[];executionTimeframe?:string;marketSource?:string}> = [];
   const sqlBrokerTrades=new Map<string,any>();
   const sqlCoverage:Array<{botId:string;running:boolean;brokerSync:any;counts:any}> = [];
   // Six concurrent reads at most; never query another user's account.
@@ -329,7 +347,10 @@ export class PropDAOLiveService{
         decisionSnapshots.push({accountId,botId:d.botId,grantId:String(d.grantId),
          codeHash:typeof d.codeHash==='string'?d.codeHash:null,
          candleClose:d.candleClose,time:d.time,action:d.action,reason:d.reason||'',
-         checks:Array.isArray(d.checks)?d.checks.slice(0,16):[]});
+         checks:Array.isArray(d.checks)?d.checks.slice(0,16):[],
+         recentCandles:Array.isArray(d.recentCandles)?d.recentCandles.slice(-20):[],
+         executionTimeframe:typeof d.executionTimeframe==='string'?d.executionTimeframe:null,
+         marketSource:typeof d.marketSource==='string'?d.marketSource:null});
       }
      }
      if(Array.isArray(ledger.events)){
@@ -428,9 +449,23 @@ export class PropDAOLiveService{
   const priorState=await this.runtime(grant,'status');
   if(priorState.pendingIntent)throw Error('Unresolved prior order on this PropDAO account. Use Reconcile pending order in Deploy after checking your PropDAO account.');
   if(priorState.running||priorState.paused)throw Error('This robot is already running. Stop it before deploying a new strategy version.');
+  // Store source before issuing the runtime grant. Never reconstruct old
+  // revisions from current.json after user edits or redeploys.
+  const revisionKey=this.revisionKey(uid,botId,grant.id);
+  const previousRevision=await this.deps.read(revisionKey);
+  if(previousRevision)throw Error('Deployment revision identity collision');
+  await this.deps.write(revisionKey,JSON.stringify({
+   version:1,uid,botId,grantId:grant.id,accountId:grant.accountId,
+   codeHash:grant.codeHash,code:grant.code,capturedAt:now}));
   await this.deps.write(this.key(uid,botId),JSON.stringify(grant));
   try{await this.recordAgent(uid,botId,bot,{state:'deployment_pending',action:'deployment_authorized',grantId:grant.id,expiresAt:grant.expiresAt,codeHash:grant.codeHash,limits:{riskUsd:grant.riskUsd,riskReward,leverage:grant.leverage},authorized:true})}
-  catch(error){if(existing)await this.deps.write(this.key(uid,botId),JSON.stringify(existing));else if(this.deps.remove)await this.deps.remove(this.key(uid,botId));else await this.deps.write(this.key(uid,botId),JSON.stringify({...grant,revokedAt:Date.now()}));throw error}
+  catch(error){
+   if(existing)await this.deps.write(this.key(uid,botId),JSON.stringify(existing));
+   else if(this.deps.remove)await this.deps.remove(this.key(uid,botId));
+   else await this.deps.write(this.key(uid,botId),JSON.stringify({...grant,revokedAt:Date.now()}));
+   if(this.deps.remove)await this.deps.remove(revisionKey).catch(()=>undefined);
+   throw error;
+  }
   try{
    const result=await this.runtime(grant,'deploy',grant);
    // Deployment acknowledgement omits the grant identity. A status read must
@@ -449,6 +484,9 @@ export class PropDAOLiveService{
     if(existing)await this.deps.write(this.key(uid,botId),JSON.stringify(existing));
     else if(this.deps.remove)await this.deps.remove(this.key(uid,botId));
     else await this.deps.write(this.key(uid,botId),JSON.stringify({...grant,revokedAt:Date.now()}));
+    // Only a definite non-submission permits deletion of this candidate
+    // revision. Retain snapshots for ambiguous outcomes and possible fills.
+    if(this.deps.remove)await this.deps.remove(revisionKey).catch(()=>undefined);
     await this.recordAgent(uid,botId,bot,{state:'stopped',action:'deployment_rejected',grantId:existing?.id,expiresAt:existing?.expiresAt,authorized:false,error:reason},true);
    }else{
     // A timeout or malformed response is an unknown outcome. Keep the
@@ -580,6 +618,8 @@ export function propDAOLiveRoutes(app:Express,deps:Dependencies){
   try{return res.json(await service.executionHistory(uid,accountId))}
   catch(error){return res.status(403).json({error:error instanceof Error?error.message:'Account activity unavailable'})}
  });
+ app.get('/api/venues/propdao/bots/:botId/revisions/:grantId',route((uid,id,req)=>
+  service.revision(uid,id,String(req.params.grantId))));
  app.get('/api/venues/propdao/bots/:botId/live',route((uid,id,req)=>service.status(uid,id,typeof req.query.accountId==='string'?req.query.accountId:undefined)));
  app.get('/api/venues/propdao/bots/:botId/live/market',route((uid,id)=>service.market(uid,id)));
  app.post('/api/venues/propdao/bots/:botId/live/review',route((uid,id,req)=>deps.exclusive?deps.exclusive(uid,id,()=>service.review(uid,id,req)):service.review(uid,id,req)));
