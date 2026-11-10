@@ -1,0 +1,12 @@
+.tv-desk-card{--desk-line:color-mix(in srgb,currentColor 15%,transparent);border:1px solid var(--desk-line);border-radius:14px;background:color-mix(in srgb,currentColor 3%,transparent);padding:14px;margin:12px 0;font-size:12px;min-width:0}
+.tv-desk-card header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;font-size:13px}
+.tv-desk-note,.tv-desk-warning{opacity:.76;font-size:11px;line-height:1.6;margin:10px 0 0}
+.tv-desk-warning{font-weight:600}.tv-desk-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin:12px 0}
+.tv-desk-metrics>div{display:grid;gap:6px;border:1px solid var(--desk-line);border-radius:9px;padding:10px;min-width:0}
+.tv-desk-metrics small{font-size:10px;opacity:.72}.tv-desk-metrics strong{font-size:14px;font-variant-numeric:tabular-nums}
+.tv-desk-card details{margin-top:10px;border-top:1px solid var(--desk-line);padding-top:10px}
+.tv-desk-card summary{cursor:pointer;font-weight:600}
+.tv-desk-list{display:grid;gap:7px;margin-top:10px}
+.tv-desk-list>div{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px;padding:7px 0;border-bottom:1px solid var(--desk-line)}
+.tv-desk-list>div small{opacity:.72;flex-basis:100%}
+@media(max-width:550px){.tv-desk-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
