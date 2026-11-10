@@ -1,5 +1,6 @@
 import {DatabaseSync} from 'node:sqlite';
 import {describe,it,expect} from 'vitest';
+import {requiresDurableJournal,type ExecutionStage} from '../shared/propdao-execution-journal';
 import {PropDAOSqlJournal,reconciliationAlarm,nextLiveArchiveAt,type SqlHandle} from './propdao-sql-journal';
 
 function fixture(){
@@ -79,5 +80,16 @@ describe('incremental live Firestore archival schedule',()=>{
  it('rejects invalid clock state instead of silently scheduling a spin loop',()=>{
   expect(()=>nextLiveArchiveAt(Number.NaN,0,0,3)).toThrow();
   expect(()=>nextLiveArchiveAt(now,0,Number.NaN,3)).toThrow();
+ });
+});
+
+describe('order-chain fail-closed journal policy',()=>{
+ it('requires durable records for signals, order submissions and broker outcomes',()=>{
+  for(const stage of ['SIGNAL','SUBMISSION_STARTED','PROTECTED_FILL','CANCELLED_UNFILLED'] as ExecutionStage[])
+   expect(requiresDurableJournal(stage)).toBe(true);
+ });
+ it('keeps observational events best-effort without treating them as fills',()=>{
+  for(const stage of ['ENTRY_SKIPPED','PRE_SUBMIT_REJECTED','OUTCOME_UNKNOWN'] as ExecutionStage[])
+   expect(requiresDurableJournal(stage)).toBe(false);
  });
 });
