@@ -42,6 +42,20 @@ is pending. To conclude, require two separately verified flat broker
 snapshots, at least five minutes since stop, and all archive rows ACKed.
 After verified completion, the extra alarm can be removed.
 
+## Fail-closed trade evidence
+Every BUY/SELL decision must be durably journaled with its code hash
+before order execution. A failed SQL write for SIGNAL or SUBMISSION_STARTED
+prevents the provider submission. When a pre-submit write fails after
+an account lock is acquired, the runtime attempts to release the lock;
+if cleanup cannot be verified, the pending intent remains locked for
+operator reconciliation.
+
+If a confirmed fill or cancellation cannot be durably recorded after
+the provider has responded, the robot halts new entries and retains the
+unresolved intent. This is deliberately conservative: the broker may
+already hold exposure and must be independently checked. WAIT telemetry
+remains best-effort and cannot authorize an order.
+
 ## Firebase
 - users/{uid}/liveTrades/{stableHash}: broker-confirmed closed trade,
   provider ID, account, symbol, side, size, entry/exit, timestamps,
