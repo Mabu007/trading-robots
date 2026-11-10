@@ -31,7 +31,7 @@ export function attributeTrade(t:Trade&{accountId?:string},events:ExecutionEvent
  const accountId=t.accountId??(scopes.length===1?scopes[0]:'');
  return reconcileTradeIdentity({...t,accountId},events);
 }
-export function summarizeDay(trades:Array<Trade&{accountId:string;botId:string|null;attribution:string}>,day:string,coverage:{
+export function summarizeDay(trades:Array<Trade&{accountId:string;botId:string|null;attribution:string;grantId?:string|null;strategyCodeHash?:string|null}>,day:string,coverage:{
  accountsChecked:number;failures:string[];capped:string[];journalWarnings:string[];ledgerAvailable:boolean;writeFailures:number;
 }){
  const unknownTimes=trades.filter(t=>timestamp(t.closedAt)===null).length;
@@ -60,8 +60,22 @@ export function summarizeDay(trades:Array<Trade&{accountId:string;botId:string|n
   conflictingTrades:today.filter(t=>t.attribution==='conflicting-evidence').length,
   unattributedTrades:today.filter(t=>t.attribution!=='exact-provider-identity'&&t.attribution!=='probable-entry-evidence').length,
   byRobot:[...byRobot.values()].map(g=>({...g,pnl:Math.round(g.pnl*1e6)/1e6})),
+  recentTrades:today.slice(0,20).map(t=>({
+   accountId:t.accountId,tradeId:t.id,botId:t.botId,grantId:t.grantId??null,
+   attribution:t.attribution,confidence:t.attribution==='exact-provider-identity'?'verified':t.attribution==='probable-entry-evidence'?'probable':'unknown',
+   strategyCodeHash:t.strategyCodeHash??null,symbol:t.symbol,side:t.side,pnl:t.pnl,fee:t.fee,
+   reason:t.reason,entry:t.entry,exit:t.exit,
+   openedAtUTC:timestamp(t.openedAt)!==null?new Date(timestamp(t.openedAt)!).toISOString():null,
+   closedAtUTC:timestamp(t.closedAt)!==null?new Date(timestamp(t.closedAt)!).toISOString():null
+  })),
+  verifiedRobotPerformance:[...new Set(today.filter(t=>t.attribution==='exact-provider-identity'&&t.botId).map(t=>t.botId!))].slice(0,12).map(botId=>({
+   botId,attribution:'exact-provider-identity',
+   metrics:summarizeDeterministicPerformance(today.filter(t=>t.botId===botId&&t.attribution==='exact-provider-identity').map(t=>({...t,accountId:t.accountId})))
+  })),
   recentLosses:losses.slice(0,12).map(t=>({accountId:t.accountId,tradeId:t.id,botId:t.botId,attribution:t.attribution,
-   side:t.side,symbol:t.symbol,pnl:t.pnl,fee:t.fee,reason:t.reason,entry:t.entry,exit:t.exit,confidence:t.attribution==='exact-provider-identity'?'verified':t.attribution==='probable-entry-evidence'?'probable':'unknown',
+   side:t.side,symbol:t.symbol,pnl:t.pnl,fee:t.fee,reason:t.reason,entry:t.entry,exit:t.exit,
+   grantId:t.grantId??null,strategyCodeHash:t.strategyCodeHash??null,
+   confidence:t.attribution==='exact-provider-identity'?'verified':t.attribution==='probable-entry-evidence'?'probable':'unknown',
    openedAtUTC:timestamp(t.openedAt)!==null?new Date(timestamp(t.openedAt)!).toISOString():null,
    closedAtUTC:timestamp(t.closedAt)!==null?new Date(timestamp(t.closedAt)!).toISOString():null})),
   performanceAllObserved:summarizeDeterministicPerformance(today.map(t=>({...t,accountId:t.accountId}))),
