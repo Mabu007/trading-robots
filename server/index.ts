@@ -112,6 +112,7 @@ async function verifyFirebaseUser(authorization: string | undefined): Promise<{u
 
 app.get('/api/health', (_req, res) => res.json({
  ok:true,
+ releaseCommit:process.env.VERCEL_GIT_COMMIT_SHA||process.env.TV_RELEASE_SHA||null,
  firebase:{clientConfigured:Boolean(process.env.VITE_FIREBASE_API_KEY&&process.env.VITE_FIREBASE_PROJECT_ID&&process.env.VITE_FIREBASE_APP_ID),serverConfigured:FirestoreStore.configured()},
  ai:{provider:'OpenRouter',credentialMode:'user-managed',byoAvailable:Boolean(process.env.AI_CREDENTIAL_ENCRYPTION_KEY),sharedFallbackEnabled:process.env.ALLOW_SHARED_OPENROUTER_KEY==='true'&&Boolean(process.env.OPENROUTER_API_KEY?.trim())},
  aiConfigured:process.env.ALLOW_SHARED_OPENROUTER_KEY==='true'&&Boolean(process.env.OPENROUTER_API_KEY?.trim())
