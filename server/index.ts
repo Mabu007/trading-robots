@@ -873,8 +873,9 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
   const earlierPublicQuestion=[...messages].reverse().filter((m:any)=>m.role==='user').slice(1,4).find((m:any)=>researchRequested(m.content));
   const referentialFollowup=typeof lastUser?.content==='string'&&lastUser.content.length<140&&/\b(what about|and (?:the |what)|how about|what caused|tell me more|why|does (?:that|it)|is (?:it|that))\b/i.test(lastUser.content);
   const currentQuestion=String(lastUser?.content||'');
+  const referenceFocus=/\b(?:last|latest|recent)\s+trade\b/i.test(currentQuestion)?'trade':'loss';
   const conversationRef=conversationId&&FirestoreStore.configured()?
-   await readTradingReferent(marketplace.store,uid,conversationId).catch(()=>null):null;
+   await readTradingReferent(marketplace.store,uid,conversationId,Date.now(),referenceFocus).catch(()=>null):null;
   const referentialTradeQuestion=Boolean(conversationRef)&&
    /\b(?:trade|loss|losing|robot|bot|stop|stopped|entry|exit|signal|its|that|last|position|performance)\b/i.test(currentQuestion);
   const deskIntent=!strategyId&&!backtestId&&req.body?.auditMode!==true&&wantsLiveTradeEvidence(currentQuestion);
@@ -965,7 +966,9 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     if(deskIntent){
      deskEvidence=await runRead('getTradingDeskToday',{venue:'propdao',day:'today',timezone:'Africa/Johannesburg'},
       async()=>{try{return await tradingDesk.today(uid)}catch(e){return {available:false,reason:e instanceof Error?e.message:'Broker read unavailable'}}});
-     if(conversationId&&FirestoreStore.configured())
+     // Do not replace a discussed trade with an unrelated newer loss
+     // during a referential follow-up.
+     if(conversationId&&FirestoreStore.configured()&&!referentialTradeQuestion)
       await rememberDeskTrade(marketplace.store,uid,conversationId,deskEvidence).catch(()=>null);
     }
     // A saved referent is only a scoped pointer, never a claim about current
@@ -979,6 +982,19 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
        await rememberInspectedTrade(marketplace.store,uid,conversationId,result).catch(()=>null);
       return result;
      }).catch(e=>({available:false,reason:e instanceof Error?e.message:'Trade evidence unavailable'}));
+    }
+    // When the trade is linked, read exactly the deployed revision rather
+    // than the mutable latest strategy.js. This is a distinct read-only tool.
+    let referencedRevisionEvidence:unknown;
+    const refLink=(referencedTradeEvidence as any)?.attribution;
+    if(referentialTradeQuestion&&refLink?.botId&&refLink?.grantId&&
+       /\b(?:stop|formula|code|logic|strategy|revision|rule|calculated)\b/i.test(currentQuestion)){
+     referencedRevisionEvidence=await runRead('getDeployedStrategyRevision',{
+      botId:refLink.botId,grantId:refLink.grantId},async()=>{
+      const revision=await propdaoLiveService.revision(uid,refLink.botId,refLink.grantId);
+      return revision.available?{...revision,code:revision.code.slice(0,26000),
+       complete:revision.code.length<=26000,originalLength:revision.code.length}:revision;
+     }).catch(e=>({available:false,reason:e instanceof Error?e.message:'Historical code unavailable'}));
     }
     // Proactively obtain owner-checked live facts for the selected robot.
     // Tool selection does not depend on the model correctly guessing a status tool.
@@ -1090,7 +1106,19 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     }
     const marketTools=req.body?.includeMarketContext===true&&req.body?.auditMode!==true&&!requestedEvidence?{
       ...(researchMode?publicFinanceTools(clientAbort.signal):{}),
-      ...(!researchMode?{inspectBrokerTrade:tool({
+      ...(!researchMode?{getDeployedStrategyRevision:tool({
+       description:'Retrieve the immutable historical PropDAO strategy source used by a specific deployment grant; this is not current editable strategy.js. With omitted identities use the owner-scoped conversation trade reference. Never modify strategy or place trades.',
+       inputSchema:z.object({botId:z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).optional(),
+        grantId:z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).optional()}).strict(),
+       execute:async({botId,grantId})=>{
+        const b=botId??conversationRef?.robotId,g=grantId??conversationRef?.grantId;
+        if(!b||!g||Boolean(botId)!==Boolean(grantId))
+         return {available:false,reason:'Choose a previously verified deployment grant, or inspect a broker trade first.'};
+        const revision=await propdaoLiveService.revision(uid,b,g);
+        return revision.available?{...revision,code:revision.code.slice(0,26000),
+         complete:revision.code.length<=26000,originalLength:revision.code.length}:revision;
+       }
+      }),inspectBrokerTrade:tool({
        description:'Read owner-verified broker trade, original protected-fill evidence, exact/probable robot attribution and deterministic stop/ATR diagnostics. Omitting IDs uses the current conversation trade reference, if one exists. Read-only. Never use simulated backtest trades here.',
        inputSchema:z.object({accountId:z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).optional(),
         tradeId:z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).optional()}).strict(),
@@ -1204,6 +1232,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
       deskEvidence?'VERIFIED LIVE TRADING DESK FOR TODAY (SAST; all authenticated PropDAO accounts): '+JSON.stringify(deskEvidence):'',
       conversationRef?'CONVERSATION TRADE REFERENCE (owner-scoped pointer only; revalidate before asserting facts): '+JSON.stringify(conversationRef):'',
       referencedTradeEvidence?'LATEST VERIFIED TRADE INSPECTION (read-only; note exact versus probable attribution): '+JSON.stringify(referencedTradeEvidence):'',
+      referencedRevisionEvidence?'IMMUTABLE DEPLOYED STRATEGY REVISION (inspect source rules; if incomplete, say so): '+JSON.stringify(referencedRevisionEvidence):'',
       'Trader harness rules: For loss questions, FIRST analyze the authenticated desk-wide broker receipt, not a saved backtest. Break down today by account and exactly linked bot. Never ask which robot before attempting the read. Explain where and when real losses occurred, with verified broker exit reasons, and distinguish root-cause hypotheses from actual strategy filter measurements. Incomplete broker/Worker history must be labeled partial, not zero. A robot may be unattributed due to missing position IDs. Ask one concrete follow-up only if necessary after looking at data. Never silently increase risk or alter broker orders.',
       currentMarketEvidence?'Latest read-only completed-candle market evidence. Distinguish the derivative reference market from the broker and deployed strategy filters: '+JSON.stringify(currentMarketEvidence):'',
       robotOperationsEvidence?'Owner-checked, current robot operations evidence (not strategy filter internals; do not invent missing reasons): '+JSON.stringify(robotOperationsEvidence):'',requestedEvidence?'The server already ran the exact requested read. Use this evidence, and explain an unavailable result clearly: '+JSON.stringify(requestedEvidence):''].filter(Boolean).join('\n\n'),
