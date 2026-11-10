@@ -251,7 +251,10 @@ export class PropDAOLiveService{
   // A dashboard refresh must not spawn a potentially unbounded chain of
   // remote Durable Object status reads. Return an explicit incomplete result.
   if(grants.length>18)return unavailable('More than 18 robot deployments for this account. Execution coverage requires paginated inspection; no absence-of-trades claim can be made.');
-  const sources=[{uid,accountId} as PropGrant,...grants.map(g=>({...g,runtimeScope:'bot' as const}))];
+  // Legacy grants (no runtimeScope) run in the account-scoped DO; querying them as
+  // bot-scoped creates false missing history and duplicates the account history.
+  const sources=[{uid,accountId} as PropGrant,...grants.filter(g=>g.runtimeScope==='bot')
+   .map(g=>({...g,runtimeScope:'bot' as const}))];
   const gathered:ExecutionEvent[]=[],failed:string[]=[];
   // Six concurrent reads at most; never query another user's account.
   for(let i=0;i<sources.length;i+=6){
@@ -260,10 +263,16 @@ export class PropDAOLiveService{
     catch{return {grant,state:null}}
    }));
    for(const {grant,state} of batch){
-    if(!state||state.grant?.accountId&&state.grant.accountId!==accountId||
-       grant.botId&&state.grant?.botId&&state.grant.botId!==grant.botId){
+    if(!state||(state.grant?.accountId&&state.grant.accountId!==accountId)||
+       (grant.botId&&(!state.grant||state.grant.botId!==grant.botId||
+        state.grant.accountId!==accountId))){
      failed.push(grant.botId||'legacy');continue;
     }
+    // A Worker running the old code cannot produce structured order outcomes.
+    // Display its retained text events, but do not call this complete coverage.
+    if(!Array.isArray(state.executionEvents)&&
+       (state.grant||(Array.isArray(state.events)&&state.events.length>0)))
+     failed.push(grant.botId||'legacy');
     const structured=safeExecutionEvents(state.executionEvents,accountId);
     const old=oldWorkerEvents(state.events,accountId);
     // Never attribute old free-text Worker events to an active bot.
