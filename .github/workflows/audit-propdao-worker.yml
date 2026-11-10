@@ -30,6 +30,6 @@ jobs:
         with:
           node-version: '24'
       - name: Check audit contract without network calls
-        run: node --test scripts/verify-propdao-worker.test.mjs
+        run: node --test scripts/verify-propdao-worker.test.mjs scripts/rollback-propdao-worker.test.mjs
       - name: Read currently deployed Cloudflare bindings and authenticated health (NO WRITES)
         run: node scripts/verify-propdao-worker.mjs
