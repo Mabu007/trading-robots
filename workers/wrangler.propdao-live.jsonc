@@ -5,6 +5,6 @@
  "workers_dev":true,
  "durable_objects":{"bindings":[{"name":"BOTS","class_name":"PropDAOLiveBot"}]},
  "migrations":[{"tag":"v1","new_sqlite_classes":["PropDAOLiveBot"]}],
- "vars":{"PROPDAO_CONTROL_URL":"https://trading-robots.vercel.app","PROPDAO_LIVE_ENABLED":"false"},
+ "vars":{"PROPDAO_CONTROL_URL":"https://trading-robots.vercel.app","PROPDAO_LIVE_ENABLED":"true"},
  "observability":{"enabled":true}
 }
