@@ -788,7 +788,7 @@ function App(){
   }
   if(command==='edit'&&!focusedCode&&code.length>45000){setChat([...next,{role:'assistant',content:'This source is too long to edit safely in one chat request. Use a shorter strategy or edit it directly.'}]);return;}
   if(command==='edit')setNewCodeTarget(null);
-  if(!focusedCode&&referenced&&command!=='create'&&command!=='backtest'){
+  if(!focusedCode&&referenced&&!insightBot&&command!=='create'&&command!=='backtest'){
    try{
     const response=await request<{code:string}>('/api/user-bots/'+encodeURIComponent(referenced.bot.id)+'/current','GET');
     checkpoint();
