@@ -1,5 +1,6 @@
 import './trading-desk-card.css';
-type Loss={accountId:string;tradeId:string;botId:string|null;side:string;symbol:string;pnl:number;reason:string;closedAtUTC:string|null};
+type Loss={accountId:string;tradeId:string;botId:string|null;attribution?:string;confidence?:string;
+ side:string;symbol:string;pnl:number;reason:string;closedAtUTC:string|null};
 export type DeskView={available?:boolean;day?:string;accountsChecked?:number;closedTradesToday?:number;reportedPnl?:number;
  losses?:number;wins?:number;matchedRobotTrades?:number;probableRobotTrades?:number;
  conflictingRobotTrades?:number;unattributedTrades?:number;recentLosses?:Loss[];partial?:boolean;
@@ -26,7 +27,11 @@ export function TradingDeskCard({report}:{report:DeskView}){
   </div></details>}
   {!!report.recentLosses?.length&&<details><summary>Recent losing fills</summary><div className="tv-desk-list">
    {report.recentLosses.slice(0,12).map(x=><div key={x.accountId+':'+x.tradeId}><span>{x.symbol} {x.side} · {localTime(x.closedAtUTC)}</span><strong>{money(x.pnl)}</strong>
-    <small>{x.reason||'Exit unspecified'} · {x.botId||'Robot unverified'}</small></div>)}
+    <small>{x.reason||'Exit unspecified'} · {x.botId||'Robot unverified'} · {
+     x.attribution==='exact-provider-identity'?'Verified provider ID':
+     x.attribution==='probable-entry-evidence'?'Probable — not verified':
+     x.attribution==='conflicting-evidence'?'Conflicting evidence':'Attribution unknown'
+    }</small></div>)}
   </div></details>}
   {report.partial&&<p className="tv-desk-warning">Partial coverage: some records, Worker events, or historical trades may be missing.</p>}
   <p className="tv-desk-note">Broker-reported P/L is not adjusted for fees here: fee inclusion is unverified. Probable robot links are not proof; SL exits alone do not identify the strategy defect.</p>
