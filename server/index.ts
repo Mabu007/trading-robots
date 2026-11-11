@@ -5,6 +5,7 @@ import {explicitBacktestRequest} from '../src/chat-action-boundary.ts';
 import {filterReadiness} from '../src/strategy-check-readiness.ts';
 import {completedMarketEvidence} from '../src/market-condition-evidence.ts';
 import {wantsLiveTradeEvidence} from '../src/live-trade-intent.ts';
+import {wantsRobotEnvironment} from '../src/robot-environment-intent.ts';
 import {analyzeLiveTradeLosses} from './live-trade-analysis.ts';
 import {TradingDesk} from './trading-desk.ts';
 import {watchOutputs} from './watch-outputs.ts';
@@ -861,9 +862,12 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
   const earlierPublicQuestion=[...messages].reverse().filter((m:any)=>m.role==='user').slice(1,4).find((m:any)=>researchRequested(m.content));
   const referentialFollowup=typeof lastUser?.content==='string'&&lastUser.content.length<140&&/\b(what about|and (?:the |what)|how about|what caused|tell me more|why|does (?:that|it)|is (?:it|that))\b/i.test(lastUser.content);
   const currentQuestion=String(lastUser?.content||'');
+  const priorRobotContext=messages.slice(-7,-1).some((m:any)=>m?.role==='user'&&wantsRobotEnvironment(m.content));
+  const robotContextIntent=wantsRobotEnvironment(currentQuestion)||
+    Boolean(priorRobotContext&&/\b(?:it|its|that|the same|why|no trades|how come|again|working|running)\b/i.test(currentQuestion));
   const deskIntent=!strategyId&&!backtestId&&req.body?.auditMode!==true&&wantsLiveTradeEvidence(currentQuestion);
   const officialResearch=publicFinanceRequested(currentQuestion);
-  const researchMode=!deskIntent&&!robotId&&!strategyId&&!backtestId&&req.body?.researchMode===true&&req.body?.auditMode!==true&&(officialResearch||researchRequested(lastUser?.content)||Boolean(referentialFollowup&&earlierPublicQuestion));
+  const researchMode=!deskIntent&&!robotContextIntent&&!robotId&&!strategyId&&!backtestId&&req.body?.researchMode===true&&req.body?.auditMode!==true&&(officialResearch||researchRequested(lastUser?.content)||Boolean(referentialFollowup&&earlierPublicQuestion));
   let aiMessages=[{role:'system',content:vibesPersona},...messages];
   let publicEvidence:Awaited<ReturnType<typeof researchBrief>>|undefined;
   if(researchMode){
@@ -948,26 +952,43 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     let deskEvidence:unknown;
     if(deskIntent)deskEvidence=await runRead('getTradingDeskToday',{venue:'propdao',day:'today',timezone:'Africa/Johannesburg'},
       async()=>{try{return await tradingDesk.today(uid)}catch(e){return {available:false,reason:e instanceof Error?e.message:'Broker read unavailable'}}});
+    // Resolve an implicit "my running robot" reference from authenticated
+    // deployment grants AND current Worker state. Public research must never
+    // swallow this private robot question or make the model guess an ID.
+    let effectiveRobotId=robotId;
+    let robotEnvironmentEvidence:unknown;
+    if(!researchMode&&!strategyId&&!backtestId&&(robotContextIntent||robotId)){
+     robotEnvironmentEvidence=await runRead('discoverRunningPropDAORobots',
+       {requestedBotId:robotId??null},async()=>{
+        try{return await propdaoLiveService.discoverRobotEnvironment(uid,robotId)}
+        catch(error){return {available:false,kind:'unavailable',
+          reason:error instanceof Error?error.message:'Owned robot environment unavailable'}}
+       });
+     const environment=robotEnvironmentEvidence as {selection?:{robotId?:string};kind?:string};
+     if(environment?.selection?.robotId&&
+        ['resolved','paused','unverified'].includes(environment.kind??''))
+      effectiveRobotId=environment.selection.robotId;
+    }
     // Proactively obtain owner-checked live facts for the selected robot.
     // Tool selection does not depend on the model correctly guessing a status tool.
     let robotOperationsEvidence:unknown;
-    if(robotId&&!researchMode&&!strategyId&&!backtestId){
-     robotOperationsEvidence=await runRead('getPropDAORobotOperations',{botId:robotId},async()=>{
+    if(effectiveRobotId&&!researchMode&&!strategyId&&!backtestId){
+     robotOperationsEvidence=await runRead('getPropDAORobotOperations',{botId:effectiveRobotId},async()=>{
       try{
        // The broker read remains available when Worker health is unavailable.
        // Never let an unreachable Worker force a backtest-only AI answer.
        const lossIntent=wantsLiveTradeEvidence(currentQuestion);
        const [runtimeResult,historyResult]=await Promise.allSettled([
-        propdaoLiveService.status(uid,robotId),
-        lossIntent?propdaoLiveService.accountTradeHistory(uid,robotId):Promise.resolve(null)
+        propdaoLiveService.status(uid,effectiveRobotId),
+        lossIntent?propdaoLiveService.accountTradeHistory(uid,effectiveRobotId):Promise.resolve(null)
        ]);
        const directHistory=historyResult.status==='fulfilled'?historyResult.value:null;
        const state=runtimeResult.status==='fulfilled'?runtimeResult.value:null;
        const brokerReport=directHistory?.available&&Array.isArray(directHistory.trades)
-        ?analyzeLiveTradeLosses({trades:directHistory.trades,accountId:directHistory.accountId!,botId:robotId,
+        ?analyzeLiveTradeLosses({trades:directHistory.trades,accountId:directHistory.accountId!,botId:effectiveRobotId,
           executionEvents:state?.executionEvents,now:Date.now()}):null;
        if(!state)return {
-        available:false,running:null,botId:robotId,fetchedAt:new Date().toISOString(),
+        available:false,running:null,botId:effectiveRobotId,fetchedAt:new Date().toISOString(),
         error:runtimeResult.status==='rejected'&&runtimeResult.reason instanceof Error?runtimeResult.reason.message:'Worker runtime unavailable',
         liveTradeHistoryAvailable:brokerReport!==null,
         liveTradeHistory:brokerReport,
@@ -980,7 +1001,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
        return {
         available:state.deployed===true&&!state.uncertain&&!state.statusUnavailable,
         source:'Owner-scoped PropDAO deployment, Cloudflare Worker runtime and direct broker status',
-        fetchedAt:new Date().toISOString(),botId:robotId,accountId:state.accountId??null,
+        fetchedAt:new Date().toISOString(),botId:effectiveRobotId,accountId:state.accountId??null,
         running:state.running===true,uncertain:Boolean(state.uncertain||state.statusUnavailable),
         lastDecision:evaluation&&typeof evaluation==='object'?{
          action:evaluation.action??null,reason:evaluation.reason||null,readiness:filterReadiness(evaluation.checks),
@@ -1018,7 +1039,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
         limitation:'WAIT without reported filters does not identify which strategy threshold failed. A broker trade history read verifies account activity only; missing linked provider position/intent IDs prevent attribution to this specific robot.',
         error:state.error??state.accountError??null
        };
-      }catch(error){return {available:false,botId:robotId,fetchedAt:new Date().toISOString(),
+      }catch(error){return {available:false,botId:effectiveRobotId,fetchedAt:new Date().toISOString(),
        error:error instanceof Error?error.message:'Robot operations read unavailable',
        limitation:'Cannot verify status, filters or market conditions.'};}
      });
@@ -1026,10 +1047,10 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     let currentMarketEvidence:unknown;
     const wantsFreshMarket=!strategyId&&!backtestId&&!researchMode&&
      /\b(?:market|right now|currently|volatility|rsi|atr|ema|price action|market conditions|suitable|trending|consolidat|choppy)\b/i.test(currentQuestion);
-    if(wantsFreshMarket)currentMarketEvidence=await runRead('getCurrentMarketConditions',{botId:robotId??null,asset:selectedAsset??null},async()=>{
+    if(wantsFreshMarket)currentMarketEvidence=await runRead('getCurrentMarketConditions',{botId:effectiveRobotId??null,asset:selectedAsset??null},async()=>{
      try{
-      if(robotId){
-       const sample=await propdaoLiveService.market(uid,robotId);
+      if(effectiveRobotId){
+       const sample=await propdaoLiveService.market(uid,effectiveRobotId);
        return completedMarketEvidence({symbol:sample.symbol,source:'Hyperliquid reference for PropDAO robot',
         timeframe:sample.timeframe,bars:sample.candles,nowSeconds:Date.now()/1000});
       }
@@ -1058,7 +1079,11 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     }
     const marketTools=req.body?.includeMarketContext===true&&req.body?.auditMode!==true&&!requestedEvidence?{
       ...(researchMode?publicFinanceTools(clientAbort.signal):{}),
-      ...(!researchMode?{getTradingDeskToday:tool({
+      ...(!researchMode?{getRunningPropDAORobotEnvironment:tool({
+       description:'Discover user-owned PropDAO live deployments and inspect current Worker state, deployed strategy source/config/risk/decisions and broker exposure. If robot ID is omitted, find the actual currently running robot without asking the user for its ID. Read-only; never assume old grants mean running.',
+       inputSchema:z.object({botId:z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).optional()}).strict(),
+       execute:async({botId})=>propdaoLiveService.discoverRobotEnvironment(uid,botId)
+      }),getTradingDeskToday:tool({
        description:'Read current user-owned PropDAO accounts, today (South Africa time) closed broker trades, loss streak and P/L, exact robot attribution, and Firestore coverage. Use for portfolio-level questions such as "papi why we losing" even if NO robot is named. This is read-only.',
        inputSchema:z.object({}).strict(),
        execute:async()=>tradingDesk.today(uid)
@@ -1068,8 +1093,8 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
        inputSchema:z.object({asset:z.enum(['GOLDUSDC','BTC','ETH']),timeframe:z.enum(['m1','m5','m15']).default('m1')}).strict(),
        execute:async({asset,timeframe})=>{
         try{
-         if(robotId&&asset==='GOLDUSDC'){
-          const sample=await propdaoLiveService.market(uid,robotId);
+         if(effectiveRobotId&&asset==='GOLDUSDC'){
+          const sample=await propdaoLiveService.market(uid,effectiveRobotId);
           return completedMarketEvidence({symbol:sample.symbol,source:'Hyperliquid reference for PropDAO robot',
            timeframe:sample.timeframe,bars:sample.candles,nowSeconds:Date.now()/1000});
          }
@@ -1154,6 +1179,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
       deskEvidence?'VERIFIED LIVE TRADING DESK FOR TODAY (SAST; all authenticated PropDAO accounts): '+JSON.stringify(deskEvidence):'',
       'Trader harness rules: For loss questions, FIRST analyze the authenticated desk-wide broker receipt, not a saved backtest. Break down today by account and exactly linked bot. Never ask which robot before attempting the read. Explain where and when real losses occurred, with verified broker exit reasons, and distinguish root-cause hypotheses from actual strategy filter measurements. Incomplete broker/Worker history must be labeled partial, not zero. A robot may be unattributed due to missing position IDs. Ask one concrete follow-up only if necessary after looking at data. Never silently increase risk or alter broker orders.',
       currentMarketEvidence?'Latest read-only completed-candle market evidence. Distinguish the derivative reference market from the broker and deployed strategy filters: '+JSON.stringify(currentMarketEvidence):'',
+      robotEnvironmentEvidence?'AUTHENTICATED DEPLOYED ROBOT DISCOVERY AND ENVIRONMENT. This is the source of truth for robot selection and deployed strategy code; if kind=ambiguous ask which candidate, if kind=unverified do not claim running; do not say you cannot see deployed robots when this evidence is available. Never promise profitability or call conditions optimal without comparing actual code to current completed market candles: '+JSON.stringify(robotEnvironmentEvidence):'',
       robotOperationsEvidence?'Owner-checked, current robot operations evidence (not strategy filter internals; do not invent missing reasons): '+JSON.stringify(robotOperationsEvidence):'',requestedEvidence?'The server already ran the exact requested read. Use this evidence, and explain an unavailable result clearly: '+JSON.stringify(requestedEvidence):''].filter(Boolean).join('\n\n'),
       messages:conversationalMessages,
       temperature:0.2,maxOutputTokens:maxTokens,tools,stopWhen:stepCountIs(5),maxRetries:0,
