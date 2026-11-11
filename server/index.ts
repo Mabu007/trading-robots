@@ -5,6 +5,7 @@ import {explicitBacktestRequest} from '../src/chat-action-boundary.ts';
 import {filterReadiness} from '../src/strategy-check-readiness.ts';
 import {completedMarketEvidence} from '../src/market-condition-evidence.ts';
 import {wantsLiveTradeEvidence} from '../src/live-trade-intent.ts';
+import {robotCardEvidence} from '../src/robot-context-card.ts';
 import {wantsRobotEnvironment} from '../src/robot-environment-intent.ts';
 import {analyzeLiveTradeLosses} from './live-trade-analysis.ts';
 import {TradingDesk} from './trading-desk.ts';
@@ -997,7 +998,9 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
    /\b(?:read|show|load|inspect|view|what|which|see|understand)\b[\s\S]{0,70}\b(?:source|strategy|robot|bot|code|strategy\.js)\b/i.test(currentQuestion);
   const robotContextIntent=wantsRobotEnvironment(currentQuestion)||
     Boolean(priorRobotContext&&/\b(?:it|its|that|the same|why|no trades|how come|again|working|running)\b/i.test(currentQuestion));
-  const deskIntent=!strategyId&&!backtestId&&req.body?.auditMode!==true&&wantsLiveTradeEvidence(currentQuestion);
+  // Account-wide broker history remains useful for a named robot diagnosis,
+  // but its evidence must be labelled account-scoped, not robot performance.
+  const deskIntent=!backtestId&&req.body?.auditMode!==true&&wantsLiveTradeEvidence(currentQuestion);
   const officialResearch=publicFinanceRequested(currentQuestion);
   const researchMode=!deskIntent&&!strategySourceRequested&&!robotContextIntent&&!robotId&&!strategyId&&!backtestId&&req.body?.researchMode===true&&req.body?.auditMode!==true&&(officialResearch||researchRequested(lastUser?.content)||Boolean(referentialFollowup&&earlierPublicQuestion));
   let aiMessages=[{role:'system',content:vibesPersona},...messages];
@@ -1101,12 +1104,13 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     // Resolve an implicit "my running robot" reference from authenticated
     // deployment grants AND current Worker state. Public research must never
     // swallow this private robot question or make the model guess an ID.
-    let effectiveRobotId=robotId;
+    let effectiveRobotId=robotId??(robotContextIntent||deskIntent?strategyId:undefined);
     let robotEnvironmentEvidence:unknown;
-    if(!researchMode&&!strategyId&&!backtestId&&(robotContextIntent||strategySourceRequested||robotId)){
+    if(!researchMode&&!backtestId&&(robotContextIntent||strategySourceRequested||robotId||
+      Boolean(strategyId&&deskIntent))){
      robotEnvironmentEvidence=await runRead('discoverRunningPropDAORobots',
-       {requestedBotId:robotId??null},async()=>{
-        try{return await propdaoLiveService.discoverRobotEnvironment(uid,robotId)}
+       {requestedBotId:effectiveRobotId??null},async()=>{
+        try{return await propdaoLiveService.discoverRobotEnvironment(uid,effectiveRobotId)}
         catch(error){return {available:false,kind:'unavailable',
           reason:error instanceof Error?error.message:'Owned robot environment unavailable'}}
        });
@@ -1138,7 +1142,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     // Avoid a second expensive broker/Worker status request for market-fit
     // conversations. Loss investigations still fetch the deeper trade journal.
     if(effectiveRobotId&&(!discovered||wantsLiveTradeEvidence(currentQuestion))&&
-       !researchMode&&!strategyId&&!backtestId){
+       !researchMode&&!backtestId){
      robotOperationsEvidence=await runRead('getPropDAORobotOperations',{botId:effectiveRobotId},async()=>{
       try{
        // The broker read remains available when Worker health is unavailable.
@@ -1211,7 +1215,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
      });
     }
     let currentMarketEvidence:unknown;
-    const wantsFreshMarket=!strategyId&&!backtestId&&!researchMode&&
+    const wantsFreshMarket=!backtestId&&!researchMode&&
      /\b(?:market|right now|currently|volatility|rsi|atr|ema|price action|market conditions|suitable|trending|consolidat|choppy)\b/i.test(currentQuestion);
     if(wantsFreshMarket)currentMarketEvidence=await runRead('getCurrentMarketConditions',{botId:effectiveRobotId??null,asset:selectedAsset??null},async()=>{
      try{
@@ -1230,6 +1234,10 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
        timeframe:'m1',bars:sample.candles,nowSeconds:Date.now()/1000});
      }catch(error){return {available:false,reason:error instanceof Error?error.message:'Fresh reference candles unavailable'};}
     });
+    let robotCard:unknown;
+    if(robotEnvironmentEvidence&&!researchMode&&(robotContextIntent||Boolean(robotId))){
+     robotCard=await runRead('getRobotContextCard',{botId:effectiveRobotId??null},async()=>robotCardEvidence(robotEnvironmentEvidence,deskEvidence));
+    }
     let requestedEvidence:unknown;
     const explicitUrl=officialResearch&&researchMode?currentQuestion.match(/https:\/\/[^\s<>"'\x60]+/)?.[0]?.replace(/[).,;!?]+$/,''):undefined;
     if(explicitUrl)requestedEvidence=await runRead('fetchPublicSource',{url:explicitUrl},async()=>{
@@ -1416,6 +1424,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
       'Trader harness rules: For loss questions, FIRST analyze the authenticated desk-wide broker receipt, not a saved backtest. Break down today by account and exactly linked bot. Never ask which robot before attempting the read. Explain where and when real losses occurred, with verified broker exit reasons, and distinguish root-cause hypotheses from actual strategy filter measurements. Incomplete broker/Worker history must be labeled partial, not zero. A robot may be unattributed due to missing position IDs. Ask one concrete follow-up only if necessary after looking at data. Never silently increase risk or alter broker orders.',
       currentMarketEvidence?'Latest read-only completed-candle market evidence. Distinguish the derivative reference market from the broker and deployed strategy filters: '+JSON.stringify(currentMarketEvidence):'',
       editableSourceEvidence?'USER-OWNED SAVED STRATEGY.JS READ (independent of tool selection): '+JSON.stringify(editableSourceEvidence)+'. If available=true you CAN inspect source; do not say the user must paste it. An incomplete window is not the full file; read more lines before editing an unseen section.': '',
+      robotCard?'ROBOT-SCOPED EVIDENCE: '+JSON.stringify(robotCard)+'. NEVER substitute account-wide P/L for verified robot performance. Only exact broker provider identities are verified robot losses. Probable links are hypotheses and must be labelled. An SL code alone does not prove the stop is too tight, a reversal, ATR conditions, or time-of-day causality. Require entry-time candles and revision-specific decision/stop evidence to diagnose; clearly state unknowns.': '',
       robotEnvironmentEvidence?'AUTHENTICATED DEPLOYED ROBOT DISCOVERY AND ENVIRONMENT. This is the source of truth for robot selection and deployed strategy code; if kind=ambiguous ask which candidate, if kind=unverified do not claim running; do not say you cannot see deployed robots when this evidence is available. Never promise profitability or call conditions optimal without comparing actual code to current completed market candles: '+JSON.stringify(robotEnvironmentEvidence):'',
       robotOperationsEvidence?'Owner-checked, current robot operations evidence (not strategy filter internals; do not invent missing reasons): '+JSON.stringify(robotOperationsEvidence):'',requestedEvidence?'The server already ran the exact requested read. Use this evidence, and explain an unavailable result clearly: '+JSON.stringify(requestedEvidence):''].filter(Boolean).join('\n\n'),
       messages:conversationalMessages,
