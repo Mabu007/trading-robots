@@ -249,7 +249,7 @@ export class PropDAOLiveService{
   if(!this.deps.list)return {available:false,reason:'Owned deployment registry is unavailable',checkedAt};
   const owned=await this.deps.accounts.list(uid);
   if(!owned.connected)return {available:false,reason:'PropDAO account is not connected',checkedAt};
-  const accountIds=new Set(owned.accounts.map(a=>a.accountId));
+  const accountIds=new Set(owned.accounts.map((a:{accountId:string})=>a.accountId));
   const prefix='propdao-live/v1/'+(process.env.VERCEL_ENV||'development')+'/'+Buffer.from(uid).toString('base64url')+'/';
   const keys=await this.deps.list(prefix,101);
   if(keys.length>100)return {available:false,reason:'More than 100 deployed grants; registry cannot be exhaustively checked',checkedAt};
