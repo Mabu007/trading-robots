@@ -66,3 +66,35 @@ it('labels broker pagination incomplete when max audit records are exhausted',as
  expect(history).toMatchObject({complete:false,capped:true,providerTotal:1000,pages:1});
  expect(history.trades).toHaveLength(100);
 });
+
+it('loads an owner-scoped fee profile and reconciles genuine broker fee fields without re-deducting',async()=>{
+ const saved=new Map<string,string>();
+ const key='pd_live_abcdefghijklmnopqrstuvwxyz123456';
+ const request=vi.fn(async(url:string,init?:RequestInit)=>{
+  if(String(url).endsWith('/accounts'))return Response.json({accounts:[
+   {account_id:'prop-1',status:'active'}]});
+  if(String(url).endsWith('/markets'))return Response.json({fees:{maker:.00015,taker:.00045},
+   data:[{symbol:'GOLDUSDC',lotStep:.0001,maxLeverage:1.5}]});
+  if(String(url).includes('/accounts/prop-1/trades'))return Response.json({data:[{
+   id:'hist-1',symbol:'GOLDUSDC',side:'SELL',qty:.2,entry:4000,exit:4001,
+   grossPnl:-.2,pnl:-.92191,fee:.72009,openFee:.36,closeFee:.36009,
+   fundingPaid:.00182,openedAt:1794380000000,closedAt:1794381000000,
+   reason:'Stop Loss',exitLiquidity:'taker',slippagePct:0
+  }],total:1});
+  return Response.json({ok:true});
+ });
+ const accounts=new PropDAOAccounts({
+  read:async(k:string)=>saved.get(k)??null,write:async(k:string,v:string)=>{saved.set(k,v)},
+  remove:async(k:string)=>{saved.delete(k)}
+ },request as typeof fetch,()=>Buffer.alloc(32,4).toString('base64'));
+ await accounts.connect('alice',key);
+ const out=await accounts.backtestCostProfile('alice','prop-1','GOLDUSDC');
+ expect(out.profile.feeRate).toEqual({maker:.00015,taker:.00045});
+ expect(out.missingAssumptions).toContain('bidAskSpread');
+ expect(out.readyForBrokerEquivalentBacktest).toBe(false);
+ expect(out.samples).toHaveLength(1);
+ expect(out.samples[0].brokerReportedNetPnlUsd).toBeCloseTo(-.92191);
+ expect(out.samples[0].feeLegsReconciled).toBe(true);
+ await expect(accounts.backtestCostProfile('alice','prop-other','GOLDUSDC')).rejects.toThrow(/not found/);
+ await expect(accounts.backtestCostProfile('bob','prop-1','GOLDUSDC')).rejects.toThrow(/Connect/);
+});
