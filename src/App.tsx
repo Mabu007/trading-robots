@@ -6,6 +6,10 @@ import {wantsLiveTradeEvidence} from './live-trade-intent';
 import {ChatEvidence} from './components/ChatEvidence';
 import {ChatStrategyApproval} from './components/ChatStrategyApproval';
 import {TradingDeskCard,type DeskView} from './components/TradingDeskCard';
+import {RobotContextCard} from './components/RobotContextCard';
+import {MarketContextCard} from './components/MarketContextCard';
+import {selectChatCard} from './chat-card-routing';
+import {robotCardEvidence,type RobotCardEvidence} from './robot-context-card';
 import {WatchOutputFields,type MonitorOutput} from './components/WatchOutputFields';
 import {updateToolTrace,type ToolTrace} from './tool-trace';
 import {useChat} from '@ai-sdk/react';
@@ -100,6 +104,33 @@ function DeskAnswer({content,trace}:{content:string;trace:ToolTrace[]}){
  const split=content.indexOf('\n\n');
  return <div className="tv-market-answer"><ChatText content={split>=0?content.slice(0,split):content}/>
   <TradingDeskCard report={result}/>{split>=0&&<ChatText content={content.slice(split+2)}/>}</div>;
+}
+function toolResult(trace:ToolTrace[],name:string){
+ return trace.find(t=>t.name===name&&t.state==='completed'&&
+  t.output&&typeof t.output==='object')?.output;
+}
+function QuestionEvidenceAnswer({content,trace,question,bots}:{
+ content:string;trace:ToolTrace[];question:string;bots:CloudBot[]
+}){
+ const kind=selectChatCard(question,trace);
+ if(kind==='desk')return <DeskAnswer content={content} trace={trace}/>;
+ const report=kind==='robot'?
+  (toolResult(trace,'getRobotContextCard') as RobotCardEvidence|undefined)||
+  robotCardEvidence(toolResult(trace,'discoverRunningPropDAORobots'),toolResult(trace,'getTradingDeskToday')):null;
+ const market=kind==='market'?toolResult(trace,'getCurrentMarketConditions')||
+  toolResult(trace,'getPublicMarketEvidence'):null;
+ if(!report&&!market)return <ChatText content={content}/>;
+ const split=content.indexOf('\n\n');
+ return <div className="tv-market-answer">
+  <ChatText content={split>=0?content.slice(0,split):content}/>
+  {report&&<RobotContextCard report={report} name={bots.find(bot=>bot.id===report.robotId)?.name}/>}
+  {market&&<MarketContextCard report={market as any}/>}
+  {split>=0&&<ChatText content={content.slice(split+2)}/>}
+ </div>;
+}
+function questionBefore(chat:Chat[],index:number){
+ for(let i=index-1;i>=0;i--)if(chat[i].role==='user')return chat[i].content;
+ return '';
 }
 type Draft={venue?:Venue;created:boolean;id:string;name:string;asset:string;prompt:string;code:string;view:'code'|'chart';chat:Chat[]};
 const fallbackAssets:string[]=[];const defaultPrompt='On the 1-minute chart, find short-term trend pullbacks. Enter after a bullish or bearish candle closes back in the trend direction. Place a protective stop beyond the recent swing and target 2R.';
@@ -1375,7 +1406,8 @@ SAVED CODE CATALOGUE (user-owned names/metadata; load the exact source before de
  preferredPropAccountId={tradesAccountFocus?.id}
  onPropAccountChanged={()=>setTradesAccountFocus(null)} onConnect={()=>setBrokerPickerOpen(true)} onInspect={(broker,kind,record)=>{setPrimaryArea('chat');setAgentWorkspace('overview');setChatCollapsed(false);if(window.innerWidth<=720)setMobilePanel('chat');const symbol=String(record.symbol||record.currencyPair||'');const context:ChatContext={kind:'trade-audit',label:'Provider '+kind+' · '+(symbol||broker),data:{source:broker.toUpperCase()+' account response (read only)',venue:broker,asset:symbol,tradeKind:kind,providerRecord:record,limitations:'Only the attached broker record is supplied. Candles, execution sequence and news are not attached.'}};void sendChat('Inspect this '+kind+' using the attached provider record. Explain what is known and do not invent missing details.',context)}}/></div>
  {conversationLibrary&&<div className="trade-modal-backdrop"><section className="trade-modal" role="dialog" aria-modal="true" aria-label="Conversations"><header><h2>Conversations</h2><button onClick={()=>setConversationLibrary(null)} aria-label="Close conversations">×</button></header>{conversationLibrary.length?conversationLibrary.map(c=><button className="tv-conversation-entry" key={c.id} disabled={!!busy&&!chatCanStop} onClick={()=>void switchConversation(c.id)}>{c.title}</button>):<p>Your saved conversations will appear here.</p>}<p>Conversations are separate from agent execution.</p></section></div>}
- <div className="studio-body"><aside className={`chat-side ${chatCollapsed?'collapsed':''} ${mobilePanel==='chat'?'mobile-open':''}`}><div className="side-head"><div><span className="ai-orb"><Sparkles size={14}/></span><strong>VIBES</strong>{cloudClient&&<button className="text-button" onClick={()=>setAiSettingsOpen(true)}>AI settings</button>}<span className={`online-dot ${aiError?'offline':'idle'}`}/></div><button className="icon-button hide-small" onClick={()=>setChatCollapsed(!chatCollapsed)}>{chatCollapsed?<PanelLeftOpen size={15}/>:<PanelLeftClose size={15}/>}</button><button className="icon-button mobile-only" onClick={()=>setMobilePanel(null)}><X size={17}/></button></div>{!chatCollapsed&&<><div className="chat-messages" ref={chatScrollRef} onScroll={event=>{const el=event.currentTarget;followChat.current=el.scrollHeight-el.scrollTop-el.clientHeight<72}}>{chat.length===0?<div className="chat-empty"><div className="chat-empty-icon"><MessageCircle size={19}/></div><strong>What are we looking at today?</strong><p>Talk markets, unpack a move, or build a strategy with VIBES.</p>{cloudClient&&<button type="button" className="tv-connect-ai" onClick={()=>setAiSettingsOpen(true)}><Sparkles size={15}/>Connect or manage your AI</button>}<div className="suggestions">{['Teach me forex from zero','Explain risk per trade','Explore historical Gold data','Latest Gold headlines','Build a draft strategy'].map(s=><button key={s} onClick={()=>setChatInput(s)}>{s}<ArrowRight size={12}/></button>)}</div></div>:chat.map((m,i)=><div className={`message ${m.role}`} key={i}><div className="message-avatar">{m.role==='assistant'?<Sparkles size={12}/>:<span>Y</span>}</div><div className="message-content">{m.role==='user'?<div className="tv-user-text">{m.content}</div>:m.context?.kind==='market-analysis'?<MarketAnswer content={m.content} report={m.context.data as MarketReport}/>:m.toolTrace?.some(t=>t.name==='getTradingDeskToday'&&t.state==='completed')?<DeskAnswer content={m.content} trace={m.toolTrace}/>:<ChatText content={m.content}/>}{m.context?.kind==='agent-task'&&cloudClient&&typeof m.context.data?.taskId==='string'&&<AgentTaskCard client={cloudClient} taskId={m.context.data.taskId} onOpenScheduled={()=>setPrimaryArea('scheduled')}/>} {m.toolTrace?.length?<ChatEvidence theme={theme} trace={m.toolTrace} onAsk={i===chat.length-1&&!busy?question=>void sendChat(question):undefined}/>:null}{m.role==='assistant'&&m.toolTrace?.length&&cloudClient&&
+ <div className="studio-body"><aside className={`chat-side ${chatCollapsed?'collapsed':''} ${mobilePanel==='chat'?'mobile-open':''}`}><div className="side-head"><div><span className="ai-orb"><Sparkles size={14}/></span><strong>VIBES</strong>{cloudClient&&<button className="text-button" onClick={()=>setAiSettingsOpen(true)}>AI settings</button>}<span className={`online-dot ${aiError?'offline':'idle'}`}/></div><button className="icon-button hide-small" onClick={()=>setChatCollapsed(!chatCollapsed)}>{chatCollapsed?<PanelLeftOpen size={15}/>:<PanelLeftClose size={15}/>}</button><button className="icon-button mobile-only" onClick={()=>setMobilePanel(null)}><X size={17}/></button></div>{!chatCollapsed&&<><div className="chat-messages" ref={chatScrollRef} onScroll={event=>{const el=event.currentTarget;followChat.current=el.scrollHeight-el.scrollTop-el.clientHeight<72}}>{chat.length===0?<div className="chat-empty"><div className="chat-empty-icon"><MessageCircle size={19}/></div><strong>What are we looking at today?</strong><p>Talk markets, unpack a move, or build a strategy with VIBES.</p>{cloudClient&&<button type="button" className="tv-connect-ai" onClick={()=>setAiSettingsOpen(true)}><Sparkles size={15}/>Connect or manage your AI</button>}<div className="suggestions">{['Teach me forex from zero','Explain risk per trade','Explore historical Gold data','Latest Gold headlines','Build a draft strategy'].map(s=><button key={s} onClick={()=>setChatInput(s)}>{s}<ArrowRight size={12}/></button>)}</div></div>:chat.map((m,i)=><div className={`message ${m.role}`} key={i}><div className="message-avatar">{m.role==='assistant'?<Sparkles size={12}/>:<span>Y</span>}</div><div className="message-content">{m.role==='user'?<div className="tv-user-text">{m.content}</div>:m.context?.kind==='market-analysis'?<MarketAnswer content={m.content} report={m.context.data as MarketReport}/>:m.toolTrace?.length?<QuestionEvidenceAnswer content={m.content} trace={m.toolTrace}
+ question={questionBefore(chat,i)} bots={cloudBots}/>:<ChatText content={m.content}/>}{m.context?.kind==='agent-task'&&cloudClient&&typeof m.context.data?.taskId==='string'&&<AgentTaskCard client={cloudClient} taskId={m.context.data.taskId} onOpenScheduled={()=>setPrimaryArea('scheduled')}/>} {m.toolTrace?.length?<ChatEvidence theme={theme} trace={m.toolTrace} onAsk={i===chat.length-1&&!busy?question=>void sendChat(question):undefined}/>:null}{m.role==='assistant'&&m.toolTrace?.length&&cloudClient&&
  <ChatStrategyApproval trace={m.toolTrace}
   request={(path,method,body)=>userBotRequest(path,method,body)}
   onApplied={async(operation,botId)=>{
