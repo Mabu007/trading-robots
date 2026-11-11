@@ -972,7 +972,12 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     // Proactively obtain owner-checked live facts for the selected robot.
     // Tool selection does not depend on the model correctly guessing a status tool.
     let robotOperationsEvidence:unknown;
-    if(effectiveRobotId&&!researchMode&&!strategyId&&!backtestId){
+    const discovered=(robotEnvironmentEvidence as {selection?:{robotId?:string}}|undefined)?.selection?.robotId===effectiveRobotId;
+    // Discovery has already independently read the deployment and Worker.
+    // Avoid a second expensive broker/Worker status request for market-fit
+    // conversations. Loss investigations still fetch the deeper trade journal.
+    if(effectiveRobotId&&(!discovered||wantsLiveTradeEvidence(currentQuestion))&&
+       !researchMode&&!strategyId&&!backtestId){
      robotOperationsEvidence=await runRead('getPropDAORobotOperations',{botId:effectiveRobotId},async()=>{
       try{
        // The broker read remains available when Worker health is unavailable.
@@ -1049,6 +1054,8 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
      /\b(?:market|right now|currently|volatility|rsi|atr|ema|price action|market conditions|suitable|trending|consolidat|choppy)\b/i.test(currentQuestion);
     if(wantsFreshMarket)currentMarketEvidence=await runRead('getCurrentMarketConditions',{botId:effectiveRobotId??null,asset:selectedAsset??null},async()=>{
      try{
+      if(robotContextIntent&&!effectiveRobotId)
+       return {available:false,reason:'Robot discovery did not identify one verified deployment. Do not substitute a generic GOLD market for an unknown robot instrument.'};
       if(effectiveRobotId){
        const sample=await propdaoLiveService.market(uid,effectiveRobotId);
        return completedMarketEvidence({symbol:sample.symbol,source:'Hyperliquid reference for PropDAO robot',
