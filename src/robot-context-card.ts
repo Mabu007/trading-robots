@@ -27,7 +27,11 @@ export function robotCardEvidence(environment:unknown,desk:unknown):RobotCardEvi
  const latest=last??(decisions.length?decisions.at(-1):null);
  const decision=latest&&typeof latest==='object'?latest as Record<string,unknown>:null;
  const rows=Array.isArray(result.byRobot)?result.byRobot:[];
- const robotRow=rows.find(x=>x&&typeof x==='object'&&x.botId===robotId) as
+ // Do not mix a historical robot revision or an earlier broker account
+ // with the current deployed grant merely because they share a bot name/ID.
+ const grantId=str(selection.grantId);
+ const robotRow=rows.find(x=>x&&typeof x==='object'&&x.botId===robotId&&
+  x.accountId===accountId&&x.grantId===grantId) as
   {verified?:number;probable?:number;pnl?:number}|undefined;
  const losses=Array.isArray(result.recentLosses)?result.recentLosses:[];
  const accountUnknown=accountId?losses.filter(x=>x&&typeof x==='object'&&
