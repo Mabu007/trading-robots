@@ -152,20 +152,27 @@ export class PropDAOAccounts {
    qty:number(t?.qty),entry:number(t?.entry),exit:number(t?.exit),
    pnl:number(t?.pnl),openedAt:number(t?.openedAt),closedAt:number(t?.closedAt),
    reason:String(t?.reason||''),fee:number(t?.fee),
+   grossPnl:number(t?.grossPnl),openFee:number(t?.openFee),closeFee:number(t?.closeFee),
+   fundingPaid:number(t?.fundingPaid),slippagePct:number(t?.slippagePct),
+   exitLiquidity:t?.exitLiquidity==='taker'||t?.exitLiquidity==='maker'?t.exitLiquidity:null,
+   orderType:typeof t?.orderType==='string'?t.orderType.slice(0,48):null,
    positionId:validId(t?.positionId)?t.positionId:null,
    intentId:validId(t?.intentId)?t.intentId:null,
    orderId:validId(t?.orderId)?t.orderId:null
   }));
   if(trades.some((t:any)=>!t.id||!t.symbol||!['BUY','SELL'].includes(t.side)||
    [t.qty,t.entry,t.exit,t.pnl].some(v=>typeof v!=='number'||!Number.isFinite(v))||
-   [t.openedAt,t.closedAt,t.fee].some(v=>v!==null&&!Number.isFinite(v))))
+   [t.openedAt,t.closedAt,t.fee,t.grossPnl,t.openFee,t.closeFee,t.fundingPaid,t.slippagePct]
+    .some(v=>v!==null&&!Number.isFinite(v))))
    throw Error('Invalid PropDAO trade history');
   // The runtime validator above establishes these numeric broker fields;
   // preserve nullable timestamps and optional provider link identifiers.
   return trades as Array<{id:string;symbol:string;side:'BUY'|'SELL';
    qty:number;entry:number;exit:number;pnl:number;
    openedAt:number|null;closedAt:number|null;reason:string;fee:number|null;
-   positionId:string|null;intentId:string|null;orderId:string|null}>;
+   positionId:string|null;intentId:string|null;orderId:string|null;
+   grossPnl:number|null;openFee:number|null;closeFee:number|null;fundingPaid:number|null;
+   slippagePct:number|null;exitLiquidity:'maker'|'taker'|null;orderType:string|null}>;
  }
  /** Lightweight live-reconciliation read. DO alarms must NOT page history. */
  async recentTrades(uid:string,id:string){
