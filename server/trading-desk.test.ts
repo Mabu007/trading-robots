@@ -13,8 +13,8 @@ it('uses SAST midnight and not UTC midnight for trading-day questions',()=>{
 it('never guesses robot attribution from a matching price, time, symbol or side',()=>{
  const event:any={id:'event-abc12345',time:now,accountId:'prop-1',botId:'bot-1',grantId:'grant-1',stage:'PROTECTED_FILL',
   symbol:'GOLDUSDC',side:'SELL',positionId:'position-1234'};
- expect(attributeTrade(trade('id1',-2),[event])).toMatchObject({botId:null,attribution:'unattributed'});
- expect(attributeTrade({...trade('id1',-2),positionId:'position-1234'},[event])).toMatchObject({botId:'bot-1',grantId:'grant-1'});
+ expect(attributeTrade(trade('id1',-2),[event],'prop-1')).toMatchObject({botId:null,attribution:'unattributed'});
+ expect(attributeTrade({...trade('id1',-2),positionId:'position-1234'},[event],'prop-1')).toMatchObject({botId:'bot-1',grantId:'grant-1'});
 });
 it('reads all owned accounts, stores broker records once and summarizes genuine daily losses',async()=>{
  const records=new Map<string,any>();
@@ -115,4 +115,37 @@ it('uses SQL Durable Object broker evidence while a robot is running and defers 
   reportedPnl:-2,liveDurableObject:{activeAccounts:1,retainedBrokerTrades:1}});
  expect((response as any).ledger.tradeWrites).toBe(0);
  expect(store.create).not.toHaveBeenCalled();
+});
+
+it('reconciles an archived protected fill after Worker stops, without pretending it was a live robot trade',async()=>{
+ const archive:any={id:'event_12345678',accountId:'prop-1',time:now-120000,
+  stage:'PROTECTED_FILL',botId:'bot-1',grantId:'grant-1',symbol:'GOLDUSDC',
+  side:'SELL',quantity:.5,entryPrice:4100,filledAt:now-120000,positionId:'position-1234'};
+ const store:RecordStore={
+  get:async()=>null,put:async()=>{},create:async()=>true,
+  query:async(path:string)=>path.endsWith('liveExecutionEvents')?[archive]:[]
+ };
+ const broker={list:async()=>({connected:true,accounts:[{accountId:'prop-1',status:'active'}]}),
+  recentTrades:async()=>[{...trade('t1',-2),positionId:'position-1234'}]};
+ const desk=new TradingDesk(store,broker);
+ const report:any=await desk.today('alice',now);
+ expect(report.matchedRobotTrades).toBe(1);
+ expect(report.byRobot[0]).toMatchObject({botId:'bot-1',verified:1,probable:0});
+ expect(report.recentLosses[0]).toMatchObject({botId:'bot-1',confidence:'verified'});
+});
+it('separates unique probable links from exact broker identity attribution',async()=>{
+ const store:RecordStore={
+  get:async()=>null,put:async()=>{},create:async()=>true,
+  query:async(path:string)=>path.endsWith('liveExecutionEvents')?[{
+    id:'event_12345678',time:now-120000,accountId:'prop-1',stage:'PROTECTED_FILL',
+    botId:'bot-1',grantId:'grant-1',symbol:'GOLDUSDC',side:'SELL',
+    quantity:.5,entryPrice:4100,filledAt:now-120000
+   }]:[]
+ };
+ const broker={list:async()=>({connected:true,accounts:[{accountId:'prop-1',status:'active'}]}),
+  recentTrades:async()=>[trade('t1',-2)]};
+ const report:any=await new TradingDesk(store,broker).today('alice',now);
+ expect(report.matchedRobotTrades).toBe(0);
+ expect(report.probableRobotTrades).toBe(1);
+ expect(report.recentLosses[0]).toMatchObject({botId:'bot-1',confidence:'probable'});
 });
