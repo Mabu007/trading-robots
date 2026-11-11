@@ -348,8 +348,19 @@ async function commitReviewedCode(uid:string,botId:string,code:string,expectedCo
   const saved=JSON.parse(raw);
   if(saved.userId!==uid||saved.botId!==botId||typeof saved.code!=='string')throw Error('Saved code failed its ownership check.');
   if(saved.code!==expectedCode||(expectedVenue&&saved.venue!==expectedVenue))throw Error('Saved code or venue changed since review. Request a new proposal.');
+  const metaPath=`users/${uid}/bots/${botId}`;
+  const meta=await marketplace.store.get(metaPath);
+  if(!meta||meta.id&&meta.id!==botId||
+     meta.ownerUid&&meta.ownerUid!==uid||meta.userId&&meta.userId!==uid)
+   throw Error('Strategy catalog ownership changed before source application');
   await beforeCommit();
   await writeR2Object(storageKey,JSON.stringify({...saved,code,updatedAt:new Date().toISOString()}));
+  try{
+   await marketplace.store.put(metaPath,{...meta,lastBacktest:null,updatedAt:Date.now()});
+  }catch(error){
+   await writeR2Object(storageKey,raw).catch(()=>{});
+   throw Error('Source metadata update failed; original source restoration was attempted');
+  }
   return storageKey;
  }));
 }
