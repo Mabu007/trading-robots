@@ -467,6 +467,13 @@ app.post('/api/agent/robot-mutations',async(req,res)=>{
   return res.status(400).json({error:'Unsupported source mutation'});
  }catch(error){return res.status(409).json({error:error instanceof Error?error.message:'Could not stage source mutation'})}
 });
+app.get('/api/agent/robot-mutations/:intentId',async(req,res)=>{
+ res.setHeader('Cache-Control','private, no-store');
+ const uid=await firebaseUidOrReply(req,res);
+ if(!uid||!strategyReviewEnabled(uid,req,res))return;
+ try{return res.json(await robotCrud.preview(uid,String(req.params.intentId||'')))}
+ catch(error){return res.status(409).json({error:error instanceof Error?error.message:'Review unavailable'})}
+});
 for(const action of ['approve','deny','apply'] as const){
  app.post('/api/agent/robot-mutations/:intentId/'+action,async(req,res)=>{
   res.setHeader('Cache-Control','private, no-store');
@@ -478,6 +485,16 @@ for(const action of ['approve','deny','apply'] as const){
   catch(error){return res.status(409).json({error:error instanceof Error?error.message:'Robot mutation review failed'})}
  });
 }
+app.get('/api/agent/strategy-reviews/:botId/:intentId',async(req,res)=>{
+ res.setHeader('Cache-Control','private, no-store');
+ const uid=await firebaseUidOrReply(req,res);
+ if(!uid||!strategyReviewEnabled(uid,req,res))return;
+ const botId=String(req.params.botId||''),intentId=String(req.params.intentId||'');
+ if(!validBotId(botId)||!validBotId(intentId))
+  return res.status(400).json({error:'Invalid review identity'});
+ try{return res.json(await strategyReviews.preview(uid,botId,intentId))}
+ catch(error){return res.status(409).json({error:error instanceof Error?error.message:'Review unavailable'})}
+});
 app.post('/api/agent/strategy-reviews',async(req,res)=>{
  const uid=await firebaseUidOrReply(req,res);if(!uid||!strategyReviewEnabled(uid,req,res))return;
  try{
