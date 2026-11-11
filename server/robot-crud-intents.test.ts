@@ -76,6 +76,7 @@ describe('owner-checked reviewed source CRUD',()=>{
   const key=seed('alice','bot-1');
   const stage=await service.stageDelete('alice','bot-1');
   expect(stage).toMatchObject({operation:'strategy.delete',reviewRequired:true});
+  expect([...r2.values()].filter(v=>v.includes(stage.intentId)).every(v=>!v.includes(starterCode))).toBe(true);
   expect(await service.preview('alice',stage.intentId)).toMatchObject({before:starterCode,after:null});
   await service.approve('alice',stage.intentId);
   guards.assertDeletable.mockRejectedValueOnce(Error('Stop and reconcile live robot before deleting'));
@@ -85,6 +86,7 @@ describe('owner-checked reviewed source CRUD',()=>{
   await service.apply('alice',stage.intentId);
   expect(guards.deleteOwned).toHaveBeenCalledOnce();
   expect(docs.has('users/alice/bots/bot-1')).toBe(false);
+  expect([...r2.keys()].some(key=>key.endsWith(stage.intentId+'.json'))).toBe(false);
  });
  it('rejects stale approved deletion if strategy changed after review',async()=>{
   const {service,seed,r2,guards}=harness();
