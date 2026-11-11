@@ -73,8 +73,8 @@ describe('robot cards cannot turn unknown account trades into robot performance'
     probableRobotTrades:1,unattributedTrades:1}
   }));
   expect(market).toContain('Market · GOLDUSDC');
-  expect(market).not.toContain('Today\'s PropDAO trading desk');
-  expect(broker).toContain('Today\'s PropDAO trading desk');
+  expect(market).not.toContain('PropDAO trading desk');
+  expect(broker).toContain('PropDAO trading desk');
   expect(broker).toContain('1 probable');
  });
 });
