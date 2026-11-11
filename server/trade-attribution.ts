@@ -12,7 +12,7 @@ export type TradeLink={
 };
 const none=(reason:string):TradeLink=>({botId:null,grantId:null,attribution:'unattributed',
  confidence:'unknown',eventId:null,evidence:[reason],codeHash:null,decisionCandleClose:null});
-const id=(v:unknown):v is string=>typeof v==='string'&&/^[A-Za-z0-9_-]{4,160}$/.test(v);
+const id=(v:unknown):v is string=>typeof v==='string'&&/^[A-Za-z0-9_-]{1,160}$/.test(v);
 const num=(v:unknown):v is number=>typeof v==='number'&&Number.isFinite(v);
 const ms=(v:unknown)=>num(v)?v>1e11?v:v*1000:null;
 function link(e:ExecutionEvent,confidence:'verified'|'probable',evidence:string[]):TradeLink{
