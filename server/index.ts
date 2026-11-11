@@ -414,7 +414,7 @@ async function approvedRobotDelete(uid:string,botId:string){
  // Verify the complete nested metadata set before removing any source files.
  const collection=`users/${uid}/bots/${botId}/versions`;
  const revisions:string[]=[];
- if(!marketplace.store.page)throw Error('Version catalog cannot be checked safely');
+ if(!marketplace.store.page||!marketplace.store.remove)throw Error('Deletion requires complete version enumeration and removal support');
  let after:string|undefined;
  do{
   const page=await marketplace.store.page(collection,undefined,undefined,after,100);
