@@ -1174,6 +1174,71 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     const marketTools=(req.body?.includeMarketContext===true||sourceToolRequested)&&
        req.body?.auditMode!==true&&(!requestedEvidence||sourceToolRequested)?{
       ...(researchMode?publicFinanceTools(clientAbort.signal):{}),
+      ...(sourceToolRequested?{
+       readEditableStrategySource:tool({
+        description:'Read REAL saved strategy.js from owned R2 with exact full source SHA256 and line numbers. Use this before an edit; do not ask users to paste source. Saved code may differ from the running deployed revision.',
+        inputSchema:z.object({botId:z.string().regex(/^[A-Za-z0-9_-]{1,100}$/).optional(),
+         startLine:z.number().int().min(1).max(6000).default(1),
+         lineCount:z.number().int().min(1).max(140).default(120)}).strict(),
+        execute:async({botId,startLine,lineCount})=>{
+         try{
+          const id=botId??effectiveRobotId;
+          if(!id)return {available:false,reason:'No unique owned robot; select a strategy'};
+          const source=await ownedEditableSource(id),chunk=sourceLines(source.code,startLine,lineCount);
+          const deployed=robotEnvironmentEvidence as {selection?:{robotId?:string;strategyCodeHash?:string}}|undefined;
+          return {available:true,botId:id,name:source.meta.name,venue:source.meta.venue,
+           asset:source.meta.asset,source:'owner-checked saved current.json',
+           ...chunk,
+           deployedCodeHash:deployed?.selection?.robotId===id?deployed.selection.strategyCodeHash:null,
+           savedMatchesDeployed:deployed?.selection?.robotId===id?
+            deployed.selection.strategyCodeHash===chunk.codeHash:null};
+         }catch(error){return {available:false,reason:error instanceof Error?error.message:'Source unavailable'}}
+        }
+       }),
+       ...(mutationIntent.edit?{proposeStrategySourceEdit:tool({
+        description:'STAGE a unique exact code-text replacement, binding the original SHA256 and syntax-validating complete resulting strategy.js. Never applies; user must approve and click Apply. Read exact source first.',
+        inputSchema:z.object({botId:z.string().regex(/^[A-Za-z0-9_-]{1,100}$/).optional(),
+         expectedCodeHash:z.string().regex(/^[a-f0-9]{64}$/),
+         find:z.string().min(1).max(3000),
+         replace:z.string().min(1).max(6000)}).strict(),
+        execute:async({botId,expectedCodeHash,find,replace:replacement})=>{
+         try{
+          const id=botId??effectiveRobotId;
+          if(!id)return {available:false,reason:'No unique owned strategy to edit'};
+          const saved=await ownedEditableSource(id);
+          const patch=uniqueCodeReplacement(saved.code,find,replacement,expectedCodeHash);
+          const stage=await strategyReviews.stage(uid,id,saved.code,patch.proposed);
+          return {available:true,reviewRequired:true,operation:'strategy.apply',
+           ...stage,name:saved.meta.name,botId:id,previousCodeHash:patch.previousHash,
+           proposedCodeHash:patch.proposedHash,changedAtLine:patch.changedAtLine,
+           oldSnippet:patch.oldSnippet.slice(0,1600),newSnippet:patch.newSnippet.slice(0,1600),
+           note:'PENDING REVIEW ONLY. No code or live deployment changed. Stop and reconcile a running robot before user Apply.'};
+         }catch(error){return {available:false,reason:error instanceof Error?error.message:'Source edit review failed'}}
+        }
+       })}:{}),
+       ...(mutationIntent.create?{proposeCreateRobot:tool({
+        description:'STAGE creation of a new saved strategy; does not create, backtest or deploy. Requires user clicking Approve & Apply. Complete source must include static config and onCandle.',
+        inputSchema:z.object({name:z.string().min(2).max(64),
+         asset:z.string().regex(/^[A-Za-z0-9_:.@-]{1,64}$/),
+         venue:z.enum(['propdao','hyperliquid','valr']),
+         code:z.string().min(60).max(12000),prompt:z.string().max(2000).optional()}).strict(),
+        execute:async(input)=>{
+         try{return {available:true,...await robotCrud.stageCreate(uid,input)}}
+         catch(error){return {available:false,reason:error instanceof Error?error.message:'Creation review failed'}}
+        }
+       })}:{}),
+       ...(mutationIntent.delete?{proposeDeleteRobot:tool({
+        description:'STAGE deletion of exact owner-scoped saved robot, never delete directly. Requires human approve and apply and verified stopped runtime. Broker trades and historical market data cannot be deleted.',
+        inputSchema:z.object({botId:z.string().regex(/^[A-Za-z0-9_-]{1,100}$/).optional()}).strict(),
+        execute:async({botId})=>{
+         try{
+          const id=botId??effectiveRobotId;
+          if(!id)return {available:false,reason:'Choose a unique owned robot to delete'};
+          return {available:true,...await robotCrud.stageDelete(uid,id)};
+         }catch(error){return {available:false,reason:error instanceof Error?error.message:'Deletion review failed'}}
+        }
+       })}:{}),
+      }:{}),
       ...(!researchMode?{getRunningPropDAORobotEnvironment:tool({
        description:'Discover user-owned PropDAO live deployments and inspect current Worker state, deployed strategy source/config/risk/decisions and broker exposure. If robot ID is omitted, find the actual currently running robot without asking the user for its ID. Read-only; never assume old grants mean running.',
        inputSchema:z.object({botId:z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).optional()}).strict(),
