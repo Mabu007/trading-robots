@@ -34,7 +34,7 @@ import {scopePrivateTools} from './agent-tool-discovery.ts';
 import {ApprovalIntents} from './approval-intents.ts';
 import {ReviewedStrategyUpdates} from './strategy-approval-flow.ts';
 import {RobotCrudIntents} from './robot-crud-intents.ts';
-import {uniqueCodeReplacement,sourceLines,requestedStrategyMutation} from './robot-source-operations.ts';
+import {uniqueCodeReplacement,sourceLines,requestedStrategyMutation,validateSavedSourceOverwrite} from './robot-source-operations.ts';
 import {fetchPublicSource,publicFinanceRequested,publicFinanceTools} from './public-finance.ts';
 import {GdeltNews,registerGdeltNews} from './gdelt-news.ts';
 import {codeWatchRoutes} from './code-watch-routes.ts';
@@ -299,14 +299,20 @@ app.put('/api/user-bots/:botId/current', async (req, res) => {
   try {
     const write=async()=>{
      const previous=await readR2Object(storageKey);
-     // Direct user-initiated saves are distinct from AI review approval.
-     // Neither path may silently replace source while its robot is running.
-     if(previous&&venue==='propdao')await propdaoLiveService.assertDeletable(uid,botId);
-     if(previous&&venue==='valr'){
-      const grant=await liveService.grant(uid);
-      if(grant?.botId===botId)await liveService.beforeKeyChange(uid);
+     const current=validateSavedSourceOverwrite(uid,botId,venue,previous);
+     // For overwrites, independently verify ownership of the Firestore
+     // catalogue as well as the scoped R2 identity.
+     if(current.existing){
+      const meta=await marketplace.store.get(`users/${uid}/bots/${botId}`);
+      if(!meta||meta.id&&meta.id!==botId||meta.ownerUid&&meta.ownerUid!==uid||
+         meta.userId&&meta.userId!==uid||meta.venue!==venue)
+       throw Error('Strategy catalog owner or venue mismatch; overwrite denied');
+      if(venue==='propdao')await propdaoLiveService.assertDeletable(uid,botId);
+      if(venue==='valr'){
+       const grant=await liveService.grant(uid);
+       if(grant?.botId===botId)await liveService.beforeKeyChange(uid);
+      }
      }
-     if(previous&&venue==='ctrader')throw Error('cTrader source changes require verified stopped gateway state');
      await writeR2Object(storageKey,JSON.stringify({
       schemaVersion:1,userId:uid,botId,code,venue,updatedAt:new Date().toISOString()
      }));
@@ -347,12 +353,14 @@ async function commitReviewedCode(uid:string,botId:string,code:string,expectedCo
   if(!raw)throw Error('Saved code was not found.');
   const saved=JSON.parse(raw);
   if(saved.userId!==uid||saved.botId!==botId||typeof saved.code!=='string')throw Error('Saved code failed its ownership check.');
+  if(saved.venue==='ctrader')throw Error('cTrader source requires independently verified stopped gateway review');
   if(saved.code!==expectedCode||(expectedVenue&&saved.venue!==expectedVenue))throw Error('Saved code or venue changed since review. Request a new proposal.');
   const metaPath=`users/${uid}/bots/${botId}`;
   const meta=await marketplace.store.get(metaPath);
   if(!meta||meta.id&&meta.id!==botId||
-     meta.ownerUid&&meta.ownerUid!==uid||meta.userId&&meta.userId!==uid)
-   throw Error('Strategy catalog ownership changed before source application');
+     meta.ownerUid&&meta.ownerUid!==uid||meta.userId&&meta.userId!==uid||
+     meta.venue!==saved.venue)
+   throw Error('Strategy catalog ownership or venue changed before source application');
   await beforeCommit();
   await writeR2Object(storageKey,JSON.stringify({...saved,code,updatedAt:new Date().toISOString()}));
   try{
