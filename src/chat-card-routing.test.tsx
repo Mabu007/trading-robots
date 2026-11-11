@@ -67,8 +67,9 @@ describe('robot cards cannot turn unknown account trades into robot performance'
     {botId:'bot-1',accountId:'prop-OTHER',grantId:'grant-1',verified:16,probable:0,pnl:-40},
     {botId:'bot-1',accountId:'prop-1',grantId:'grant-OLD',verified:8,probable:0,pnl:-20}
    ],recentLosses:[]});
-  expect(report.today).toMatchObject({verifiedTrades:0,probableTrades:0,
-   verifiedAndProbableReportedPnl:null});
+  expect(report.today).toMatchObject({verifiedTrades:0,probableTrades:0});
+  // Do not provide a P/L field that could mix verified and probable trade cohorts.
+  expect(report.today).not.toHaveProperty('verifiedAndProbableReportedPnl');
  });
  it('does not present missing Worker evidence as a running robot',()=>{
   const report=robotCardEvidence({kind:'unverified',
