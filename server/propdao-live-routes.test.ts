@@ -533,3 +533,28 @@ describe('VIBES owner-scoped live robot environment discovery',()=>{
   await expect(svc.discoverRobotEnvironment('alice')).rejects.toThrow(/integrity/);
  });
 });
+
+describe('stopped robot source mutation must confirm broker-flat exposure',()=>{
+ it('blocks deletion when exposure is unverified, open or resting despite stopped Worker',async()=>{
+  const {svc,saved}=setup();
+  const prefix='propdao-live/v1/'+(process.env.VERCEL_ENV||'development')+'/'+Buffer.from('alice').toString('base64url')+'/';
+  saved.set(prefix+'bot-1.json',JSON.stringify({
+   uid:'alice',botId:'bot-1',id:'grant-1',accountId:'prop-1',
+   code:starterCode,codeHash:createHash('sha256').update(starterCode).digest('hex'),
+   issuedAt:Date.now()-60000,expiresAt:Date.now()+600000
+  }));
+  const status=vi.spyOn(svc,'status');
+  status.mockResolvedValue({running:false,paused:false,uncertain:false,
+   brokerExposureVerified:false,positions:null,pendingOrders:null} as any);
+  await expect(svc.assertDeletable('alice','bot-1')).rejects.toThrow(/Broker exposure/);
+  status.mockResolvedValue({running:false,paused:false,uncertain:false,
+   brokerExposureVerified:true,positions:[{id:'position'}],pendingOrders:[]} as any);
+  await expect(svc.assertDeletable('alice','bot-1')).rejects.toThrow(/Broker exposure/);
+  status.mockResolvedValue({running:false,paused:false,uncertain:false,
+   brokerExposureVerified:true,positions:[],pendingOrders:[{id:'resting-order'}]} as any);
+  await expect(svc.assertDeletable('alice','bot-1')).rejects.toThrow(/Broker exposure/);
+  status.mockResolvedValue({running:false,paused:false,uncertain:false,
+   brokerExposureVerified:true,positions:[],pendingOrders:[]} as any);
+  await expect(svc.assertDeletable('alice','bot-1')).resolves.toBeUndefined();
+ });
+});
