@@ -91,4 +91,19 @@ describe('owner-bound staged strategy approval flow',()=>{
   expect(results.filter(x=>x.status==='fulfilled')).toHaveLength(1);
   expect(results.filter(x=>x.status==='rejected')).toHaveLength(1);
  });
+ it('will NOT stage an approval for a running robot; never claims edit ready',async()=>{
+  const m=memory();
+  const deps=(m.service as any).deps;
+  deps.beforeStage=async()=>{throw Error('Stop and reconcile this PropDAO bot before deleting its code.')};
+  await expect(m.service.stage('alice','bot-1',original,revised)).rejects.toThrow(/Stop and reconcile/);
+  expect([...m.objects.keys()].some(k=>k.includes('/approvals/'))).toBe(false);
+  expect(JSON.parse(m.objects.get(m.codeKey)!).code).toBe(original);
+ });
+ it('rechecks runtime before approving a proposal staged while stopped',async()=>{
+  const m=memory(),stage=await m.service.stage('alice','bot-1',original,revised);
+  const deps=(m.service as any).deps;
+  deps.beforeStage=async()=>{throw Error('Broker exposure unknown; stop and reconcile before editing')};
+  await expect(m.service.approve('alice','bot-1',stage.intentId)).rejects.toThrow(/Broker exposure/);
+  expect(JSON.parse(m.objects.get(m.codeKey)!).code).toBe(original);
+ });
 });
