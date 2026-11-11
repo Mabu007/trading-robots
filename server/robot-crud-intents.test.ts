@@ -18,15 +18,15 @@ function harness(){
    Object.entries(updates).forEach(([path,v])=>docs.set(path,v));
   }
  };
- const guards={withLock:vi.fn(async <T,>(_:string,__:string,work:()=>Promise<T>):Promise<T>=>work()),
-  assertDeletable:vi.fn(async()=>{}),deleteOwned:vi.fn(async(_:string,botId:string)=>{
+ const guards={assertDeletable:vi.fn(async()=>{}),deleteOwned:vi.fn(async(_:string,botId:string)=>{
    const prefix='user-bots/'+Buffer.from('alice').toString('base64url')+'/'+botId+'/';
    docs.delete('users/alice/bots/'+botId);
    for(const k of [...r2.keys()])if(k.startsWith(prefix))r2.delete(k);
   })};
  const service=new RobotCrudIntents({approvals:new ApprovalIntents(store),store,
   read:async key=>r2.get(key)??null,write:async(key,s)=>{r2.set(key,s)},
-  remove:async key=>{r2.delete(key)},...guards});
+  remove:async key=>{r2.delete(key)},
+  withLock:async<T>(_:string,__:string,work:()=>Promise<T>):Promise<T>=>work(),...guards});
  const seed=(uid:string,botId:string,code=starterCode)=>{
   const key='user-bots/'+Buffer.from(uid).toString('base64url')+'/'+botId+'/current.json';
   docs.set('users/'+uid+'/bots/'+botId,{id:botId,ownerUid:uid,userId:uid,
