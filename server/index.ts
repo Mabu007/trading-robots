@@ -297,8 +297,22 @@ app.put('/api/user-bots/:botId/current', async (req, res) => {
   }
   const storageKey = `${userBotRoot(uid, botId)}/current.json`;
   try {
-    const write = () => writeR2Object(storageKey, JSON.stringify({schemaVersion:1,userId:uid,botId,code,venue,updatedAt:new Date().toISOString()}));
-    if(venue==='propdao') await propBotExclusive(uid,botId,write);
+    const write=async()=>{
+     const previous=await readR2Object(storageKey);
+     // Direct user-initiated saves are distinct from AI review approval.
+     // Neither path may silently replace source while its robot is running.
+     if(previous&&venue==='propdao')await propdaoLiveService.assertDeletable(uid,botId);
+     if(previous&&venue==='valr'){
+      const grant=await liveService.grant(uid);
+      if(grant?.botId===botId)await liveService.beforeKeyChange(uid);
+     }
+     if(previous&&venue==='ctrader')throw Error('cTrader source changes require verified stopped gateway state');
+     await writeR2Object(storageKey,JSON.stringify({
+      schemaVersion:1,userId:uid,botId,code,venue,updatedAt:new Date().toISOString()
+     }));
+    };
+    if(venue==='propdao')await propBotExclusive(uid,botId,write);
+    else if(venue==='valr')await valrExclusive(uid,write);
     else await write();
     return res.json({ storageKey });
   } catch (error) {
