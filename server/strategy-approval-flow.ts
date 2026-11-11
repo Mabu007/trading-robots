@@ -15,6 +15,9 @@ export type ReviewedStrategyDependencies={
  read:(key:string)=>Promise<string|null>;
  write:(key:string,data:string)=>Promise<void>;
  getOwnedBot:(uid:string,botId:string)=>Promise<BotMeta|null>;
+ /** Fail closed BEFORE issuing an AI review for a running or exposure-unknown
+  * deployment. Apply still rechecks independently under execution locks. */
+ beforeStage?:(uid:string,botId:string,venue:string)=>Promise<void>;
  /** Must hold existing per-account/bot locks and confirm live strategy is stopped.
   * Execute beforeCommit only AFTER checking current source and ownership, inside locks.
   */
@@ -68,6 +71,7 @@ export class ReviewedStrategyUpdates {
   if(expected===proposed)throw Error('No code changes to review');
   const current=await this.current(uid,botId);
   if(current.code!==expected||current.venue!==meta.venue)throw Error('Saved strategy source or venue changed before review');
+  if(this.deps.beforeStage)await this.deps.beforeStage(uid,botId,meta.venue);
   const action=strategyApplyAction(meta,botId,expected,proposed);
   const intent=await this.deps.approvals.create(uid,action,120000);
   const stage:Stage={schemaVersion:1,ownerUid:uid,botId,intentId:intent.id,action,expectedCode:expected,proposedCode:proposed,createdAt:this.now(),expiresAt:intent.expiresAt};
@@ -98,6 +102,7 @@ export class ReviewedStrategyUpdates {
   const v=await this.load(uid,botId,intentId);
   const current=await this.current(uid,botId);
   if(current.code!==v.expected||current.venue!==v.action.venue)throw Error('Strategy source or venue changed before approval.');
+  if(this.deps.beforeStage)await this.deps.beforeStage(uid,botId,v.action.venue);
   await this.deps.approvals.approve(uid,intentId,v.action);
   return {approved:true,intentId,botId,expiresAt:v.record.expiresAt};
  }
