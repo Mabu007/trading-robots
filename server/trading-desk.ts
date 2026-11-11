@@ -28,17 +28,18 @@ const sum=(values:number[])=>Math.round(values.reduce((a,b)=>a+b,0)*1e6)/1e6;
 export function attributeTrade(t:Trade,events:ExecutionEvent[],accountId:string):TradeLink{
  return reconcileBrokerTrade({...t,accountId},events);
 }
-export function summarizeDay(trades:Array<Trade&{accountId:string;botId:string|null;attribution:string;confidence?:string}>,day:string,coverage:{
+export function summarizeDay(trades:Array<Trade&{accountId:string;botId:string|null;grantId?:string|null;attribution:string;confidence?:string}>,day:string,coverage:{
  accountsChecked:number;failures:string[];capped:string[];journalWarnings:string[];ledgerAvailable:boolean;writeFailures:number;
 }){
  const unknownTimes=trades.filter(t=>timestamp(t.closedAt)===null).length;
  const today=trades.filter(t=>{const ms=timestamp(t.closedAt);return ms!==null&&sastDay(ms)===day})
   .sort((a,b)=>(timestamp(b.closedAt)||0)-(timestamp(a.closedAt)||0));
  const losses=today.filter(t=>t.pnl<0),wins=today.filter(t=>t.pnl>0),decided=today.filter(t=>t.pnl!==0);
- const byRobot=new Map<string,{botId:string;trades:number;losses:number;pnl:number;
-  verified:number;probable:number}>();
- for(const t of today){const k=t.botId||'unattributed',g=byRobot.get(k)||
-  {botId:k,trades:0,losses:0,pnl:0,verified:0,probable:0};
+ const byRobot=new Map<string,{accountId:string;botId:string;grantId:string|null;
+  trades:number;losses:number;pnl:number;verified:number;probable:number}>();
+ for(const t of today){const k=JSON.stringify([t.accountId,t.botId||'unattributed',t.grantId??null]),
+   g=byRobot.get(k)||{accountId:t.accountId,botId:t.botId||'unattributed',
+    grantId:t.grantId??null,trades:0,losses:0,pnl:0,verified:0,probable:0};
   g.trades++;g.losses+=Number(t.pnl<0);g.pnl+=t.pnl;
   g.verified+=Number(t.attribution==='exact-provider-identity');
   g.probable+=Number(t.attribution==='probable-entry-evidence');byRobot.set(k,g);}
@@ -146,7 +147,7 @@ export class TradingDesk{
   if(!accounts.length)return {available:false,day,timeZone:'Africa/Johannesburg',reason:'No connected PropDAO accounts'};
   if(accounts.length>12)return {available:false,day,reason:'More than 12 accounts; restrict the investigation to a named account'};
   const root='users/'+uid+'/liveTrades';
-  const retained=new Map<string,Trade&{accountId:string;botId:string|null;attribution:string;confidence?:string}>();
+  const retained=new Map<string,Trade&{accountId:string;botId:string|null;grantId?:string|null;attribution:string;confidence?:string}>();
   const failures:string[]=[],capped:string[]=[],journalWarnings:string[]=[];
   let writeFailures=0,tradeWrites=0,eventWrites=0,decisionWrites=0;
   let liveSqlAccountCount=0,liveSqlTradeCount=0;
