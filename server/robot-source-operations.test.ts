@@ -1,7 +1,7 @@
 import {describe,it,expect} from 'vitest';
 import {starterCode} from '../src/strategy.ts';
 import {createHash} from 'node:crypto';
-import {uniqueCodeReplacement,sourceLines,requestedStrategyMutation} from './robot-source-operations.ts';
+import {uniqueCodeReplacement,sourceLines,requestedStrategyMutation,validateSavedSourceOverwrite} from './robot-source-operations.ts';
 const sha=(x:string)=>createHash('sha256').update(x).digest('hex');
 describe('exact, code-hash-bound source edits',()=>{
  it('replaces only one intended line then validates the complete strategy',()=>{
@@ -37,5 +37,33 @@ describe('model tool activation requires the user to request the operation',()=>
  it('does not expose mutation tools for ordinary market or loss analysis',()=>{
   expect(requestedStrategyMutation('How did the robot trade today?')).toEqual({create:false,edit:false,delete:false});
   expect(requestedStrategyMutation('Read the GOLDUSDC candles')).toEqual({create:false,edit:false,delete:false});
+ });
+});
+
+describe('existing strategy source may not be overwritten under another venue or owner',()=>{
+ const saved=JSON.stringify({schemaVersion:1,userId:'alice',botId:'gold1',
+  venue:'propdao',code:starterCode});
+ it('requires the stored venue, owner, and bot identity to match',()=>{
+  expect(validateSavedSourceOverwrite('alice','gold1','propdao',saved))
+   .toEqual({existing:true,venue:'propdao'});
+  expect(()=>validateSavedSourceOverwrite('alice','gold1','hyperliquid',saved))
+   .toThrow(/venue mismatch/);
+  expect(()=>validateSavedSourceOverwrite('bob','gold1','propdao',saved))
+   .toThrow(/owner/);
+  expect(()=>validateSavedSourceOverwrite('alice','gold2','propdao',saved))
+   .toThrow(/owner/);
+ });
+ it('blocks invalid saved data and cTrader gateway updates',()=>{
+  expect(()=>validateSavedSourceOverwrite('alice','gold1','propdao','garbage'))
+   .toThrow(/invalid/);
+  expect(()=>validateSavedSourceOverwrite('alice','gold1','ctrader',
+   JSON.stringify({userId:'alice',botId:'gold1',venue:'ctrader',code:starterCode})))
+   .toThrow(/gateway/);
+ });
+ it('permits brand new owned source with a supported venue only',()=>{
+  expect(validateSavedSourceOverwrite('alice','gold1','propdao',null))
+   .toEqual({existing:false,venue:'propdao'});
+  expect(()=>validateSavedSourceOverwrite('alice','gold1','arbitrary',null))
+   .toThrow(/Invalid/);
  });
 });
