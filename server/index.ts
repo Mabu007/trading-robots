@@ -1207,9 +1207,9 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
           return {available:true,botId:id,name:source.meta.name,venue:source.meta.venue,
            asset:source.meta.asset,source:'owner-checked saved current.json',
            ...chunk,
-           deployedCodeHash:deployed?.selection?.robotId===id?deployed.selection!.strategyCodeHash:null,
+           deployedCodeHash:deployed?.selection?.robotId===id?deployed?.selection?.strategyCodeHash:null,
            savedMatchesDeployed:deployed?.selection?.robotId===id?
-            deployed.selection!.strategyCodeHash===chunk.codeHash:null};
+            deployed?.selection?.strategyCodeHash===chunk.codeHash:null};
          }catch(error){return {available:false,reason:error instanceof Error?error.message:'Source unavailable'}}
         }
        }),
