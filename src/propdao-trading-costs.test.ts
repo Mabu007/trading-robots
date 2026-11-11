@@ -59,7 +59,7 @@ describe('PropDAO broker trade cost evidence',()=>{
 describe('same signals and candles: legacy R result versus PropDAO monetary costs',()=>{
  it('reconciles a next-candle gross winning trade to net losing under documented maker/taker fees',()=>{
   const candles=[{time:1,open:4000,high:4001,low:3999,close:4000,volume:1},
-   {time:61,open:4000,high:4001,low:3999,close:4000,volume:1},
+   {time:61,open:4000,high:4001,low:3999.5,close:4000,volume:1},
    {time:121,open:4000.5,high:4002,low:3999,close:4000.5,volume:1}];
   const legacy=simulate(candles,[{action:'BUY',stopLoss:3999,takeProfit:4000.5},
    {action:'WAIT'},{action:'WAIT'}]);
