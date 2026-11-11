@@ -193,3 +193,48 @@ export function sizePropDAOForNetStop(input:{
   quantity,estimatedStopLossUsd:fixed(-stop.netPnlUsd),
   lossPerUnitUsd:fixed(lossPerUnitUsd)};
 }
+
+
+/** Broker records are the source of truth for settled net P/L.
+ * Do NOT subtract commissions again from provider `pnl`. Validate the
+ * relationship before using historical fees as calibration evidence.
+ */
+export function reconcilePropDAOBrokerCostEvidence(trade:{
+ symbol:string;qty:number;entry:number;exit:number;pnl:number;
+ grossPnl?:number|null;fee?:number|null;openFee?:number|null;
+ closeFee?:number|null;fundingPaid?:number|null;
+ exitLiquidity?:'maker'|'taker'|null;reason?:string
+}){
+ if(!positive(trade.qty)||!positive(trade.entry)||!positive(trade.exit)||
+    !Number.isFinite(trade.pnl)||!/^[A-Z0-9]{2,40}$/.test(trade.symbol))
+  fail('Invalid authenticated broker trade evidence.');
+ const legsKnown=nonnegative(trade.openFee??NaN)&&nonnegative(trade.closeFee??NaN);
+ const reportedFee=nonnegative(trade.fee??NaN)?trade.fee!:null;
+ const feeLegSum=legsKnown?trade.openFee!+trade.closeFee!:null;
+ const feeTotal=reportedFee??feeLegSum;
+ const feeDelta=reportedFee!==null&&feeLegSum!==null?
+  fixed(reportedFee-feeLegSum):null;
+ const grossKnown=Number.isFinite(trade.grossPnl);
+ const fundingKnown=Number.isFinite(trade.fundingPaid);
+ const inferredExpectedNet=grossKnown&&feeTotal!==null&&fundingKnown?
+  fixed(trade.grossPnl!-feeTotal-trade.fundingPaid!):null;
+ const netDelta=inferredExpectedNet!==null?fixed(trade.pnl-inferredExpectedNet):null;
+ const tolerance=Math.max(0.02,Math.abs(trade.pnl)*0.0001);
+ return {symbol:trade.symbol,quantity:trade.qty,
+  brokerReportedNetPnlUsd:trade.pnl,
+  brokerReportedGrossPnlUsd:grossKnown?trade.grossPnl!:null,
+  brokerReportedEntryFeeUsd:nonnegative(trade.openFee??NaN)?trade.openFee!:null,
+  brokerReportedExitFeeUsd:nonnegative(trade.closeFee??NaN)?trade.closeFee!:null,
+  brokerReportedTotalFeesUsd:feeTotal,
+  brokerReportedFundingUsd:fundingKnown?trade.fundingPaid!:null,
+  feeLegsReconciled:feeDelta===null?null:Math.abs(feeDelta)<=tolerance,
+  grossToNetReconciled:netDelta===null?null:Math.abs(netDelta)<=tolerance,
+  feeReconciliationDifferenceUsd:feeDelta,
+  netReconciliationDifferenceUsd:netDelta,
+  measuredEffectiveRoundTripFeeRate:feeTotal!==null?
+   fixed(feeTotal/(trade.qty*(trade.entry+trade.exit))):null,
+  feeBasis:'Open and close executed notional; historical observed rate is descriptive, not a universal fee schedule',
+  accounting:'PropDAO pnl is broker reported net; no fee re-deduction is applied',
+  provenance:'authenticated-PropDAO-closed-trade'
+ };
+}
