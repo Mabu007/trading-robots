@@ -398,6 +398,15 @@ function ownedHyperliquidBacktest(uid:string){
 const strategyReviews=new ReviewedStrategyUpdates({
  approvals:new ApprovalIntents(marketplace.store),
  read:readR2Object,write:writeR2Object,
+ beforeStage:async(uid,botId,venue)=>{
+  // The AI must not report 'edit ready' for an active deployed revision.
+  // This is a read-only preflight; apply repeats checks under locks.
+  if(venue==='propdao')await propdaoLiveService.assertDeletable(uid,botId);
+  else if(venue==='valr'){
+   const grant=await liveService.grant(uid);
+   if(grant?.botId===botId)await liveService.beforeKeyChange(uid);
+  }else if(venue==='ctrader')throw Error('cTrader gateway stop/reconcile verification is unavailable');
+ },
  getOwnedBot:async(uid,botId)=>{
   if(!FirestoreStore.configured())return null;
   const bot=await marketplace.store.get(`users/${uid}/bots/${botId}`);
