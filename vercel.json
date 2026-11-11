@@ -1,7 +1,7 @@
 {
   "functions": {
     "api/index.ts": {
-      "includeFiles": "{server/**,shared/**,src/strategy.ts,src/types.ts,src/engine.ts,src/tool-trace.ts,src/entry-fill-guard.ts,src/strategy-runtime.ts,workers/strategy-sandbox.ts}",
+      "includeFiles": "{server/**,shared/**,src/strategy.ts,src/types.ts,src/engine.ts,src/propdao-trading-costs.ts,src/tool-trace.ts,src/entry-fill-guard.ts,src/strategy-runtime.ts,workers/strategy-sandbox.ts}",
       "maxDuration": 60
     }
   },
@@ -29,5 +29,6 @@
       "codex/phase2-strategy-validation-20261107": false,
       "codex/phase2-auth-rollout-validation-20261106": false
     }
-  }
+  },
+  "buildCommand": "npm run build && if [ \"$VERCEL_ENV\" = \"preview\" ]; then npm test -- --reporter=dot && node --test scripts/verify-propdao-worker.test.mjs scripts/rollback-propdao-worker.test.mjs; fi"
 }
