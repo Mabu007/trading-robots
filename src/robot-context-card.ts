@@ -6,7 +6,7 @@ export type RobotCardEvidence={
  timeframe:string|null;revision:string|null;running:'running'|'paused'|'stopped'|'unverified';
  lastDecision:{action:string;reason:string|null;time:number|null}|null;
  brokerExposure:string;brokerExposureVerified:boolean;
- today:{verifiedTrades:number;probableTrades:number;verifiedAndProbableReportedPnl:number|null;
+ today:{verifiedTrades:number;probableTrades:number;
   accountRecentLossesWithoutRobotProof:number;partial:boolean;unattributedStatement:string}|null;
  issue:string|null;source:'owner-checked deployed grant and Worker state';
 };
@@ -34,7 +34,8 @@ export function robotCardEvidence(environment:unknown,desk:unknown):RobotCardEvi
   x.accountId===accountId&&(x.botId===null||x.attribution==='conflicting-evidence')).length:0;
  const coverage=result.available===true?{
   verifiedTrades:num(robotRow?.verified)??0,probableTrades:num(robotRow?.probable)??0,
-  verifiedAndProbableReportedPnl:num(robotRow?.pnl),
+  // No per-robot P/L until exact and probable trade cohorts are split.
+  // The account's broker P/L must never be represented as verified robot P/L.
   accountRecentLossesWithoutRobotProof:accountUnknown,
   partial:result.partial===true,
   unattributedStatement:'Account-only trades and probable matches are not verified robot losses. Profitability cannot be inferred from unattributed fills.'
