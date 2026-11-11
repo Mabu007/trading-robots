@@ -18,7 +18,7 @@ function harness(){
    Object.entries(updates).forEach(([path,v])=>docs.set(path,v));
   }
  };
- const guards={withLock:vi.fn(async(_:string,__:string,work:()=>Promise<unknown>)=>work()),
+ const guards={withLock:vi.fn(async <T,>(_:string,__:string,work:()=>Promise<T>):Promise<T>=>work()),
   assertDeletable:vi.fn(async()=>{}),deleteOwned:vi.fn(async(_:string,botId:string)=>{
    const prefix='user-bots/'+Buffer.from('alice').toString('base64url')+'/'+botId+'/';
    docs.delete('users/alice/bots/'+botId);
