@@ -33,7 +33,7 @@ export function requestedStrategyMutation(input:unknown){
  return {
   create:/\b(?:create|make|build|write|generate|new)\b[\s\S]{0,90}\b(?:bot|robot|strategy|strategy\.js)\b|\b(?:bot|robot|strategy)\b[\s\S]{0,90}\b(?:create|new|generate|build)\b/i.test(text),
   edit:/\b(?:edit|modify|update|change|fix|adjust|rewrite|improve|widen|tighten|replace)\b/i.test(text)&&
-   /\b(?:strategy|bot|robot|code|source|script|stop|sl|filter|entry|exit|it|that)\b/i.test(text),
+   /\b(?:strategy|bot|robot|code|source|script|stop|sl|filter|entry|exit|it|its|that)\b/i.test(text),
   delete:/\b(?:delete|remove|erase|discard)\b[\s\S]{0,90}\b(?:bot|robot|strategy|code)\b|\b(?:bot|robot|strategy|code)\b[\s\S]{0,90}\b(?:delete|remove|erase)\b/i.test(text)
  };
 }
