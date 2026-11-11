@@ -12,7 +12,7 @@ const trace=(name:string,output:unknown={}):ToolTrace=>({
 const desk=trace('getTradingDeskToday',{available:true,closedTradesToday:2,reportedPnl:-3.42,
  matchedRobotTrades:0,probableRobotTrades:0,unattributedTrades:2});
 const env=trace('discoverRunningPropDAORobots',{available:true,kind:'resolved',
- selection:{robotId:'bot-1',accountId:'prop-1',instrument:'GOLDUSDC',
+ selection:{robotId:'bot-1',grantId:'grant-1',accountId:'prop-1',instrument:'GOLDUSDC',
  executionTimeframe:'m1',strategyCodeHash:'a'.repeat(64)},
  worker:{running:true,brokerExposureVerified:true,brokerExposure:'flat',
  lastEvaluation:{action:'WAIT',reason:'EMA mismatch',time:Date.parse('2026-11-11T10:30:00Z')}}});
@@ -50,7 +50,7 @@ describe('question-intent evidence cards',()=>{
 describe('robot cards cannot turn unknown account trades into robot performance',()=>{
  it('shows broker-linked counts separately from account unknown losses',()=>{
   const report=robotCardEvidence(env.output,{
-   available:true,partial:true,byRobot:[{botId:'bot-1',verified:1,probable:2,pnl:-1.4}],
+   available:true,partial:true,byRobot:[{botId:'bot-1',grantId:'grant-1',accountId:'prop-1',verified:1,probable:2,pnl:-1.4}],
    recentLosses:[{accountId:'prop-1',tradeId:'t1',botId:null}]});
   expect(report).toMatchObject({robotId:'bot-1',running:'running',
    today:{verifiedTrades:1,probableTrades:2,accountRecentLossesWithoutRobotProof:1}});
@@ -60,6 +60,15 @@ describe('robot cards cannot turn unknown account trades into robot performance'
   expect(html).toContain('Probable links');
   expect(html).toContain('not verified robot losses');
   expect(html).not.toContain('Trading desk');
+ });
+ it('does not attribute earlier robot revisions or broker accounts to this deployment',()=>{
+  const report=robotCardEvidence(env.output,{
+   available:true,byRobot:[
+    {botId:'bot-1',accountId:'prop-OTHER',grantId:'grant-1',verified:16,probable:0,pnl:-40},
+    {botId:'bot-1',accountId:'prop-1',grantId:'grant-OLD',verified:8,probable:0,pnl:-20}
+   ],recentLosses:[]});
+  expect(report.today).toMatchObject({verifiedTrades:0,probableTrades:0,
+   verifiedAndProbableReportedPnl:null});
  });
  it('does not present missing Worker evidence as a running robot',()=>{
   const report=robotCardEvidence({kind:'unverified',
