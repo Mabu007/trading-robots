@@ -1,6 +1,7 @@
 import {createHash,timingSafeEqual,randomBytes} from 'node:crypto';
 import type {Express,Request,Response} from 'express';
 import {parseStrategyConfig} from '../src/strategy.ts';
+import {chooseLiveRobot,type RobotContextSelection} from '../src/robot-environment-intent.ts';
 import {inspectBacktestEvidence} from './strategy-backtest-evidence.ts';
 import {runTrustedBacktestReplay,ReplayUnavailable,ReplayMismatch,type TrustedReplayReceipt} from './trusted-backtest-replay.ts';
 import {DwellirHistory} from './dwellir-history.ts';
@@ -234,6 +235,114 @@ export class PropDAOLiveService{
     error:!matched&&state.pendingIntent?'This account has an unresolved order from another bot. Reconcile it before deploying.':health.error};
 
   }catch(e){return {configured:true,deployed:true,activeAuthorization:!grant.revokedAt&&Date.now()<grant.expiresAt,running:false,uncertain:true,authorizationRevoked:Boolean(grant.revokedAt),accountId:grant.accountId,events:[],error:e instanceof Error?e.message:'Worker unavailable. Order status is unknown.'}}
+ }
+ /** Discover the actual user's deployed robot from persisted grants and live
+  * Worker status. No model-supplied robot ID and no UI-specific selection is
+  * required. Every grant and broker account is owner-checked. This read does
+  * not authorize orders or mutate a bot.
+  */
+ async discoverRobotEnvironment(uid:string,requestedBotId?:string){
+  if(!uid||uid.includes('/')||uid.length>256||
+     requestedBotId!==undefined&&!safeId(requestedBotId))
+   throw Error('Invalid owner or bot reference');
+  const checkedAt=new Date().toISOString();
+  if(!this.deps.list)return {available:false,reason:'Owned deployment registry is unavailable',checkedAt};
+  const owned=await this.deps.accounts.list(uid);
+  if(!owned.connected)return {available:false,reason:'PropDAO account is not connected',checkedAt};
+  const accountIds=new Set(owned.accounts.map((a:{accountId:string})=>a.accountId));
+  const prefix='propdao-live/v1/'+(process.env.VERCEL_ENV||'development')+'/'+Buffer.from(uid).toString('base64url')+'/';
+  const keys=await this.deps.list(prefix,101);
+  if(keys.length>100)return {available:false,reason:'More than 100 deployed grants; registry cannot be exhaustively checked',checkedAt};
+  const now=Date.now(),active:PropGrant[]=[];
+  for(const key of keys){
+   if(!key.startsWith(prefix)||!key.endsWith('.json'))throw Error('Unexpected deployment key');
+   const botId=key.slice(prefix.length,-5);
+   if(!safeId(botId)||key!==this.key(uid,botId))throw Error('Deployment registry key invalid');
+   if(requestedBotId&&requestedBotId!==botId)continue;
+   const raw=await this.deps.read(key);
+   if(!raw)continue;
+   const g=JSON.parse(raw) as PropGrant;
+   if(g.uid!==uid||g.botId!==botId||!safeId(g.accountId)||!safeId(g.id)||
+      typeof g.code!=='string'||g.code.length>180000||
+      typeof g.codeHash!=='string'||hash(g.code)!==g.codeHash)
+    throw Error('Deployed strategy ownership or source revision integrity failure');
+   if(!accountIds.has(g.accountId))continue;
+   if(!Number.isFinite(g.issuedAt)||!Number.isFinite(g.expiresAt))continue;
+   if(!g.revokedAt&&g.expiresAt>now)active.push(g);
+  }
+  active.sort((a,b)=>b.issuedAt-a.issuedAt);
+  if(!active.length)return {available:false,kind:'none',
+   reason:requestedBotId?'No active owned deployment for the selected robot':'No active authorized PropDAO deployment found',
+   checkedAt,scannedGrants:keys.length};
+  // Never inspect an unbounded number of Worker DOs in a conversational call.
+  if(active.length>6)return {available:false,kind:'ambiguous',
+   reason:'More than six authorized robots; choose one from the owned list before detailed live inspection',
+   checkedAt,candidates:active.slice(0,12).map(g=>({
+    robotId:g.botId,accountId:g.accountId,issuedAt:g.issuedAt,
+    authorized:true,workerStatus:'not-checked'}))};
+  const checked=await Promise.all(active.map(async g=>{
+   try{
+    const state=await this.status(uid,g.botId);
+    // An account-wide older Worker cannot impersonate a different grant.
+    const grantMatches=state.deployed===true&&state.accountId===g.accountId&&
+     state.codeHash===g.codeHash&&!state.accountOccupied;
+    const runtime:RobotContextSelection['runtime']=!grantMatches||state.uncertain||
+     state.statusUnavailable?'unverified':state.running===true?'running':
+      state.paused===true?'paused':'inactive';
+    return {g,state,runtime};
+   }catch(error){
+    return {g,state:{error:error instanceof Error?error.message:'Worker status unavailable'},
+     runtime:'unverified' as const};
+   }
+  }));
+  const items:RobotContextSelection[]=checked.map(({g,runtime})=>({
+   robotId:g.botId,accountId:g.accountId,issuedAt:g.issuedAt,grantId:g.id,runtime
+  }));
+  const chosen=chooseLiveRobot(items,requestedBotId);
+  const choices=items.map(x=>({robotId:x.robotId,accountId:x.accountId,
+   runtime:x.runtime,issuedAt:x.issuedAt}));
+  if(!chosen.choice)return {available:false,kind:chosen.kind,checkedAt,
+   reason:chosen.kind==='ambiguous'?'Multiple deployments match; choose an exact robot before assessing strategy fit':
+    chosen.kind==='none'?'No Worker-verified running or paused robot; existing grants are inactive':
+     'Selected robot is not an active owned deployment',
+   candidates:choices};
+  const entry=checked.find(x=>x.g.botId===chosen.choice!.robotId)!;
+  const {g,state}=entry,config=parseStrategyConfig(g.code);
+  const summary={
+   robotId:g.botId,grantId:g.id,accountId:g.accountId,
+   instrument:g.symbol,marketReferenceInstrument:g.coin,
+   riskUsd:g.riskUsd,leverage:g.leverage,
+   authorizedAt:g.issuedAt,grantExpiresAt:g.expiresAt,
+   strategyCodeHash:g.codeHash,executionTimeframe:config.executionTimeframe,
+   timeframes:config.timeframes,riskReward:g.riskReward??config.riskReward,
+   riskPercentConfig:config.riskPercent,
+   code:g.code.slice(0,18000),codeComplete:g.code.length<=18000,
+   strategySource:'exact owner-owned deployed grant, not current mutable strategy.js'
+  };
+  return {
+   available:chosen.kind==='resolved'||chosen.kind==='paused',
+   kind:chosen.kind,checkedAt,selection:summary,
+   candidates:choices,
+   worker:{runtime:entry.runtime,verified:entry.runtime!=='unverified',
+    running:state.running===true&&entry.runtime==='running',
+    paused:state.paused===true&&entry.runtime==='paused',
+    uncertain:state.uncertain===true||entry.runtime==='unverified',
+    lastEvaluation:state.lastEvaluation??null,
+    recentDecisions:Array.isArray(state.recentDecisions)?state.recentDecisions.slice(-12):[],
+    marketTelemetry:state.lastMarketData??null,
+    nextAlarm:state.nextAlarm??null,
+    brokerExposureVerified:state.brokerExposureVerified===true,
+    brokerExposure:state.brokerExposureVerified===true?state.brokerExposure:'unknown',
+    openPositions:state.brokerExposureVerified===true&&Array.isArray(state.positions)?state.positions.slice(0,10):null,
+    pendingOrders:state.brokerExposureVerified===true&&Array.isArray(state.pendingOrders)?state.pendingOrders.slice(0,10):null,
+    risk:state.brokerExposureVerified===true?state.risk??null:null,
+    error:state.error??state.accountError??null},
+   limitations:[
+    'A saved deployment grant alone does not establish a running Worker; Worker runtime must independently match.',
+    'Market telemetry is a reference feed, not authenticated PropDAO bid/ask or a guarantee of strategy profitability.',
+    ...(chosen.kind==='unverified'?['Live Worker status is unverified; do not claim running or flat exposure.']:[])
+   ]
+  };
  }
  /** Read all owned, account-bound bot-specific Durable Objects, including
   * the legacy account Worker. An account is not the new robot runtime key.
@@ -572,6 +681,14 @@ export class PropDAOLiveService{
 export function propDAOLiveRoutes(app:Express,deps:Dependencies){
  const service=new PropDAOLiveService(deps);
  const route=(fn:(uid:string,id:string,req:Request)=>Promise<unknown>)=>async(req:Request,res:Response)=>{res.setHeader('Cache-Control','no-store');const uid=await deps.uid(req,res);if(!uid)return;const id=String(req.params.botId);if(!safeId(id))return res.status(400).json({error:'Invalid bot ID'});try{return res.json(await fn(uid,id,req))}catch(e){return res.status(/Unresolved prior order|reconcil|open orders or positions|already running or paused/.test(e instanceof Error?e.message:'')?409:400).json({error:e instanceof Error?e.message:'PropDAO live request failed'})}};
+ app.get('/api/venues/propdao/live/robot-environment',async(req,res)=>{
+  res.setHeader('Cache-Control','private, no-store');
+  const uid=await deps.uid(req,res);if(!uid)return;
+  const requested=typeof req.query.botId==='string'?req.query.botId:undefined;
+  try{return res.json(await service.discoverRobotEnvironment(uid,requested))}
+  catch(error){return res.status(503).json({available:false,
+   reason:error instanceof Error?error.message:'Robot environment unavailable'})}
+ });
  app.get('/api/venues/propdao/accounts/:accountId/robot-activity',async(req,res)=>{
   res.setHeader('Cache-Control','private, no-store');
   const uid=await deps.uid(req,res);if(!uid)return;
