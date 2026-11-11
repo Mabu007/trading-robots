@@ -85,7 +85,7 @@ export function analyzeLiveTradeLosses(input:{
    robotAttribution:exact.has(t.id)?'matched-by-identity':probable.has(t.id)?'probable-entry-evidence':'unattributed-account-trade'})),
   recentTrades:order.slice(0,8).map(t=>({id:t.id,symbol:t.symbol,side:t.side,pnl:t.pnl,fee:t.fee,
    openedAtUTC:utc(t.openedAt),closedAtUTC:utc(t.closedAt),reason:t.reason,
-   robotAttribution:attributed.has(t.id)?'matched-by-identity':'unattributed-account-trade'})),
+   robotAttribution:exact.has(t.id)?'matched-by-identity':probable.has(t.id)?'probable-entry-evidence':'unattributed-account-trade'})),
   limitations:[
    'Provider trade history is account-wide and capped at the most recent 50 records; older losses may be missing.',
    'Unmatched trades may belong to this robot, another strategy, or manual activity. Probable robot links are not exact broker identity matches.',
