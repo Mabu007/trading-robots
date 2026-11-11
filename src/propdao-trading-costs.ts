@@ -12,13 +12,13 @@ export const PROPDAO_DOCUMENTED_FEES=Object.freeze({
  provenance:'published-PropDAO-fee-schedule' as const
 });
 export type PropDAOLiquidity='maker'|'taker';
-export type CostProvenance='authenticated-propdao-markets'|'published-PropDAO-fee-schedule';
+export type CostProvenance='live-propdao-markets'|'published-PropDAO-fee-schedule';
 export type PropDAOCostProfile={
  version:typeof PROPDAO_COST_MODEL_VERSION;
  symbol:string;feeRate:{maker:number;taker:number};
  feeProvenance:CostProvenance; feeSource:string;
  verifiedAt:string; lotStep:number;minQuantity:number;minimumNotionalUsd:number|null;
- contractMultiplier:number; contractProvenance:'authenticated-propdao-markets'|'asset-units-assumption';
+ contractMultiplier:number; contractProvenance:'live-propdao-markets'|'asset-units-assumption';
 };
 export type ExecutionAssumptions={
  /** Full quoted spread, in USDC per asset unit; applied half on each side. */
@@ -53,7 +53,7 @@ export function validatePropDAOProfile(profile:PropDAOCostProfile){
     profile.minQuantity<profile.lotStep-1e-9||
     profile.minimumNotionalUsd!==null&&(!positive(profile.minimumNotionalUsd))||
     !positive(profile.contractMultiplier)||!profile.feeSource||
-    !['authenticated-propdao-markets','published-PropDAO-fee-schedule'].includes(profile.feeProvenance))
+    !['live-propdao-markets','published-PropDAO-fee-schedule'].includes(profile.feeProvenance))
    fail('Unverified contract, quantity or fee profile.');
  validateRates(profile.feeRate);
 }
@@ -64,7 +64,7 @@ export function validateExecutionAssumptions(a:ExecutionAssumptions){
     !['user-assumption','measured-historical-quote','account-specific-evidence'].includes(a.provenance)||
     !a.note?.trim())fail('Spread, slippage and funding must each be explicit with provenance.');
 }
-/** Authenticated account's available market specification takes precedence
+/** Current PropDAO market metadata takes precedence
  * over global documentation. Never fabricate a lot step or min quantity.
  */
 export function propDAOProfileFromMarkets(
@@ -80,14 +80,14 @@ export function propDAOProfileFromMarkets(
  const profile:PropDAOCostProfile={
   version:PROPDAO_COST_MODEL_VERSION,symbol,
   feeRate:{maker:markets.fees.maker!,taker:markets.fees.taker!},
-  feeProvenance:'authenticated-propdao-markets',
-  feeSource:'PropDAO GET /markets; authenticated account-bound market selection',
+  feeProvenance:'live-propdao-markets',
+  feeSource:'PropDAO public GET /markets; instrument selection checked against owned account',
   verifiedAt,
   lotStep:asset.lotStep!,minQuantity:asset.minQty??asset.lotStep!,
   minimumNotionalUsd:asset.minNotionalUsd??null,
   contractMultiplier:asset.contractMultiplier??1,
   contractProvenance:positive(asset.contractMultiplier??NaN)?
-   'authenticated-propdao-markets':'asset-units-assumption'
+   'live-propdao-markets':'asset-units-assumption'
  };
  validatePropDAOProfile(profile);return profile;
 }
