@@ -28,6 +28,7 @@ export function ChatStrategyApproval({trace,request,onApplied}:{
  const stage=proposal(item?.output);
  const [preview,setPreview]=useState<Preview|null>(null);
  const [confirmed,setConfirmed]=useState(false);
+ const [approved,setApproved]=useState(false);
  const [state,setState]=useState<'pending'|'loading'|'applying'|'applied'|'denied'>('pending');
  const [error,setError]=useState('');
  if(!stage)return null;
@@ -53,11 +54,18 @@ export function ChatStrategyApproval({trace,request,onApplied}:{
   if(!preview||!confirmed||expired||state!=='pending')return;
   setError('');setState('applying');
   try{
-   await request(path+'/approve','POST',{});
+   if(!approved){
+    await request(path+'/approve','POST',{});
+    setApproved(true);
+   }
    const applied=await request(path+'/apply','POST',{});
-   if(applied.applied!==true||applied.botId!==selected.botId||applied.operation&&applied.operation!==selected.operation)
+   if(applied.applied!==true||applied.botId!==selected.botId||
+      applied.operation&&applied.operation!==selected.operation)
     throw Error('Server did not confirm applied source mutation');
-   setState('applied');await onApplied(selected.operation,selected.botId);
+   setState('applied');
+   try{await onApplied(selected.operation,selected.botId)}
+   catch{setError('Source change succeeded on the server, but your library view did not refresh. Reload the page.')}
+   return;
   }catch(e){setError(e instanceof Error?e.message:'Source mutation was not completed');setState('pending');setConfirmed(false)}
  }
  async function deny(){
@@ -91,7 +99,7 @@ export function ChatStrategyApproval({trace,request,onApplied}:{
      <label><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>
       I reviewed the exact source change and authorize this {stage.operation==='strategy.delete'?'deletion':'save'}.</label>}
     {preview&&<button type="button" disabled={!confirmed||state!=='pending'} onClick={()=>void commit()}>
-      {state==='applying'?'Applying…':label}</button>}
+      {state==='applying'?'Applying…':approved?'Apply approved change':label}</button>}
     <button type="button" disabled={state!=='pending'} onClick={()=>void deny()}>Deny</button>
    </div>}
   {error&&<p role="alert" className="tv-source-error">{error}</p>}
