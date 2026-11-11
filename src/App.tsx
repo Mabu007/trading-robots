@@ -117,8 +117,9 @@ function QuestionEvidenceAnswer({content,trace,question,bots}:{
  const report=kind==='robot'?
   (toolResult(trace,'getRobotContextCard') as RobotCardEvidence|undefined)||
   robotCardEvidence(toolResult(trace,'discoverRunningPropDAORobots'),toolResult(trace,'getTradingDeskToday')):null;
- const market=kind==='market'?toolResult(trace,'getCurrentMarketConditions')||
-  toolResult(trace,'getPublicMarketEvidence'):null;
+ const market=kind==='market'?
+  (toolResult(trace,'getCurrentMarketConditions')||
+   toolResult(trace,'getPublicMarketEvidence')) as Record<string,unknown>|undefined:null;
  if(!report&&!market)return <ChatText content={content}/>;
  const split=content.indexOf('\n\n');
  return <div className="tv-market-answer">
