@@ -30,5 +30,5 @@
       "codex/phase2-auth-rollout-validation-20261106": false
     }
   },
-  "buildCommand": "npm run build && if [ \"$VERCEL_ENV\" = \"preview\" ]; then npm test -- --reporter=dot && node --test scripts/verify-propdao-worker.test.mjs scripts/rollback-propdao-worker.test.mjs; fi"
+  "buildCommand": "npm run build && if [ \"$VERCEL_ENV\" = \"preview\" ]; then VERCEL_ENV=development npm test -- --reporter=dot && node --test scripts/verify-propdao-worker.test.mjs scripts/rollback-propdao-worker.test.mjs; fi"
 }
