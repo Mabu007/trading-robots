@@ -117,3 +117,17 @@ describe('owner-checked reviewed source CRUD',()=>{
   await expect(service.preview('alice',stage.intentId)).rejects.toThrow(/changed/);
  });
 });
+
+it('refuses a running robot source deletion before creating an approval record',async()=>{
+ const {service,seed,guards,r2}=harness();seed('alice','bot-1');
+ guards.assertDeletable.mockRejectedValue(Error('Stop and reconcile this PropDAO bot'));
+ await expect(service.stageDelete('alice','bot-1')).rejects.toThrow(/Stop and reconcile/);
+ expect([...r2.keys()].some(k=>k.includes('strategy-crud/v1/'))).toBe(false);
+});
+it('rechecks the verified stopped and flat broker state on approval',async()=>{
+ const {service,seed,guards}=harness();seed('alice','bot-1');
+ const proposal=await service.stageDelete('alice','bot-1');
+ guards.assertDeletable.mockRejectedValue(Error('Broker exposure is unknown or not flat'));
+ await expect(service.approve('alice',proposal.intentId)).rejects.toThrow(/Broker exposure/);
+ expect(guards.deleteOwned).not.toHaveBeenCalled();
+});

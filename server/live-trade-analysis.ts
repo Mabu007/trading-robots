@@ -1,9 +1,10 @@
-import {safeExecutionEvents,type ExecutionEvent} from '../shared/propdao-execution-journal.ts';
+import {safeExecutionEvents} from '../shared/propdao-execution-journal.ts';
+import {reconcileBrokerTrade} from './trade-attribution.ts';
 
 type ClosedTrade={
  id:string;symbol:string;side:'BUY'|'SELL';qty:number;entry:number;exit:number;pnl:number;
  openedAt:number|null;closedAt:number|null;reason:string;fee:number|null;
- positionId?:string|null;intentId?:string|null;
+ positionId?:string|null;intentId?:string|null;orderId?:string|null;
 };
 type Group={key:string;count:number;losing:number;reportedPnl:number};
 function tally(items:ClosedTrade[],key:(t:ClosedTrade)=>string):Group[]{
@@ -37,27 +38,26 @@ export function analyzeLiveTradeLosses(input:{
    qty:t.qty as number,entry:t.entry as number,exit:t.exit as number,pnl:t.pnl as number,
    openedAt:num(t.openedAt),closedAt:num(t.closedAt),fee:num(t.fee),
    reason:typeof t.reason==='string'?t.reason.slice(0,80):'',
-   positionId:strictId(t.positionId),intentId:strictId(t.intentId)};
+   positionId:strictId(t.positionId),intentId:strictId(t.intentId),orderId:strictId(t.orderId)};
   return [trade];
  });
- // Only journal events carrying a provider-linked position/intent identity,
- // plus the same bot ID, account, side and symbol, can establish attribution.
- const events=safeExecutionEvents(input.executionEvents,input.accountId).filter(e=>e.botId===input.botId&&e.stage==='PROTECTED_FILL');
- const attributed=new Set<string>();
- for(const trade of trades){
-  const matches=events.filter((e:ExecutionEvent)=>e.symbol===trade.symbol&&e.side===trade.side&&(
-   (trade.positionId&&e.positionId===trade.positionId)||
-   (trade.intentId&&e.intentId===trade.intentId)
-  ));
-  if(matches.length===1)attributed.add(trade.id);
- }
+ // Reuse the single broker-to-Worker reconciliation contract from the desk.
+ // Probable links are NEVER represented as broker-ID-verified robot trades.
+ const events=safeExecutionEvents(input.executionEvents,input.accountId)
+  .filter(e=>e.botId===input.botId&&e.stage==='PROTECTED_FILL');
+ const attribution=new Map(trades.map(t=>[t.id,reconcileBrokerTrade(
+  {...t,accountId:input.accountId},events)]));
+ const exact=new Set(trades.filter(t=>attribution.get(t.id)?.confidence==='verified'&&
+  attribution.get(t.id)?.botId===input.botId).map(t=>t.id));
+ const probable=new Set(trades.filter(t=>attribution.get(t.id)?.confidence==='probable'&&
+  attribution.get(t.id)?.botId===input.botId).map(t=>t.id));
  const order=[...trades].sort((a,b)=>(b.closedAt??0)-(a.closedAt??0));
  const losses=order.filter(t=>t.pnl<0);
  const wins=order.filter(t=>t.pnl>0);
  const samples=order.filter(t=>t.pnl!==0);
  const pnl=trades.reduce((n,t)=>n+t.pnl,0);
  const worst=losses.length?Math.min(...losses.map(t=>t.pnl)):null;
- const byBot=trades.filter(t=>attributed.has(t.id));
+ const byBot=trades.filter(t=>exact.has(t.id));
  const brokerFeesKnown=trades.every(t=>t.fee!==null);
  const feeTotal=trades.reduce((n,t)=>n+(t.fee||0),0);
  return {
@@ -74,20 +74,21 @@ export function analyzeLiveTradeLosses(input:{
   bySide:tally(trades,t=>t.side),
   byExitReason:tally(trades,t=>t.reason||'Unspecified by broker'),
   matchedRobotTradeCount:byBot.length,
+  probableRobotTradeCount:probable.size,
   matchedRobotReportedPnl:Number(byBot.reduce((n,t)=>n+t.pnl,0).toFixed(6)),
-  attribution:'Only broker position/intent IDs explicitly linked to this robot Worker journal establish attribution; other account trades must not be called robot trades.',
+  attribution:'Exact account-scoped provider position/intent/order IDs establish verified robot attribution. A unique price/time/quantity match remains probable, not verified. Other account trades cannot be assigned to this robot.',
   attributableLosses:byBot.filter(t=>t.pnl<0).length,
-  unmatchedAccountTrades:trades.length-byBot.length,
+  unmatchedAccountTrades:trades.length-byBot.length-probable.size,
   reportedStopLossExits:trades.filter(t=>/^(?:SL|STOP[_ -]?LOSS|STOPPED[_ -]?OUT)$/i.test(t.reason.trim())).length,
   recentLosingTrades:losses.slice(0,input.limit??12).map(t=>({...t,
    openedAtUTC:utc(t.openedAt),closedAtUTC:utc(t.closedAt),
-   robotAttribution:attributed.has(t.id)?'matched-by-identity':'unattributed-account-trade'})),
+   robotAttribution:exact.has(t.id)?'matched-by-identity':probable.has(t.id)?'probable-entry-evidence':'unattributed-account-trade'})),
   recentTrades:order.slice(0,8).map(t=>({id:t.id,symbol:t.symbol,side:t.side,pnl:t.pnl,fee:t.fee,
    openedAtUTC:utc(t.openedAt),closedAtUTC:utc(t.closedAt),reason:t.reason,
-   robotAttribution:attributed.has(t.id)?'matched-by-identity':'unattributed-account-trade'})),
+   robotAttribution:exact.has(t.id)?'matched-by-identity':probable.has(t.id)?'probable-entry-evidence':'unattributed-account-trade'})),
   limitations:[
    'Provider trade history is account-wide and capped at the most recent 50 records; older losses may be missing.',
-   'Unmatched trades may belong to this robot, another strategy, or manual activity; attribution is unknown.',
+   'Unmatched trades may belong to this robot, another strategy, or manual activity. Probable robot links are not exact broker identity matches.',
    'A stop-loss reason is a broker exit label, not proof which strategy condition or volatility pattern caused the loss.',
    'Without strategy decision checks and contemporary candles, the precise cause of a losing entry cannot be established.'
   ]

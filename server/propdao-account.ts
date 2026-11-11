@@ -5,6 +5,15 @@ import type { Express, Request, Response as ExpressResponse } from 'express';
 type Storage={read:(key:string)=>Promise<string|null>;write:(key:string,value:string)=>Promise<void>;remove:(key:string)=>Promise<void>};
 const validKey=(v:unknown):v is string=>typeof v==='string' && /^pd_live_[A-Za-z0-9_-]{1,240}$/.test(v);
 const validId=(v:unknown):v is string=>typeof v==='string' && /^[A-Za-z0-9_-]{1,128}$/.test(v);
+/** Preserve only provider-reported IDs, including numeric and snake_case
+ * representations. Never derive identity from price, time or the active bot. */
+const providerId=(...values:unknown[]):string|null=>{
+ for(const v of values){
+  if(typeof v==='string'&&validId(v))return v;
+  if(typeof v==='number'&&Number.isSafeInteger(v)&&v>=0)return String(v);
+ }
+ return null;
+};
 function secret(v:string|undefined){if(!v||!/^[A-Za-z0-9+/]{43}=$/.test(v))throw Error('PropDAO credential encryption is not configured.');const k=Buffer.from(v,'base64');if(k.length!==32||k.toString('base64')!==v)throw Error('PropDAO credential encryption is not configured.');return k}
 function path(uid:string){const env=process.env.VERCEL_ENV==='production'?'production':process.env.VERCEL_ENV==='preview'?'preview':'development';return `propdao-credentials/v1/${env}/${Buffer.from(uid).toString('base64url')}.json`}
 /** An error verified to happen before any order HTTP submission. */
@@ -127,7 +136,14 @@ export class PropDAOAccounts {
   if(!Array.isArray(remaining?.data)||remaining.data.length)throw Error('Resting order or partial fill requires reconciliation. Protected positions remain; no further entries permitted.');
   const filledQuantity=Number(position.qty);
   if(!Number.isFinite(filledQuantity)||filledQuantity<=0||filledQuantity>qty+market.lotStep/2)throw Error('Unexpected filled quantity; account reconciliation required');
-  return {intentId:input.intentId,quantity:filledQuantity,requestedQuantity:qty,plannedLoss:verdict.plannedLoss*(filledQuantity/qty),projectedNetProfit:projectedNetProfit*(filledQuantity/qty),riskBudgetUsd:input.riskUsd,riskReward:input.riskReward,stop:input.stop,target,protected:true,filled:true,positionId:position.id,providerStatus:'PROTECTED_FILL',provider:body};
+  return {intentId:input.intentId,quantity:filledQuantity,requestedQuantity:qty,plannedLoss:verdict.plannedLoss*(filledQuantity/qty),projectedNetProfit:projectedNetProfit*(filledQuantity/qty),riskBudgetUsd:input.riskUsd,riskReward:input.riskReward,stop:input.stop,target,protected:true,filled:true,positionId:providerId(position.id),
+    entryPrice:Number.isFinite(Number(position.entry))&&Number(position.entry)>0?Number(position.entry):null,
+    brokerOrderId:providerId(responseOrderId),
+    filledAt:Number.isFinite(Number(position.openedAt))&&Number(position.openedAt)>0?
+     Number(position.openedAt):Date.now(),
+    fillTimestampSource:Number.isFinite(Number(position.openedAt))&&Number(position.openedAt)>0?
+     'provider-position-openedAt':'server-confirmed-position-observed',
+    providerStatus:'PROTECTED_FILL',provider:body};
   }catch(error){
    if(!submissionStarted)throw new PropDAONoSubmissionError(error instanceof Error?error.message:'Order preflight failed before submission');
    throw error;
@@ -151,8 +167,9 @@ export class PropDAOAccounts {
    exit:number(t.exit),pnl:number(t.pnl),openedAt:number(t.openedAt),closedAt:number(t.closedAt),
    reason:String(t.reason||''),fee:number(t.fee),
    // Provider identity fields are optional. Never infer them from price or time.
-   positionId:validId(t.positionId)?t.positionId:null,
-   intentId:validId(t.intentId)?t.intentId:null
+   positionId:providerId(t.positionId,t.position_id,t.position?.id),
+   intentId:providerId(t.intentId,t.intent_id,t.clientOrderId,t.client_order_id),
+   orderId:providerId(t.orderId,t.order_id,t.brokerOrderId,t.broker_order_id)
   }));
   if(trades.some((t:any)=>!t.id||!t.symbol||!['BUY','SELL'].includes(t.side)||
    [t.qty,t.entry,t.exit,t.pnl].some(v=>typeof v!=='number'||!Number.isFinite(v))||
