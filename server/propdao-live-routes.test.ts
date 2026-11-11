@@ -466,3 +466,70 @@ it('permits authenticated read-only broker history after robot authorization is 
  await expect(svc.provider({uid:'alice',botId:'bot-1',grantId:'grant-stop-1',action:'execute',payload:{}}))
   .rejects.toThrow(/expired/i);
 });
+
+
+describe('VIBES owner-scoped live robot environment discovery',()=>{
+ const path=(uid:string,botId:string)=>'propdao-live/v1/'+(process.env.VERCEL_ENV||'development')+'/'+Buffer.from(uid).toString('base64url')+'/'+botId+'.json';
+ const add=(saved:Map<string,string>,botId:string,accountId='prop-1',timestamp=Date.now())=>{
+  const code=starterCode;
+  saved.set(path('alice',botId),JSON.stringify({
+   id:'grant-'+botId,uid:'alice',botId,accountId,code,
+   codeHash:createHash('sha256').update(code).digest('hex'),
+   symbol:'BTCUSDC',coin:'BTC',riskUsd:2,leverage:1,riskReward:2,
+   issuedAt:timestamp,expiresAt:timestamp+3600_000,runtimeScope:'bot'
+  }));
+ };
+ it('finds a running deployment WITHOUT a caller-supplied botId and exposes exact deployed strategy',async()=>{
+  const {svc,saved}=setup();
+  add(saved,'bot-latest');
+  const hash=createHash('sha256').update(starterCode).digest('hex');
+  vi.spyOn(svc,'status').mockResolvedValue({
+   deployed:true,running:true,paused:false,accountId:'prop-1',codeHash:hash,
+   lastEvaluation:{action:'WAIT',reason:'M5 trend filter failed',time:Date.now()},
+   recentDecisions:[{action:'WAIT',reason:'M5 trend filter failed'}],
+   brokerExposureVerified:true,brokerExposure:'flat',positions:[],pendingOrders:[],
+   risk:{equity:1000,roomUsd:45},nextAlarm:Date.now()+60000
+  } as any);
+  const result:any=await svc.discoverRobotEnvironment('alice');
+  expect(result).toMatchObject({available:true,kind:'resolved',
+   selection:{robotId:'bot-latest',instrument:'BTCUSDC',executionTimeframe:'m1',
+    strategyCodeHash:hash,code:starterCode},
+   worker:{verified:true,running:true,brokerExposure:'flat',
+    lastEvaluation:{reason:'M5 trend filter failed'}}});
+ });
+ it('never reads another owner account, even when a grant is in the caller R2 prefix',async()=>{
+  const {svc,saved,accounts}=setup();
+  add(saved,'bot-other','prop-other');
+  const status=vi.spyOn(svc,'status');
+  const result:any=await svc.discoverRobotEnvironment('alice');
+  expect(result).toMatchObject({available:false,kind:'none'});
+  expect(accounts.list).toHaveBeenCalledWith('alice');
+  expect(status).not.toHaveBeenCalled();
+  expect(await svc.discoverRobotEnvironment('bob')).toMatchObject({available:false,kind:'none'});
+ });
+ it('refuses to pick one of two concurrently running robots',async()=>{
+  const {svc,saved}=setup();
+  add(saved,'bot-1');add(saved,'bot-2');
+  const hash=createHash('sha256').update(starterCode).digest('hex');
+  vi.spyOn(svc,'status').mockImplementation(async()=>{
+   return {deployed:true,running:true,accountId:'prop-1',codeHash:hash} as any
+  });
+  const result:any=await svc.discoverRobotEnvironment('alice');
+  expect(result).toMatchObject({available:false,kind:'ambiguous'});
+  expect(result.candidates).toHaveLength(2);
+ });
+ it('reports unknown Worker state without falsely claiming a running robot',async()=>{
+  const {svc,saved}=setup();add(saved,'bot-one');
+  vi.spyOn(svc,'status').mockRejectedValue(Error('Worker not reachable'));
+  const result:any=await svc.discoverRobotEnvironment('alice');
+  expect(result).toMatchObject({available:false,kind:'unverified',
+   worker:{verified:false,running:false,brokerExposure:'unknown'}});
+  expect(result.selection.code).toBe(starterCode);
+ });
+ it('refuses integrity-mismatched historical code and robot impersonation',async()=>{
+  const {svc,saved}=setup();add(saved,'bot-one');
+  const k=path('alice','bot-one'),record=JSON.parse(saved.get(k)!);
+  saved.set(k,JSON.stringify({...record,code:'export const config = {};'}));
+  await expect(svc.discoverRobotEnvironment('alice')).rejects.toThrow(/integrity/);
+ });
+});
