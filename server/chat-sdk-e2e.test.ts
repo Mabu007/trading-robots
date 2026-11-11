@@ -18,6 +18,7 @@ it('authenticates a Firebase token and streams a model response through the SDK 
  const token=unsigned+'.'+sign('RSA-SHA256',Buffer.from(unsigned),privateKey).toString('base64url');
  process.env.FIREBASE_PROJECT_ID='test-project';process.env.VITE_FIREBASE_PROJECT_ID='test-project';
  let bookRequests=0,toolCalls=0,strategyCalls=0,backtestCalls=0,researchCalls=0;
+ let sawEditProposalTool=false,sawUnsafeApprovalTool=false;
  const researchBrief=vi.spyOn(research,'researchBrief').mockResolvedValue({context:'Verified public research fixture.'} as any);
  const simulation=Buffer.from(JSON.stringify({asset:'GOLDUSDC',from:'2026-01-01',to:'2026-01-02',logs:[],result:{candles:[{},{}],trades:[{id:1,pnl:-1}],metrics:{netReturn:-1}}}));
  const savedRead=vi.spyOn(r2,'readR2Object').mockImplementation(async(key)=>{
@@ -36,6 +37,12 @@ it('authenticates a Firebase token and streams a model response through the SDK 
    const sent=JSON.parse(String(init?.body));
    if(sent.messages.some((x:{content:unknown})=>x.content==='Rate-limited draft')){
     return Response.json({error:{message:'Provider returned error',code:429}},{status:429});
+   }
+   if(sent.messages.some((x:{content:unknown})=>x.content==='Change my robot stop loss')){
+    const names=Array.isArray(sent.tools)?sent.tools.map((t:any)=>t?.function?.name??t?.name):[];
+    sawEditProposalTool=names.includes('readEditableStrategySource')&&
+      names.includes('proposeStrategySourceEdit');
+    sawUnsafeApprovalTool=names.some((name:string)=>/approve|apply|deleteSourceImmediately|submitTrade/i.test(name));
    }
    if(sent.messages.some((x:{content:unknown})=>x.content==='Gold news today')){
     researchCalls++;
@@ -99,6 +106,10 @@ it('authenticates a Firebase token and streams a model response through the SDK 
    .rejects.toThrow(/OpenRouter rate-limited the selected model/);
   const book=await postApiStream(url,{messages:[{role:'user',content:'Book'}],includeMarketContext:true},'AI',()=>undefined,undefined,token);
   expect(book).toBe('Hello trader');expect(toolCalls).toBe(2);expect(bookRequests).toBe(1);
+  const edit=await postApiStream(url,{messages:[{role:'user',content:'Change my robot stop loss'}],includeMarketContext:true,researchMode:true},'AI',()=>undefined,undefined,token);
+  expect(edit).toBe('Hello trader');
+  expect(sawEditProposalTool).toBe(true);
+  expect(sawUnsafeApprovalTool).toBe(false);
   const strategy=await postApiStream(url,{messages:[{role:'user',content:'Strategy'}],includeMarketContext:true},'AI',()=>undefined,undefined,token);
   expect(strategy).toBe('Hello trader');expect(strategyCalls).toBe(2);
   let completion:{error:unknown;result?:string}|undefined;
