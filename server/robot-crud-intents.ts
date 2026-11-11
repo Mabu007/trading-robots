@@ -90,6 +90,9 @@ export class RobotCrudIntents{
  async stageDelete(uid:string,botId:string){
   const {meta,code}=await this.current(uid,botId);
   if(meta.venue==='ctrader')throw Error('Cannot safely delete cTrader source until its live gateway state can be independently reconciled');
+  // Never invite a user to approve deletion of a still-running bot.
+  // Approval is gated independently again after staging, then at apply.
+  await this.deps.assertDeletable(uid,botId);
   const data={botId,operation:'strategy.delete' as const,codeHash:hash(code),
    meta:{name:meta.name,asset:meta.asset,venue:venue(meta.venue),
     prompt:typeof (meta as any).prompt==='string'?(meta as any).prompt.slice(0,3000):''}};
@@ -143,6 +146,7 @@ export class RobotCrudIntents{
   if(s.operation==='strategy.delete'){
    const current=await this.current(uid,s.botId);
    if(hash(current.code)!==s.codeHash)throw Error('Strategy source has changed since deletion review');
+   await this.deps.assertDeletable(uid,s.botId);
   }else if(await this.deps.store.get(botPath(uid,s.botId))||
     await this.deps.read(root(uid,s.botId)+'/current.json'))
    throw Error('New robot identity is occupied');
