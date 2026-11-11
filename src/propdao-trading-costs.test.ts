@@ -1,4 +1,5 @@
 import {describe,it,expect} from 'vitest';
+import {simulate} from './engine';
 import {accountPropDAOTrade,explicitPropDAOAssumptions,propDAOProfileFromMarkets,sizePropDAOForNetStop,reconcilePropDAOBrokerCostEvidence} from './propdao-trading-costs';
 const profile=propDAOProfileFromMarkets('GOLDUSDC',{
  fees:{maker:0.00015,taker:0.00045},
@@ -52,5 +53,31 @@ describe('PropDAO broker trade cost evidence',()=>{
   expect(result.brokerReportedGrossPnlUsd).toBeNull();
   expect(result.brokerReportedFundingUsd).toBeNull();
   expect(result.grossToNetReconciled).toBeNull();
+ });
+});
+
+describe('same signals and candles: legacy R result versus PropDAO monetary costs',()=>{
+ it('reconciles a next-candle gross winning trade to net losing under documented maker/taker fees',()=>{
+  const candles=[{time:1,open:4000,high:4001,low:3999,close:4000,volume:1},
+   {time:61,open:4000,high:4001,low:3999,close:4000,volume:1},
+   {time:121,open:4000.5,high:4002,low:3999,close:4000.5,volume:1}];
+  const legacy=simulate(candles,[{action:'BUY',stopLoss:3999,takeProfit:4000.5},
+   {action:'WAIT'},{action:'WAIT'}]);
+  expect(legacy.trades).toHaveLength(1);
+  expect(legacy.trades[0].pnl).toBeGreaterThan(0);
+  const executed=legacy.trades[0];
+  const costed=accountPropDAOTrade({...trade,quantity:.2,
+   referenceEntry:executed.entry,referenceExit:executed.exit,
+   exitReason:executed.reason==='target'?'target':'end'});
+  expect(costed.grossReferenceUsd).toBeGreaterThan(0);
+  expect(costed.netPnlUsd).toBeLessThan(0);
+  expect(costed.accounting).toContain('included in prices');
+  // The legacy R engine is NOT yet a certified PropDAO monetary backtest.
+ });
+ it('preserves a negative stop loss for a symmetric short even with execution costs',()=>{
+  const short=accountPropDAOTrade({...trade,side:'SHORT',referenceEntry:4000,
+   referenceExit:4002,exitReason:'stop'});
+  expect(short.grossPnlUsd).toBeLessThan(0);
+  expect(short.netPnlUsd).toBeLessThan(short.grossPnlUsd);
  });
 });
