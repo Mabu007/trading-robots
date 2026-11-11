@@ -329,7 +329,7 @@ async function commitReviewedCode(uid:string,botId:string,code:string,expectedCo
  return valrExclusive(uid,()=>propBotExclusive(uid,botId,async()=>{
   await propdaoLiveService.assertDeletable(uid,botId);
   const grant=await liveService.grant(uid);if(grant?.botId===botId)await liveService.beforeKeyChange(uid);
-  const storageKey=`${userBotRoot(uid,botId)}/current.json`,raw=await readR2Object(storageKey);
+  const storageKey=`${userBotRoot(sourceOwnerUid,botId)}/current.json`,raw=await readR2Object(storageKey);
   if(!raw)throw Error('Saved code was not found.');
   const saved=JSON.parse(raw);
   if(saved.userId!==uid||saved.botId!==botId||typeof saved.code!=='string')throw Error('Saved code failed its ownership check.');
@@ -1032,15 +1032,16 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
      emitTool({type:'tool-result',toolCallId,toolName:name,output});
      return output;
     }
+    const sourceOwnerUid=uid as string;
     async function ownedEditableSource(botId:string){
      if(!validBotId(botId))throw Error('Invalid owned strategy ID');
-     const meta=await marketplace.store.get(`users/${uid}/bots/${botId}`);
-     if(!meta||meta.id&&meta.id!==botId||meta.ownerUid&&meta.ownerUid!==uid||
-        meta.userId&&meta.userId!==uid)throw Error('Saved strategy ownership could not be verified');
+     const meta=await marketplace.store.get(`users/${sourceOwnerUid}/bots/${botId}`);
+     if(!meta||meta.id&&meta.id!==botId||meta.ownerUid&&meta.ownerUid!==sourceOwnerUid||
+        meta.userId&&meta.userId!==sourceOwnerUid)throw Error('Saved strategy ownership could not be verified');
      const raw=await readR2Object(`${userBotRoot(uid,botId)}/current.json`);
      if(!raw||raw.length>250000)throw Error('Saved robot source is unavailable');
      const record=JSON.parse(raw);
-     if(record.userId!==uid||record.botId!==botId||record.venue!==meta.venue||
+     if(record.userId!==sourceOwnerUid||record.botId!==botId||record.venue!==meta.venue||
         typeof record.code!=='string'||record.code.length>180000)
       throw Error('Robot source ownership or venue differs from the catalog');
      return {meta,code:record.code as string};
@@ -1206,9 +1207,9 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
           return {available:true,botId:id,name:source.meta.name,venue:source.meta.venue,
            asset:source.meta.asset,source:'owner-checked saved current.json',
            ...chunk,
-           deployedCodeHash:deployed?.selection?.robotId===id?deployed.selection.strategyCodeHash:null,
+           deployedCodeHash:deployed?.selection?.robotId===id?deployed.selection!.strategyCodeHash:null,
            savedMatchesDeployed:deployed?.selection?.robotId===id?
-            deployed.selection.strategyCodeHash===chunk.codeHash:null};
+            deployed.selection!.strategyCodeHash===chunk.codeHash:null};
          }catch(error){return {available:false,reason:error instanceof Error?error.message:'Source unavailable'}}
         }
        }),
@@ -1225,7 +1226,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
           const saved=await ownedEditableSource(id);
           const patch=uniqueCodeReplacement(saved.code,find,replacement,expectedCodeHash);
           const stage=await strategyReviews.stage(uid,id,saved.code,patch.proposed);
-          return {available:true,reviewRequired:true,operation:'strategy.apply',
+          return {available:true,reviewRequired:true,
            ...stage,name:saved.meta.name,botId:id,previousCodeHash:patch.previousHash,
            proposedCodeHash:patch.proposedHash,changedAtLine:patch.changedAtLine,
            oldSnippet:patch.oldSnippet.slice(0,1600),newSnippet:patch.newSnippet.slice(0,1600),
