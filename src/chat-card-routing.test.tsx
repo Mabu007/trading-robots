@@ -31,6 +31,11 @@ describe('question-intent evidence cards',()=>{
    trace('getCurrentMarketConditions',{available:true,close:4050})
   ])).toBe('market');
  });
+ it('does not render a false technical card for public research snapshots',()=>{
+  expect(selectChatCard('Latest gold macro headlines',[
+   trace('getPublicMarketEvidence',{available:true,quote:{coin:'xyz:GOLD',price:4045}})
+  ])).toBe('none');
+ });
  it('leaves chat source reviews to the existing approval card',()=>{
   expect(selectChatCard('Fix its SL and let me review',[
    desk,env,trace('proposeStrategySourceEdit',{reviewRequired:true})
