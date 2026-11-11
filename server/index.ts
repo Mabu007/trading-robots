@@ -33,6 +33,7 @@ import {ValrAccounts} from './valr-account.ts';
 import {scopePrivateTools} from './agent-tool-discovery.ts';
 import {ApprovalIntents} from './approval-intents.ts';
 import {ReviewedStrategyUpdates} from './strategy-approval-flow.ts';
+import {RobotCrudIntents} from './robot-crud-intents.ts';
 import {fetchPublicSource,publicFinanceRequested,publicFinanceTools} from './public-finance.ts';
 import {GdeltNews,registerGdeltNews} from './gdelt-news.ts';
 import {codeWatchRoutes} from './code-watch-routes.ts';
@@ -370,6 +371,50 @@ const strategyReviews=new ReviewedStrategyUpdates({
  },
  commit:commitReviewedCode
 });
+// Mission-critical source CRUD shares the exact existing owner and runtime
+// locks. The SDK can only create a PENDING review, never approve/apply it.
+async function approvedRobotDelete(uid:string,botId:string){
+ await propdaoLiveService.assertDeletable(uid,botId);
+ const valrGrant=await liveService.grant(uid);
+ if(valrGrant?.botId===botId)await liveService.beforeKeyChange(uid);
+ const owned=await marketplace.store.get(`users/${uid}/bots/${botId}`);
+ if(!owned||owned.id&&owned.id!==botId||
+    owned.ownerUid&&owned.ownerUid!==uid||
+    owned.userId&&owned.userId!==uid)
+  throw Error('Robot catalog ownership could not be verified');
+ const prefix=`${userBotRoot(uid,botId)}/`;
+ const keys=await listR2Objects(prefix,1001);
+ if(keys.length>1000)throw Error('Too many saved versions for reviewed deletion');
+ // Verify the complete nested metadata set before removing any source files.
+ const collection=`users/${uid}/bots/${botId}/versions`;
+ const revisions:string[]=[];
+ if(!marketplace.store.page)throw Error('Version catalog cannot be checked safely');
+ let after:string|undefined;
+ do{
+  const page=await marketplace.store.page(collection,undefined,undefined,after,100);
+  for(const item of page.items){
+   if(typeof item.id!=='string'||!/^[A-Za-z0-9_-]{1,100}$/.test(item.id))
+    throw Error('Unexpected version identity; deletion blocked');
+   revisions.push(item.id);
+  }
+  after=page.next??undefined;
+  if(revisions.length>1000)throw Error('Version catalog exceeds deletion safety limit');
+ }while(after);
+ await publications.removePublication(uid,botId);
+ for(let i=0;i<keys.length;i+=10)
+  await Promise.all(keys.slice(i,i+10).map(key=>deleteR2Object(key)));
+ for(const id of revisions)
+  await marketplace.store.remove?.(collection+'/'+id);
+ await marketplace.store.remove?.(`users/${uid}/bots/${botId}/chats/current`);
+ await marketplace.store.remove?.(`users/${uid}/bots/${botId}`);
+}
+const robotCrud=new RobotCrudIntents({
+ approvals:new ApprovalIntents(marketplace.store),
+ store:marketplace.store,read:readR2Object,write:writeR2Object,remove:deleteR2Object,
+ withLock:(uid,botId,run)=>valrExclusive(uid,()=>propBotExclusive(uid,botId,run)),
+ assertDeletable:(uid,botId)=>propdaoLiveService.assertDeletable(uid,botId),
+ deleteOwned:approvedRobotDelete
+});
 app.get('/api/agent/capabilities',async(req,res)=>{
  res.setHeader('Cache-Control','private, no-store');
  const uid=await firebaseUidOrReply(req,res);if(!uid)return;
@@ -407,6 +452,30 @@ function strategyReviewEnabled(uid:string,req:express.Request,res:express.Respon
  if(phase2FeatureEnabled(uid,'AI_SDK_STRATEGY_APPROVAL_ENABLED',process.env,req.headers['x-tv-phase2-qa'])&&FirestoreStore.configured()&&Boolean(getR2Config()))return true;
  res.status(503).json({error:'Reviewed strategy updates are not enabled for this environment.'});
  return false;
+}
+app.post('/api/agent/robot-mutations',async(req,res)=>{
+ res.setHeader('Cache-Control','private, no-store');
+ const uid=await firebaseUidOrReply(req,res);
+ if(!uid||!strategyReviewEnabled(uid,req,res))return;
+ try{
+  const operation=req.body?.operation;
+  if(operation==='strategy.create')
+   return res.status(201).json(await robotCrud.stageCreate(uid,req.body));
+  if(operation==='strategy.delete')
+   return res.status(201).json(await robotCrud.stageDelete(uid,String(req.body?.botId||'')));
+  return res.status(400).json({error:'Unsupported source mutation'});
+ }catch(error){return res.status(409).json({error:error instanceof Error?error.message:'Could not stage source mutation'})}
+});
+for(const action of ['approve','deny','apply'] as const){
+ app.post('/api/agent/robot-mutations/:intentId/'+action,async(req,res)=>{
+  res.setHeader('Cache-Control','private, no-store');
+  const uid=await firebaseUidOrReply(req,res);
+  if(!uid||!strategyReviewEnabled(uid,req,res))return;
+  const intentId=String(req.params.intentId||'');
+  if(!validBotId(intentId))return res.status(400).json({error:'Invalid robot review identity'});
+  try{return res.json(await robotCrud[action](uid,intentId))}
+  catch(error){return res.status(409).json({error:error instanceof Error?error.message:'Robot mutation review failed'})}
+ });
 }
 app.post('/api/agent/strategy-reviews',async(req,res)=>{
  const uid=await firebaseUidOrReply(req,res);if(!uid||!strategyReviewEnabled(uid,req,res))return;
