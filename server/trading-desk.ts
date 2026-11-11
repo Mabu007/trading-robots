@@ -1,8 +1,9 @@
 import {createHash} from 'node:crypto';
 import type {RecordStore} from './firestore-store.ts';
 import {safeExecutionEvents,type ExecutionEvent} from '../shared/propdao-execution-journal.ts';
+import {reconcileBrokerTrade,type TradeLink} from './trade-attribution.ts';
 
-type Trade={id:string;symbol:string;side:'BUY'|'SELL';qty:number;entry:number;exit:number;pnl:number;openedAt:number|null;closedAt:number|null;reason:string;fee:number|null;positionId?:string|null;intentId?:string|null};
+type Trade={id:string;symbol:string;side:'BUY'|'SELL';qty:number;entry:number;exit:number;pnl:number;openedAt:number|null;closedAt:number|null;reason:string;fee:number|null;positionId?:string|null;intentId?:string|null;orderId?:string|null};
 type Account={accountId:string;status:string};
 type Broker={list:(uid:string)=>Promise<{connected:boolean;accounts:Account[]}>;recentTrades:(uid:string,accountId:string)=>Promise<Trade[]>};
 type Decision={accountId:string;botId:string;grantId:string;codeHash:string|null;candleClose:number;time:number;action:string;reason:string;checks:unknown[]};
@@ -23,25 +24,24 @@ const validTrade=(v:any):v is Trade=>v&&typeof v.id==='string'&&v.id.length>0&&v
  [v.qty,v.entry,v.exit,v.pnl].every((x:unknown)=>typeof x==='number'&&Number.isFinite(x));
 const sum=(values:number[])=>Math.round(values.reduce((a,b)=>a+b,0)*1e6)/1e6;
 
-/** Identity attribution is PROVEN only by an exact provider position/intent ID. */
-export function attributeTrade(t:Trade,events:ExecutionEvent[]){
- const matches=events.filter(e=>e.stage==='PROTECTED_FILL'&&e.symbol===t.symbol&&e.side===t.side&&
-  ((t.positionId&&e.positionId===t.positionId)||(t.intentId&&e.intentId===t.intentId)));
- const identities=[...new Set(matches.map(e=>e.botId+':'+e.grantId))];
- if(identities.length!==1)return {botId:null,grantId:null,attribution:'unattributed'};
- const chosen=matches[0];
- return {botId:chosen.botId,grantId:chosen.grantId,attribution:'exact-provider-identity'};
+/** Never infer provider ownership from the fact that only one robot runs. */
+export function attributeTrade(t:Trade,events:ExecutionEvent[],accountId:string):TradeLink{
+ return reconcileBrokerTrade({...t,accountId},events);
 }
-export function summarizeDay(trades:Array<Trade&{accountId:string;botId:string|null;attribution:string}>,day:string,coverage:{
+export function summarizeDay(trades:Array<Trade&{accountId:string;botId:string|null;attribution:string;confidence?:string}>,day:string,coverage:{
  accountsChecked:number;failures:string[];capped:string[];journalWarnings:string[];ledgerAvailable:boolean;writeFailures:number;
 }){
  const unknownTimes=trades.filter(t=>timestamp(t.closedAt)===null).length;
  const today=trades.filter(t=>{const ms=timestamp(t.closedAt);return ms!==null&&sastDay(ms)===day})
   .sort((a,b)=>(timestamp(b.closedAt)||0)-(timestamp(a.closedAt)||0));
  const losses=today.filter(t=>t.pnl<0),wins=today.filter(t=>t.pnl>0),decided=today.filter(t=>t.pnl!==0);
- const byRobot=new Map<string,{botId:string;trades:number;losses:number;pnl:number}>();
- for(const t of today){const k=t.botId||'unattributed',g=byRobot.get(k)||{botId:k,trades:0,losses:0,pnl:0};
-  g.trades++;g.losses+=Number(t.pnl<0);g.pnl+=t.pnl;byRobot.set(k,g);}
+ const byRobot=new Map<string,{botId:string;trades:number;losses:number;pnl:number;
+  verified:number;probable:number}>();
+ for(const t of today){const k=t.botId||'unattributed',g=byRobot.get(k)||
+  {botId:k,trades:0,losses:0,pnl:0,verified:0,probable:0};
+  g.trades++;g.losses+=Number(t.pnl<0);g.pnl+=t.pnl;
+  g.verified+=Number(t.attribution==='exact-provider-identity');
+  g.probable+=Number(t.attribution==='probable-entry-evidence');byRobot.set(k,g);}
  return {available:true,day,timeZone:'Africa/Johannesburg',window:'00:00–23:59 SAST',
   source:'Owner-authenticated PropDAO closed trades, Cloudflare journal, Firestore observation ledger',
   accountsChecked:coverage.accountsChecked,failedAccounts:coverage.failures,historyCapped:coverage.capped,
@@ -56,10 +56,12 @@ export function summarizeDay(trades:Array<Trade&{accountId:string;botId:string|n
   worstLoss:losses.length?Math.min(...losses.map(t=>t.pnl)):null,
   avgLoss:losses.length?sum(losses.map(t=>t.pnl))/losses.length:null,
   stopLossCount:today.filter(t=>/^(?:SL|STOP[_ -]?LOSS|STOPPED[_ -]?OUT)$/i.test(t.reason)).length,
-  matchedRobotTrades:today.filter(t=>t.botId!==null).length,
+  matchedRobotTrades:today.filter(t=>t.botId!==null&&t.attribution==='exact-provider-identity').length,
+  probableRobotTrades:today.filter(t=>t.botId!==null&&t.attribution==='probable-entry-evidence').length,
+  conflictingRobotTrades:today.filter(t=>t.attribution==='conflicting-evidence').length,
   unattributedTrades:today.filter(t=>t.botId===null).length,
   byRobot:[...byRobot.values()].map(g=>({...g,pnl:Math.round(g.pnl*1e6)/1e6})),
-  recentLosses:losses.slice(0,12).map(t=>({accountId:t.accountId,tradeId:t.id,botId:t.botId,attribution:t.attribution,
+  recentLosses:losses.slice(0,12).map(t=>({accountId:t.accountId,tradeId:t.id,botId:t.botId,attribution:t.attribution,confidence:t.confidence??'unknown',
    side:t.side,symbol:t.symbol,pnl:t.pnl,fee:t.fee,reason:t.reason,entry:t.entry,exit:t.exit,
    openedAtUTC:timestamp(t.openedAt)!==null?new Date(timestamp(t.openedAt)!).toISOString():null,
    closedAtUTC:timestamp(t.closedAt)!==null?new Date(timestamp(t.closedAt)!).toISOString():null})),
@@ -144,10 +146,35 @@ export class TradingDesk{
   if(!accounts.length)return {available:false,day,timeZone:'Africa/Johannesburg',reason:'No connected PropDAO accounts'};
   if(accounts.length>12)return {available:false,day,reason:'More than 12 accounts; restrict the investigation to a named account'};
   const root='users/'+uid+'/liveTrades';
-  const retained=new Map<string,Trade&{accountId:string;botId:string|null;attribution:string}>();
+  const retained=new Map<string,Trade&{accountId:string;botId:string|null;attribution:string;confidence?:string}>();
   const failures:string[]=[],capped:string[]=[],journalWarnings:string[]=[];
   let writeFailures=0,tradeWrites=0,eventWrites=0,decisionWrites=0;
   let liveSqlAccountCount=0,liveSqlTradeCount=0;
+  // Owner-scoped archived protected fills remain available after Worker stop.
+  const archivedEvents:ExecutionEvent[]=[];
+  if(this.store){
+   try{
+    const collection='users/'+uid+'/liveExecutionEvents';
+    if(this.store.page){
+     let cursor:string|undefined;
+     for(let batch=0;batch<5;batch++){
+      const page=await this.store.page(collection,undefined,undefined,cursor,100);
+      for(const item of page.items)if(typeof item.accountId==='string'&&accounts.includes(item.accountId)&&
+       item.stage==='PROTECTED_FILL')
+       archivedEvents.push(...safeExecutionEvents([item],item.accountId));
+      if(!page.next){cursor=undefined;break}
+      cursor=page.next;
+      if(batch===4)journalWarnings.push('Archived protected fills capped at 500 events');
+     }
+    }else{
+     const rows=await this.store.query(collection);
+     for(const row of rows.slice(-500))if(typeof row.accountId==='string'&&
+      accounts.includes(row.accountId)&&row.stage==='PROTECTED_FILL')
+      archivedEvents.push(...safeExecutionEvents([row],row.accountId));
+     if(rows.length>500)journalWarnings.push('Archived protected fills capped at 500 events');
+    }
+   }catch{journalWarnings.push('Archived protected fills could not be verified');}
+  }
   for(const accountId of accounts){
    try{
     // Worker SQL is the durable live source. Broker reads independently
@@ -159,11 +186,12 @@ export class TradingDesk{
     const brokerTrades=brokerResult.status==='fulfilled'?brokerResult.value:[];
     if(brokerResult.status==='rejected')failures.push(accountId+': Live broker read unavailable; showing retained evidence if present');
     if(brokerTrades.length===50)capped.push(accountId);
-    let events:ExecutionEvent[]=[],decisions:Decision[]=[];
+    let events:ExecutionEvent[]=archivedEvents.filter(e=>e.accountId===accountId),decisions:Decision[]=[];
     let doTrades:Trade[]=[],activeSql=false;
     if(workerResult.status==='fulfilled'&&workerResult.value){
      const activity=workerResult.value;
-     events=safeExecutionEvents(activity.events,accountId);
+     const recent=safeExecutionEvents(activity.events,accountId);
+     events=[...new Map([...events,...recent].map(e=>[e.id,e])).values()];
      decisions=Array.isArray(activity.decisionSnapshots)?activity.decisionSnapshots.filter(d=>
       d&&d.accountId===accountId&&validId(d.botId)&&validId(d.grantId)&&Number.isFinite(d.candleClose)).slice(-300):[];
      doTrades=Array.isArray(activity.liveTrades)?activity.liveTrades.filter(validTrade):[];
@@ -200,7 +228,7 @@ export class TradingDesk{
      }));
     }
     const documents=trades.filter(validTrade).map(t=>{
-     const scope=hash('propdao',accountId,t.id),link=attributeTrade(t,events);
+     const scope=hash('propdao',accountId,t.id),link=attributeTrade(t,events,accountId);
      const {id:providerTradeId,...brokerFields}=t;
      const record={...brokerFields,providerTradeId,accountId,...link,
       localDay:timestamp(t.closedAt)!==null?sastDay(timestamp(t.closedAt)!):null,
@@ -214,10 +242,12 @@ export class TradingDesk{
       const path=root+'/'+scope;
       try{
        if(await this.store!.create(path,record))tradeWrites++;
-       else if(record.attribution==='exact-provider-identity'){
-        const old=await this.store!.get(path);
-        if(old?.providerTradeId===record.providerTradeId&&old?.accountId===record.accountId&&
-          old?.attribution!=='exact-provider-identity')await this.store!.put(path,{...old,...record});
+       else {
+        const prior=await this.store!.get(path);
+        const rank=(x:unknown)=>x==='exact-provider-identity'?2:x==='probable-entry-evidence'?1:0;
+        if(prior?.providerTradeId===record.providerTradeId&&prior.accountId===record.accountId&&
+           rank(record.attribution)>rank(prior.attribution))
+         await this.store!.put(path,{...prior,...record});
        }
       }catch{writeFailures++;}
      }));
