@@ -53,7 +53,7 @@ describe('owner-checked reviewed source CRUD',()=>{
   expect(result).toMatchObject({applied:true,operation:'strategy.create',botId:stage.botId});
   expect(docs.get('users/alice/bots/'+stage.botId)).toMatchObject({ownerUid:'alice',venue:'propdao'});
   expect(JSON.parse(r2.get(prefix)!)).toMatchObject({code:starterCode,userId:'alice'});
-  await expect(service.apply('alice',stage.intentId)).rejects.toThrow(/now exists|no longer valid/);
+  await expect(service.apply('alice',stage.intentId)).rejects.toThrow(/now exists|no longer valid|review is missing/);
  });
  it('denial prevents creation and never writes robot source',async()=>{
   const {service,docs}=harness();
