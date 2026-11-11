@@ -329,7 +329,7 @@ async function commitReviewedCode(uid:string,botId:string,code:string,expectedCo
  return valrExclusive(uid,()=>propBotExclusive(uid,botId,async()=>{
   await propdaoLiveService.assertDeletable(uid,botId);
   const grant=await liveService.grant(uid);if(grant?.botId===botId)await liveService.beforeKeyChange(uid);
-  const storageKey=`${userBotRoot(sourceOwnerUid,botId)}/current.json`,raw=await readR2Object(storageKey);
+  const storageKey=`${userBotRoot(uid,botId)}/current.json`,raw=await readR2Object(storageKey);
   if(!raw)throw Error('Saved code was not found.');
   const saved=JSON.parse(raw);
   if(saved.userId!==uid||saved.botId!==botId||typeof saved.code!=='string')throw Error('Saved code failed its ownership check.');
@@ -1038,7 +1038,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
      const meta=await marketplace.store.get(`users/${sourceOwnerUid}/bots/${botId}`);
      if(!meta||meta.id&&meta.id!==botId||meta.ownerUid&&meta.ownerUid!==sourceOwnerUid||
         meta.userId&&meta.userId!==sourceOwnerUid)throw Error('Saved strategy ownership could not be verified');
-     const raw=await readR2Object(`${userBotRoot(uid,botId)}/current.json`);
+     const raw=await readR2Object(`${userBotRoot(sourceOwnerUid,botId)}/current.json`);
      if(!raw||raw.length>250000)throw Error('Saved robot source is unavailable');
      const record=JSON.parse(raw);
      if(record.userId!==sourceOwnerUid||record.botId!==botId||record.venue!==meta.venue||
