@@ -255,6 +255,22 @@ export class TradingDesk{
    }catch(e){failures.push(accountId+': '+(e instanceof Error?e.message:'history unavailable'));}
   }
   let ledgerAvailable=Boolean(this.store);
+  // Broker trade archives can predate the later Worker fill archive. Reconcile
+  // those old records again; never permanently freeze an 'unattributed' label.
+  const enrichArchived=async(t:Trade&{accountId:string;botId:string|null;attribution:string;
+   confidence?:string})=>{
+   const link=attributeTrade(t,archivedEvents.filter(e=>e.accountId===t.accountId),t.accountId);
+   const rank=(x:unknown)=>x==='exact-provider-identity'?2:x==='probable-entry-evidence'?1:0;
+   if(rank(link.attribution)<=rank(t.attribution))return t;
+   const path=root+'/'+hash('propdao',t.accountId,t.id);
+   try{
+    const old=await this.store!.get(path);
+    if(old?.providerTradeId===t.id&&old.accountId===t.accountId)
+     await this.store!.put(path,{...old,...link});
+    else journalWarnings.push(t.accountId+': Archived trade identity changed; new attribution was not persisted');
+   }catch{journalWarnings.push(t.accountId+': Archive attribution upgrade failed')}
+   return {...t,...link};
+  };
   if(this.store){
    try{
     if(this.store.page){
@@ -264,7 +280,7 @@ export class TradingDesk{
       for(const r of page.items){
        if(typeof r.accountId!=='string'||!accounts.includes(r.accountId)||typeof r.providerTradeId!=='string')continue;
        const t={...r,id:r.providerTradeId} as Trade&{accountId:string;botId:string|null;attribution:string};
-       if(validTrade(t)){const id=hash('propdao',t.accountId,t.id);if(!retained.has(id))retained.set(id,t);}
+       if(validTrade(t)){const id=hash('propdao',t.accountId,t.id);if(!retained.has(id))retained.set(id,await enrichArchived(t));}
       }
       if(!page.next)break;after=page.next;
       if(batch===4)journalWarnings.push('Firestore daily query capped at 500 documents');
@@ -274,7 +290,7 @@ export class TradingDesk{
      for(const r of records.slice(0,500)){
       if(typeof r.accountId!=='string'||!accounts.includes(r.accountId)||typeof r.providerTradeId!=='string')continue;
       const t={...r,id:r.providerTradeId} as Trade&{accountId:string;botId:string|null;attribution:string};
-      if(validTrade(t)){const id=hash('propdao',t.accountId,t.id);if(!retained.has(id))retained.set(id,t);}
+      if(validTrade(t)){const id=hash('propdao',t.accountId,t.id);if(!retained.has(id))retained.set(id,await enrichArchived(t));}
      }
      if(records.length>500)journalWarnings.push('Firestore daily query capped at 500 documents');
     }
