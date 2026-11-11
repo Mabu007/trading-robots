@@ -1,5 +1,5 @@
 import {describe,it,expect} from 'vitest';
-import {accountPropDAOTrade,explicitPropDAOAssumptions,propDAOProfileFromMarkets,sizePropDAOForNetStop} from './propdao-trading-costs';
+import {accountPropDAOTrade,explicitPropDAOAssumptions,propDAOProfileFromMarkets,sizePropDAOForNetStop,reconcilePropDAOBrokerCostEvidence} from './propdao-trading-costs';
 const profile=propDAOProfileFromMarkets('GOLDUSDC',{
  fees:{maker:0.00015,taker:0.00045},
  data:[{symbol:'GOLDUSDC',lotStep:0.0001,minQty:0.0001,contractMultiplier:1}]
@@ -32,5 +32,25 @@ describe('PropDAO cost accounting',()=>{
    referenceStop:3994,profile,assumptions});
   expect(sizing.accepted).toBe(true);
   expect(sizing.estimatedStopLossUsd).toBeLessThanOrEqual(10+1e-8);
+ });
+});
+
+describe('PropDAO broker trade cost evidence',()=>{
+ it('reconciles net against gross and paid fee legs without double subtraction',()=>{
+  const result=reconcilePropDAOBrokerCostEvidence({symbol:'GOLDUSDC',qty:.2,entry:4000,
+   exit:4001,grossPnl:.2,pnl:-.52209,openFee:.36,closeFee:.36009,
+   fee:.72009,fundingPaid:.002,exitLiquidity:'taker'});
+  expect(result.brokerReportedNetPnlUsd).toBeCloseTo(-.52209);
+  expect(result.brokerReportedTotalFeesUsd).toBeCloseTo(.72009);
+  expect(result.grossToNetReconciled).toBe(true);
+  expect(result.feeLegsReconciled).toBe(true);
+  expect(result.accounting).toContain('no fee re-deduction');
+ });
+ it('retains unknown gross or funding rather than inventing zero',()=>{
+  const result=reconcilePropDAOBrokerCostEvidence({symbol:'GOLDUSDC',qty:.2,entry:4000,
+   exit:4001,pnl:-.6,fee:.8});
+  expect(result.brokerReportedGrossPnlUsd).toBeNull();
+  expect(result.brokerReportedFundingUsd).toBeNull();
+  expect(result.grossToNetReconciled).toBeNull();
  });
 });
