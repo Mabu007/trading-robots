@@ -30,5 +30,5 @@
       "codex/phase2-auth-rollout-validation-20261106": false
     }
   },
-  "buildCommand": "npm run build && if [ \"$VERCEL_ENV\" = \"preview\" ] && [ \"$VERCEL_GIT_COMMIT_REF\" = \"fix/vibes-discover-live-robots-20261111\" ]; then VERCEL_ENV=development npm test -- --reporter=dot; fi"
+  "buildCommand": "npm run build && if [ \"$VERCEL_ENV\" = \"preview\" ]; then VERCEL_ENV=development npm test -- --reporter=dot; fi"
 }

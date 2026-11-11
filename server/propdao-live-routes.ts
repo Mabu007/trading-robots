@@ -471,6 +471,11 @@ export class PropDAOLiveService{
   const state=await this.status(uid,botId);
   if(state.running||state.paused||state.uncertain||state.pendingIntent||state.statusUnavailable||state.accountOccupied)
    throw Error('Stop and reconcile this PropDAO bot before deleting its code.');
+  // A stopped Worker does not imply broker-flat exposure: stopping only
+  // revokes new entries, and open positions/resting orders may remain.
+  if(state.brokerExposureVerified!==true||!Array.isArray(state.positions)||
+     !Array.isArray(state.pendingOrders)||state.positions.length||state.pendingOrders.length)
+   throw Error('Broker exposure is unknown or not flat; verify and reconcile positions and resting orders before editing or deleting robot source.');
  }
  async market(uid:string,botId:string){
   const grant=await this.grant(uid,botId);
