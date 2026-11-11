@@ -28,7 +28,7 @@ describe('exact, code-hash-bound source edits',()=>{
  });
 });
 describe('model tool activation requires the user to request the operation',()=>{
- it('recognizes the user's real failure case and source edits',()=>{
+ it("recognizes the user's real failure case and source edits",()=>{
   expect(requestedStrategyMutation('Can we edit the robot stop loss?').edit).toBe(true);
   expect(requestedStrategyMutation('Please change its SL logic').edit).toBe(true);
   expect(requestedStrategyMutation('delete the saved Gold robot').delete).toBe(true);
