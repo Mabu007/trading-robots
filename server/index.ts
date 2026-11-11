@@ -1106,13 +1106,14 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
         ['resolved','paused','unverified'].includes(environment.kind??''))
       effectiveRobotId=environment.selection.robotId;
     }
+    const editableRobotId=strategyId??effectiveRobotId;
     let editableSourceEvidence:unknown;
-    if(strategySourceRequested&&effectiveRobotId&&!researchMode&&!strategyId&&!backtestId){
+    if(strategySourceRequested&&editableRobotId&&!researchMode&&!backtestId){
      editableSourceEvidence=await runRead('readEditableStrategySource',
-      {botId:effectiveRobotId,startLine:1,lineCount:100},async()=>{
+      {botId:editableRobotId,startLine:1,lineCount:100},async()=>{
        try{
-        const saved=await ownedEditableSource(effectiveRobotId);
-        return {available:true,botId:effectiveRobotId,name:saved.meta.name,
+        const saved=await ownedEditableSource(editableRobotId);
+        return {available:true,botId:editableRobotId,name:saved.meta.name,
          venue:saved.meta.venue,asset:saved.meta.asset,
          source:'owner-checked saved strategy.js, not a mutable running grant',
          ...sourceLines(saved.code,1,100)};
@@ -1247,7 +1248,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
          lineCount:z.number().int().min(1).max(140).default(120)}).strict(),
         execute:async({botId,startLine,lineCount})=>{
          try{
-          const id=botId??effectiveRobotId;
+          const id=botId??editableRobotId;
           if(!id)return {available:false,reason:'No unique owned robot; select a strategy'};
           const source=await ownedEditableSource(id),chunk=sourceLines(source.code,startLine,lineCount);
           const deployed=robotEnvironmentEvidence as {selection?:{robotId?:string;strategyCodeHash?:string}}|undefined;
@@ -1268,7 +1269,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
          replace:z.string().min(1).max(6000)}).strict(),
         execute:async({botId,expectedCodeHash,find,replace:replacement})=>{
          try{
-          const id=botId??effectiveRobotId;
+          const id=botId??editableRobotId;
           if(!id)return {available:false,reason:'No unique owned strategy to edit'};
           const saved=await ownedEditableSource(id);
           const patch=uniqueCodeReplacement(saved.code,find,replacement,expectedCodeHash);
@@ -1297,7 +1298,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
         inputSchema:z.object({botId:z.string().regex(/^[A-Za-z0-9_-]{1,100}$/).optional()}).strict(),
         execute:async({botId})=>{
          try{
-          const id=botId??effectiveRobotId;
+          const id=botId??editableRobotId;
           if(!id)return {available:false,reason:'Choose a unique owned robot to delete'};
           return {available:true,...await robotCrud.stageDelete(uid,id)};
          }catch(error){return {available:false,reason:error instanceof Error?error.message:'Deletion review failed'}}
