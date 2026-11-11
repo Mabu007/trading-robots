@@ -37,3 +37,25 @@ export function requestedStrategyMutation(input:unknown){
   delete:/\b(?:delete|remove|erase|discard)\b[\s\S]{0,90}\b(?:bot|robot|strategy|code)\b|\b(?:bot|robot|strategy|code)\b[\s\S]{0,90}\b(?:delete|remove|erase)\b/i.test(text)
  };
 }
+
+/** A user-supplied venue must never change the stored venue to bypass
+ * production-runtime source guards. This is a pure validation boundary; the
+ * caller must still take per-bot locks and independently verify deployment.
+ */
+export function validateSavedSourceOverwrite(
+  uid:string,botId:string,requestedVenue:string,raw:string|null
+):{existing:boolean;venue:string}{
+ if(typeof uid!=='string'||!uid||uid.length>128||uid.includes('/')||
+   !/^[A-Za-z0-9_-]{1,100}$/.test(botId)||
+   !['propdao','valr','hyperliquid','ctrader'].includes(requestedVenue))
+   throw Error('Invalid saved source identity or venue');
+ if(!raw)return {existing:false,venue:requestedVenue};
+ let stored:Record<string,unknown>;
+ try{stored=JSON.parse(raw)}
+ catch{throw Error('Stored strategy source is invalid; overwrite is blocked')}
+ if(!stored||typeof stored!=='object'||stored.userId!==uid||stored.botId!==botId||
+    typeof stored.code!=='string'||stored.venue!==requestedVenue)
+  throw Error('Saved source ownership or venue mismatch; overwrite is blocked');
+ if(stored.venue==='ctrader')throw Error('cTrader source requires separately verified stopped gateway authorization');
+ return {existing:true,venue:requestedVenue};
+}
