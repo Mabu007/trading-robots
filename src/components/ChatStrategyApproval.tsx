@@ -31,16 +31,17 @@ export function ChatStrategyApproval({trace,request,onApplied}:{
  const [state,setState]=useState<'pending'|'loading'|'applying'|'applied'|'denied'>('pending');
  const [error,setError]=useState('');
  if(!stage)return null;
- const path=stage.operation==='strategy.apply'?
-  '/api/agent/strategy-reviews/'+encodeURIComponent(stage.botId)+'/'+encodeURIComponent(stage.intentId):
-  '/api/agent/robot-mutations/'+encodeURIComponent(stage.intentId);
- const expired=Date.now()>=stage.expiresAt;
+ const selected:Proposal=stage;
+ const path=selected.operation==='strategy.apply'?
+  '/api/agent/strategy-reviews/'+encodeURIComponent(selected.botId)+'/'+encodeURIComponent(selected.intentId):
+  '/api/agent/robot-mutations/'+encodeURIComponent(selected.intentId);
+ const expired=Date.now()>=selected.expiresAt;
  async function review(){
   setError('');setState('loading');
   try{
    const p=await request(path,'GET');
-   if(p.intentId!==stage.intentId||p.botId!==stage.botId||p.operation!==stage.operation||
-      typeof p.expiresAt!=='number'||p.expiresAt!==stage.expiresAt)
+   if(p.intentId!==selected.intentId||p.botId!==selected.botId||p.operation!==selected.operation||
+      typeof p.expiresAt!=='number'||p.expiresAt!==selected.expiresAt)
     throw Error('Reviewed proposal does not match this chat action');
    if(p.after!==null&&typeof p.after!=='string'||p.before!==null&&typeof p.before!=='string')
     throw Error('Full source review is invalid');
@@ -54,9 +55,9 @@ export function ChatStrategyApproval({trace,request,onApplied}:{
   try{
    await request(path+'/approve','POST',{});
    const applied=await request(path+'/apply','POST',{});
-   if(applied.applied!==true||applied.botId!==stage.botId||applied.operation&&applied.operation!==stage.operation)
+   if(applied.applied!==true||applied.botId!==selected.botId||applied.operation&&applied.operation!==selected.operation)
     throw Error('Server did not confirm applied source mutation');
-   setState('applied');await onApplied(stage.operation,stage.botId);
+   setState('applied');await onApplied(selected.operation,selected.botId);
   }catch(e){setError(e instanceof Error?e.message:'Source mutation was not completed');setState('pending');setConfirmed(false)}
  }
  async function deny(){
@@ -64,8 +65,8 @@ export function ChatStrategyApproval({trace,request,onApplied}:{
   try{await request(path+'/deny','POST',{});setState('denied')}
   catch(e){setError(e instanceof Error?e.message:'Cannot deny this review');setState('pending')}
  }
- const label=stage.operation==='strategy.create'?'Create saved robot':
-  stage.operation==='strategy.delete'?'Delete saved robot':'Apply source edit';
+ const label=selected.operation==='strategy.create'?'Create saved robot':
+  selected.operation==='strategy.delete'?'Delete saved robot':'Apply source edit';
  return <section className="tv-source-review" aria-label="Strategy source change requires approval">
   <header><strong>{label} — human approval required</strong>
    <small>{stage.name||stage.botId} · {stage.venue||'saved strategy'} · {stage.asset||'instrument not supplied'}</small>
