@@ -95,7 +95,7 @@ export class RobotCrudIntents{
     prompt:typeof (meta as any).prompt==='string'?(meta as any).prompt.slice(0,3000):''}};
   const approvedAction=action(data),intent=await this.deps.approvals.create(uid,approvedAction,180000);
   const stage:Stage={version:1,ownerUid:uid,intentId:intent.id,...data,action:approvedAction,
-   code,createdAt:this.now(),expiresAt:intent.expiresAt};
+   code:'',createdAt:this.now(),expiresAt:intent.expiresAt};
   try{await this.deps.write(stageKey(uid,intent.id),JSON.stringify(stage))}
   catch(e){await this.deps.approvals.deny(uid,intent.id).catch(()=>{});throw e}
   return this.view(stage);
@@ -119,14 +119,22 @@ export class RobotCrudIntents{
      !id.test(s.botId)||this.now()>=s.expiresAt||!Number.isFinite(s.expiresAt)||
      !['strategy.create','strategy.delete'].includes(s.operation))
    throw Error('Strategy mutation expired or identity invalid');
-  const code=validateCode(s.code);
-  if(hash(code)!==s.codeHash||approvalFingerprint(action(s))!==approvalFingerprint(s.action))
-   throw Error('Staged source or approval identity changed');
+  if(s.operation==='strategy.create'){
+   const code=validateCode(s.code);
+   if(hash(code)!==s.codeHash)throw Error('Staged source changed since creation review');
+  }else if(s.code!==''||!/^[a-f0-9]{64}$/.test(s.codeHash))
+   throw Error('Deletion review must not retain or alter historical source');
+  if(approvalFingerprint(action(s))!==approvalFingerprint(s.action))
+   throw Error('Staged approval identity changed');
   return s;
  }
  async preview(uid:string,intentId:string){
   const stage=await this.load(uid,intentId);
-  return {...this.view(stage),before:stage.operation==='strategy.delete'?stage.code:null,
+  const before=stage.operation==='strategy.delete'?
+   (await this.current(uid,stage.botId)).code:null;
+  if(before!==null&&hash(before)!==stage.codeHash)
+   throw Error('Strategy changed since deletion was staged');
+  return {...this.view(stage),before,
    after:stage.operation==='strategy.create'?stage.code:null,
    reviewRequired:true};
  }
@@ -144,6 +152,7 @@ export class RobotCrudIntents{
  async deny(uid:string,intentId:string){
   const s=await this.load(uid,intentId);
   await this.deps.approvals.deny(uid,intentId);
+  await this.deps.remove(stageKey(uid,intentId)).catch(()=>{});
   return {denied:true,operation:s.operation,botId:s.botId,intentId};
  }
  async apply(uid:string,intentId:string){
@@ -171,6 +180,7 @@ export class RobotCrudIntents{
      await this.deps.remove(location).catch(()=>{});
      throw error;
     }
+    await this.deps.remove(stageKey(uid,intentId)).catch(()=>{});
     return {applied:true,operation:s.operation,botId:s.botId,codeHash:s.codeHash,
      note:'Saved robot created. No backtest, deployment or broker order was performed.'};
    }
@@ -181,6 +191,7 @@ export class RobotCrudIntents{
    await this.deps.assertDeletable(uid,s.botId);
    await this.deps.approvals.consume(uid,intentId,s.action);
    await this.deps.deleteOwned(uid,s.botId);
+   await this.deps.remove(stageKey(uid,intentId)).catch(()=>{});
    return {applied:true,operation:s.operation,botId:s.botId,codeHash:s.codeHash,
     note:'Approved owner-scoped robot source and catalog deletion. Broker trade journal remains immutable.'};
   });
