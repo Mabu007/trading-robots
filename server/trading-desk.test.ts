@@ -149,3 +149,27 @@ it('separates unique probable links from exact broker identity attribution',asyn
  expect(report.probableRobotTrades).toBe(1);
  expect(report.recentLosses[0]).toMatchObject({botId:'bot-1',confidence:'probable'});
 });
+
+it('retroactively upgrades an archived broker trade when protected-fill evidence arrives later',async()=>{
+ const archived={...trade('old-broker',-2),id:undefined,providerTradeId:'old-broker',
+  accountId:'prop-1',localDay:'2026-11-10',botId:null,attribution:'unattributed',confidence:'unknown',
+  positionId:'position-1234'};
+ const recorded:Record<string,any>={};
+ const store:RecordStore={
+  get:async p=>p.endsWith('liveTrades')?null:archived as any,
+  put:async(path,value)=>{recorded[path]=value},
+  create:async()=>true,
+  query:async path=>path.endsWith('liveExecutionEvents')?[{
+   id:'event_12345678',time:now-120000,accountId:'prop-1',stage:'PROTECTED_FILL',
+   botId:'bot-1',grantId:'grant-1',symbol:'GOLDUSDC',side:'SELL',positionId:'position-1234'
+  }]:path.endsWith('liveTrades')?[archived as any]:[]
+ };
+ const broker={list:async()=>({connected:true,accounts:[{accountId:'prop-1',status:'active'}]}),
+  recentTrades:async()=>{throw Error('Broker offline')}};
+ const r:any=await new TradingDesk(store,broker).today('alice',now);
+ expect(r).toMatchObject({matchedRobotTrades:1,unattributedTrades:0,partial:true});
+ expect(r.recentLosses[0]).toMatchObject({botId:'bot-1',confidence:'verified'});
+ expect(Object.values(recorded)).toContainEqual(expect.objectContaining({
+  attribution:'exact-provider-identity',botId:'bot-1'
+ }));
+});
