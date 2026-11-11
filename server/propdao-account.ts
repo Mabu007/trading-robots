@@ -147,7 +147,7 @@ export class PropDAOAccounts {
   const key=await this.load(uid);
   if(!key)throw Error('Connect your PropDAO key first');
   const accounts=await this.accounts(key);
-  if(!accounts.some(a=>a.accountId===accountId))
+  if(!accounts.some((a:{accountId:string})=>a.accountId===accountId))
    throw Error('PropDAO account not found');
   const markets=await this.getPublicMarkets();
   const profile=propDAOProfileFromMarkets(symbol,markets);
