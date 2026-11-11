@@ -1086,7 +1086,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     // swallow this private robot question or make the model guess an ID.
     let effectiveRobotId=robotId;
     let robotEnvironmentEvidence:unknown;
-    if(!researchMode&&!strategyId&&!backtestId&&(robotContextIntent||robotId)){
+    if(!researchMode&&!strategyId&&!backtestId&&(robotContextIntent||strategySourceRequested||robotId)){
      robotEnvironmentEvidence=await runRead('discoverRunningPropDAORobots',
        {requestedBotId:robotId??null},async()=>{
         try{return await propdaoLiveService.discoverRobotEnvironment(uid,robotId)}
