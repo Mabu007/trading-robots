@@ -87,6 +87,13 @@ export class ReviewedStrategyUpdates {
   if(approvalFingerprint(action)!==approvalFingerprint(record.action))throw Error('Reviewed strategy payload changed');
   return {record,action,expected,proposed};
  }
+ async preview(uid:string,botId:string,intentId:string){
+  const {record,expected,proposed}=await this.load(uid,botId,intentId);
+  return {operation:'strategy.apply',botId,intentId,expiresAt:record.expiresAt,
+   before:expected,after:proposed,previousCodeHash:hash(expected),
+   proposedCodeHash:hash(proposed),reviewRequired:true,
+   note:'Source proposal only. Not approved, saved or deployed.'};
+ }
  async approve(uid:string,botId:string,intentId:string){
   const v=await this.load(uid,botId,intentId);
   const current=await this.current(uid,botId);
