@@ -1,4 +1,5 @@
 import { validatePropDAORisk } from '../shared/propdao-risk.ts';
+import {propDAOProfileFromMarkets,reconcilePropDAOBrokerCostEvidence} from '../src/propdao-trading-costs.ts';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import type { Express, Request, Response as ExpressResponse } from 'express';
 
@@ -136,6 +137,35 @@ export class PropDAOAccounts {
    throw error;
   }
  }
+ /** This read never authorizes execution. It validates account ownership
+  * and captures live PropDAO /markets fee+precision metadata. Old broker
+  * fees are descriptive calibration observations, not a substitute schedule.
+  */
+ async backtestCostProfile(uid:string,accountId:string,symbol:string){
+  if(!validId(accountId)||!/^[A-Z0-9]{2,40}$/.test(symbol))
+   throw Error('Choose a valid PropDAO account and instrument');
+  const key=await this.load(uid);
+  if(!key)throw Error('Connect your PropDAO key first');
+  const accounts=await this.accounts(key);
+  if(!accounts.some(a=>a.accountId===accountId))
+   throw Error('PropDAO account not found');
+  const markets=await this.getPublicMarkets();
+  const profile=propDAOProfileFromMarkets(symbol,markets);
+  let samples:ReturnType<typeof reconcilePropDAOBrokerCostEvidence>[]=[];
+  let evidenceError:string|null=null;
+  try{
+   const trades=await this.recentTrades(uid,accountId);
+   samples=trades.filter(t=>t.symbol===symbol).slice(0,20)
+    .map(t=>reconcilePropDAOBrokerCostEvidence(t));
+  }catch{evidenceError='Historical broker execution fees could not be read';}
+  return {accountId,symbol,currency:'USDC',profile,
+   samples,historyCoverage:{recentTradeLimit:50,sampleCount:samples.length,
+    complete:false,note:'Historical fee samples are partial and do not establish a universal rate'},
+   evidenceError,
+   missingAssumptions:['bidAskSpread','entrySlippage','stopSlippage','targetSlippage','funding'],
+   readyForBrokerEquivalentBacktest:false,
+   caveat:'Published/market fees and quantity precision verified; future spread, slippage, funding and fills remain estimates.'};
+ }
  async getPublicMarkets(){
   let response:Response;try{response=await this.request('https://app.propdao.finance/api/v1/markets',{signal:AbortSignal.timeout(10000)})}catch{throw Error('Could not load PropDAO market metadata')};
   if(!response.ok)throw Error('PropDAO markets unavailable');
@@ -263,6 +293,9 @@ export function propDAORoutes(app:Express,accounts:PropDAOAccounts,uid:(req:Requ
  app.post('/api/venues/propdao/connect',handle(async(id,req)=>{if(beforeChange)await beforeChange(id);return accounts.connect(id,req.body?.apiKey)}));
  app.get('/api/venues/propdao/accounts',handle(id=>accounts.list(id)));
  app.get('/api/venues/propdao/accounts/:accountId',handle((id,req)=>accounts.snapshot(id,req.params.accountId)));
+ app.get('/api/venues/propdao/accounts/:accountId/backtest-cost-profile',
+  handle((uid,req)=>accounts.backtestCostProfile(uid,String(req.params.accountId),
+   String(req.query.symbol||'GOLDUSDC'))));
  app.get('/api/venues/propdao/accounts/:accountId/activity',handle(async(id,req)=>{
   const accountId=String(req.params.accountId);
   const snapshot=await accounts.accountRisk(id,accountId);
