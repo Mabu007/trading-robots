@@ -124,6 +124,12 @@ export class RobotCrudIntents{
    throw Error('Staged source or approval identity changed');
   return s;
  }
+ async preview(uid:string,intentId:string){
+  const stage=await this.load(uid,intentId);
+  return {...this.view(stage),before:stage.operation==='strategy.delete'?stage.code:null,
+   after:stage.operation==='strategy.create'?stage.code:null,
+   reviewRequired:true};
+ }
  async approve(uid:string,intentId:string){
   const s=await this.load(uid,intentId);
   if(s.operation==='strategy.delete'){
