@@ -1098,6 +1098,20 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
         ['resolved','paused','unverified'].includes(environment.kind??''))
       effectiveRobotId=environment.selection.robotId;
     }
+    let editableSourceEvidence:unknown;
+    if(strategySourceRequested&&effectiveRobotId&&!researchMode&&!strategyId&&!backtestId){
+     editableSourceEvidence=await runRead('readEditableStrategySource',
+      {botId:effectiveRobotId,startLine:1,lineCount:100},async()=>{
+       try{
+        const saved=await ownedEditableSource(effectiveRobotId);
+        return {available:true,botId:effectiveRobotId,name:saved.meta.name,
+         venue:saved.meta.venue,asset:saved.meta.asset,
+         source:'owner-checked saved strategy.js, not a mutable running grant',
+         ...sourceLines(saved.code,1,100)};
+       }catch(error){return {available:false,
+        reason:error instanceof Error?error.message:'Saved source is unavailable'}}
+      });
+    }
     // Proactively obtain owner-checked live facts for the selected robot.
     // Tool selection does not depend on the model correctly guessing a status tool.
     let robotOperationsEvidence:unknown;
@@ -1383,6 +1397,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
       deskEvidence?'VERIFIED LIVE TRADING DESK FOR TODAY (SAST; all authenticated PropDAO accounts): '+JSON.stringify(deskEvidence):'',
       'Trader harness rules: For loss questions, FIRST analyze the authenticated desk-wide broker receipt, not a saved backtest. Break down today by account and exactly linked bot. Never ask which robot before attempting the read. Explain where and when real losses occurred, with verified broker exit reasons, and distinguish root-cause hypotheses from actual strategy filter measurements. Incomplete broker/Worker history must be labeled partial, not zero. A robot may be unattributed due to missing position IDs. Ask one concrete follow-up only if necessary after looking at data. Never silently increase risk or alter broker orders.',
       currentMarketEvidence?'Latest read-only completed-candle market evidence. Distinguish the derivative reference market from the broker and deployed strategy filters: '+JSON.stringify(currentMarketEvidence):'',
+      editableSourceEvidence?'USER-OWNED SAVED STRATEGY.JS READ (independent of tool selection): '+JSON.stringify(editableSourceEvidence)+'. If available=true you CAN inspect source; do not say the user must paste it. An incomplete window is not the full file; read more lines before editing an unseen section.': '',
       robotEnvironmentEvidence?'AUTHENTICATED DEPLOYED ROBOT DISCOVERY AND ENVIRONMENT. This is the source of truth for robot selection and deployed strategy code; if kind=ambiguous ask which candidate, if kind=unverified do not claim running; do not say you cannot see deployed robots when this evidence is available. Never promise profitability or call conditions optimal without comparing actual code to current completed market candles: '+JSON.stringify(robotEnvironmentEvidence):'',
       robotOperationsEvidence?'Owner-checked, current robot operations evidence (not strategy filter internals; do not invent missing reasons): '+JSON.stringify(robotOperationsEvidence):'',requestedEvidence?'The server already ran the exact requested read. Use this evidence, and explain an unavailable result clearly: '+JSON.stringify(requestedEvidence):''].filter(Boolean).join('\n\n'),
       messages:conversationalMessages,
