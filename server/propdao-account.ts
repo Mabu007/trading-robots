@@ -127,7 +127,14 @@ export class PropDAOAccounts {
   if(!Array.isArray(remaining?.data)||remaining.data.length)throw Error('Resting order or partial fill requires reconciliation. Protected positions remain; no further entries permitted.');
   const filledQuantity=Number(position.qty);
   if(!Number.isFinite(filledQuantity)||filledQuantity<=0||filledQuantity>qty+market.lotStep/2)throw Error('Unexpected filled quantity; account reconciliation required');
-  return {intentId:input.intentId,quantity:filledQuantity,requestedQuantity:qty,plannedLoss:verdict.plannedLoss*(filledQuantity/qty),projectedNetProfit:projectedNetProfit*(filledQuantity/qty),riskBudgetUsd:input.riskUsd,riskReward:input.riskReward,stop:input.stop,target,protected:true,filled:true,positionId:position.id,providerStatus:'PROTECTED_FILL',provider:body};
+  return {intentId:input.intentId,quantity:filledQuantity,requestedQuantity:qty,plannedLoss:verdict.plannedLoss*(filledQuantity/qty),projectedNetProfit:projectedNetProfit*(filledQuantity/qty),riskBudgetUsd:input.riskUsd,riskReward:input.riskReward,stop:input.stop,target,protected:true,filled:true,positionId:position.id,
+    entryPrice:Number.isFinite(Number(position.entry))&&Number(position.entry)>0?Number(position.entry):null,
+    brokerOrderId:validId(String(responseOrderId??''))?String(responseOrderId):null,
+    filledAt:Number.isFinite(Number(position.openedAt))&&Number(position.openedAt)>0?
+     Number(position.openedAt):Date.now(),
+    fillTimestampSource:Number.isFinite(Number(position.openedAt))&&Number(position.openedAt)>0?
+     'provider-position-openedAt':'server-confirmed-position-observed',
+    providerStatus:'PROTECTED_FILL',provider:body};
   }catch(error){
    if(!submissionStarted)throw new PropDAONoSubmissionError(error instanceof Error?error.message:'Order preflight failed before submission');
    throw error;
@@ -152,7 +159,8 @@ export class PropDAOAccounts {
    reason:String(t.reason||''),fee:number(t.fee),
    // Provider identity fields are optional. Never infer them from price or time.
    positionId:validId(t.positionId)?t.positionId:null,
-   intentId:validId(t.intentId)?t.intentId:null
+   intentId:validId(t.intentId)?t.intentId:null,
+   orderId:validId(t.orderId??t.brokerOrderId)?String(t.orderId??t.brokerOrderId):null
   }));
   if(trades.some((t:any)=>!t.id||!t.symbol||!['BUY','SELL'].includes(t.side)||
    [t.qty,t.entry,t.exit,t.pnl].some(v=>typeof v!=='number'||!Number.isFinite(v))||
