@@ -14,7 +14,8 @@ export function selectChatCard(question:string,trace:ToolTrace[]):ChatCardKind{
    (completed('discoverRunningPropDAORobots')||completed('getPropDAORobotOperations')||
     completed('getRunningPropDAORobotEnvironment')))
   return 'robot';
- if(completed('getTradingDeskToday')&&wantsLiveTradeEvidence(question))return 'desk';
+ if(completed('getTradingDeskToday')&&(wantsLiveTradeEvidence(question)||
+  /\b(?:trading desk|account activity|portfolio|all accounts|all trades)\b/i.test(question)))return 'desk';
  if(completed('getCurrentMarketConditions')||completed('getPublicMarketEvidence'))return 'market';
  return 'none';
 }
