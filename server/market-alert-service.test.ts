@@ -10,3 +10,19 @@ it('keeps drafts isolated; rejects forged source references and stale activation
 it('persists a delivery claim before sending, and never resends accepted or uncertain messages',async()=>{const {svc,data,sends}=make();const row=await svc.draft('alice',rule);data.set(svc.path('alice',row.id),{...row,deliveryAuthorized:true});data.set('serverTelegramUsers/'+ownerHash('alice'),{active:true,chatId:'123'});const input={uid:'alice',id:row.id,revision:row.revision,event:{id:row.revision+':event',time:Math.floor(Date.now()/1000),price:105,matched:['c1'],complete:true}};expect((await svc.deliver(input)).delivery).toBe('sent');expect((await svc.deliver(input)).delivery).toBe('sent');expect(sends()).toBe(1);await svc.control('alice',row.id,'pause').catch(()=>{});expect((await svc.deliver({...input,event:{...input.event,id:row.revision+':second'}})).delivery).toBe('cancelled');expect(sends()).toBe(1);});
 
 it('does not grant delivery permission when a saved strategy revision cannot be validated',async()=>{const {svc,data,sends}=make();const id='a'.repeat(32),revision='b'.repeat(64),path=svc.path('alice',id);data.set(path,{id,revision,state:'draft',deliveryAuthorized:false,rule:{...rule,strategy:{id:'missing',sourceHash:'c'.repeat(64)}}});data.set('serverTelegramUsers/'+ownerHash('alice'),{active:true,chatId:'123'});await expect(svc.control('alice',id,'start',revision)).rejects.toThrow(/source unavailable/);expect(data.get(path).deliveryAuthorized).toBe(false);expect(data.get(path).state).toBe('draft');expect(sends()).toBe(0);});
+
+it('shows only confirmed Telegram signals to their owner without conflating drafts or failed deliveries',async()=>{
+ const {svc,data}=make();
+ const row=await svc.draft('alice',rule);
+ data.set(svc.path('alice',row.id),{...row,deliveryAuthorized:true});
+ data.set('serverTelegramUsers/'+ownerHash('alice'),{active:true,chatId:'123'});
+ const event={id:row.revision+':signal-1',time:Math.floor(Date.now()/1000),price:3953.2,action:'BUY',matched:['c1'],complete:true};
+ expect(await svc.deliver({uid:'alice',id:row.id,revision:row.revision,event})).toMatchObject({delivery:'sent'});
+ const own=await svc.signalHistory('alice');
+ expect(own.signals).toHaveLength(1);
+ expect(own.signals[0]).toMatchObject({name:'Gold',symbol:'XAUUSD',action:'BUY',price:3953.2,delivery:'sent'});
+ expect((await svc.signalHistory('bob')).signals).toHaveLength(0);
+ data.set('serverMarketAlertOwners/'+ownerHash('alice')+'/deliveries/'+ownerHash('failed'),{alertId:row.id,delivery:'failed',event:{...event,id:row.revision+':failed'}});
+ expect((await svc.signalHistory('alice')).signals).toHaveLength(1);
+ await expect(svc.signalHistory('alice','malformed')).rejects.toThrow(/cursor/);
+});
