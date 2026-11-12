@@ -223,14 +223,14 @@ export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, 
     return new Intl.DateTimeFormat('en-GB',{day:'2-digit',month:'short',year:'numeric',timeZone:'UTC'}).format(date);
   };
 
-  return <Dialog title={bot ? bot.name : 'Write a robot'} className="tv-strategy-workbench" busy={Boolean(busy)} onClose={onClose}>
+  return <Dialog title={bot ? bot.name : 'Build a signal'} className="tv-strategy-workbench" busy={Boolean(busy)} onClose={onClose}>
    <div className="tv-workbench-studio">
     <div className="tv-workbench-hero">
-     <div className="tv-workbench-hero-brand"><span className="tv-workbench-orb"><Bot size={21}/></span><div><span className="tv-workbench-eyebrow">TRADING VIBES / ROBOT STUDIO</span><h3>{name.trim()||'Your next trading robot'}</h3><p>{savedBot?'Saved robot · '+venueLabel[venue]+' · '+asset:'Create the idea. Verify the rules. Deploy deliberately.'}</p></div></div>
+     <div className="tv-workbench-hero-brand"><span className="tv-workbench-orb"><Bot size={21}/></span><div><span className="tv-workbench-eyebrow">TRADING VIBES / SIGNAL STUDIO</span><h3>{name.trim()||'Your next signal strategy'}</h3><p>{savedBot?'Saved signal strategy · '+venueLabel[venue]+' · '+asset:'Create the idea, backtest it, then track your signals.'}</p></div></div>
      <span className={'tv-workbench-pill'+(savedBot?' is-saved':'')}><span className="tv-workbench-dot"/>{savedBot?'Saved':'Draft'}</span>
     </div>
-    <div className="tv-workbench-stepper" role="tablist" aria-label="Robot creation workflow">
-     {([{id:'write',icon:FileCode2,label:'Build',desc:'Strategy rules'},{id:'backtest',icon:Activity,label:'Backtest',desc:'Historical research'},{id:'result',icon:ShieldCheck,label:'Review',desc:'Results & deploy'}] as const).map(({id,icon:Icon,label,desc},index)=>
+    <div className="tv-workbench-stepper" role="tablist" aria-label="Signal creation workflow">
+     {([{id:'write',icon:FileCode2,label:'Build',desc:'Strategy rules'},{id:'backtest',icon:Activity,label:'Backtest',desc:'Historical research'},{id:'result',icon:ShieldCheck,label:'Review',desc:'Results & signals'}] as const).map(({id,icon:Icon,label,desc},index)=>
       <button key={id} type="button" role="tab" aria-selected={view===id} className={'tv-workbench-step'+(view===id?' is-active':'')} disabled={Boolean(busy)} onClick={()=>setView(id)}>
        <span className="tv-workbench-step-icon"><Icon size={17}/></span><span className="tv-workbench-step-copy"><strong>{String(index+1).padStart(2,'0')} · {label}</strong><small>{desc}</small></span>
       </button>)}
@@ -238,13 +238,13 @@ export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, 
     {(error||marketError)&&<div className="tv-workbench-alert" role="alert"><strong>Action needed</strong><p>{error||marketError}</p>{marketError&&<button type="button" className="tv-workbench-text-action" onClick={()=>setReloadMarkets(value=>value+1)}>Retry loading markets</button>}</div>}
     {(progress||notice)&&<div className="tv-workbench-feedback" role="status"><CheckCircle2 size={16}/>{progress||notice}</div>}
     {view==='write'&&<div className="tv-workbench-content">
-     <div className="tv-workbench-section-intro"><div><span className="tv-workbench-section-kicker">01 / ROBOT CONFIGURATION</span><h4>Make it yours.</h4><p>Define the market, then write your rules or have VIBES draft the JavaScript.</p></div></div>
+     <div className="tv-workbench-section-intro"><div><span className="tv-workbench-section-kicker">01 / SIGNAL CONFIGURATION</span><h4>Make it yours.</h4><p>Define the market, then write your rules or have VIBES draft the JavaScript.</p></div></div>
      {!lockedIdentity&&<div className="tv-workbench-identity">
-      <label className="tv-workbench-input"><span>Robot name</span><input value={name} maxLength={64} disabled={Boolean(busy)} onChange={event=>setName(event.target.value)} placeholder="e.g. Gold Session Scalper" data-dialog-initial-focus/></label>
+      <label className="tv-workbench-input"><span>Signal strategy name</span><input value={name} maxLength={64} disabled={Boolean(busy)} onChange={event=>setName(event.target.value)} placeholder="e.g. Gold Session Scalper" data-dialog-initial-focus/></label>
       <label className="tv-workbench-input"><span>Trading venue</span><select value={venue} disabled={Boolean(busy)} onChange={event=>{setVenue(event.target.value as Venue);setAsset('');setMarkets([])}}>{writableVenues.map(item=><option key={item} value={item}>{venueLabel[item]}</option>)}</select></label>
       <label className="tv-workbench-input"><span>Instrument</span><input value={asset} list={marketsId} maxLength={64} disabled={Boolean(busy)} onChange={event=>setAsset(event.target.value)} placeholder={markets.length?'Search symbols…':'Loading symbols…'}/><datalist id={marketsId}>{markets.map(symbol=><option key={symbol} value={symbol}/>)}</datalist></label>
      </div>}
-     {lockedIdentity&&<div className="tv-workbench-locked"><ShieldCheck size={17}/><span>Robot identity is locked to <strong>{asset}</strong> on <strong>{venueLabel[venue]}</strong>. Edits won't silently switch the trading instrument.</span></div>}
+     {lockedIdentity&&<div className="tv-workbench-locked"><ShieldCheck size={17}/><span>Signal strategy identity is locked to <strong>{asset}</strong> on <strong>{venueLabel[venue]}</strong>. Edits won't silently switch the trading instrument.</span></div>}
      <details className="tv-workbench-ai">
       <summary><span className="tv-workbench-ai-icon"><Sparkles size={19}/></span><span><strong>Generate with VIBES</strong><small>Describe your strategy in plain English. Review all generated code.</small></span><span className="tv-workbench-ai-caret">Expand</span></summary>
       <div className="tv-workbench-ai-body"><label className="tv-workbench-input"><span>Trading rules</span><textarea rows={5} value={rules} maxLength={12_000} disabled={Boolean(busy)} onChange={event=>setRules(event.target.value)} placeholder="Example: Trade Gold on M1, follow the H1 trend, enter after a pullback and use a fixed 1:2 risk/reward ratio…"/></label>
@@ -253,11 +253,11 @@ export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, 
      </details>
      <div className="tv-workbench-code-wrap">
       <div className="tv-workbench-code-head"><span><Code2 size={16}/><strong>strategy.js</strong></span><small>{sourceReady?'JavaScript · editable source':'Loading saved source…'}</small></div>
-      <textarea className="tv-workbench-editor" rows={15} spellCheck={false} readOnly={venue==='ctrader'} value={code} disabled={Boolean(busy)||!sourceReady} onChange={event=>setCode(event.target.value)} aria-label="Robot JavaScript" placeholder={sourceReady?'Paste or write your deterministic strategy.js source here.':'Loading saved robot source…'}/>
+      <textarea className="tv-workbench-editor" rows={15} spellCheck={false} readOnly={venue==='ctrader'} value={code} disabled={Boolean(busy)||!sourceReady} onChange={event=>setCode(event.target.value)} aria-label="Signal strategy JavaScript" placeholder={sourceReady?'Paste or write your deterministic strategy.js source here.':'Loading saved signal source…'}/>
       <div className="tv-workbench-code-footer"><small><ShieldCheck size={13}/> Saving code never authorizes orders.</small><span>{code.length.toLocaleString()} characters</span></div>
      </div>
      <div className="tv-workbench-toolbar">
-      <div>{!code&&sourceReady&&<button type="button" className="tv-workbench-secondary" disabled={Boolean(busy)} onClick={()=>setCode(starterCode)}>Insert example</button>}<button type="button" className="tv-workbench-secondary" disabled={Boolean(busy)||!sourceReady||!code.trim()||savedCode===code||venue==='ctrader'} onClick={()=>void perform('save',async signal=>{await save(signal);setNotice('Robot saved.')})}>Save robot</button></div>
+      <div>{!code&&sourceReady&&<button type="button" className="tv-workbench-secondary" disabled={Boolean(busy)} onClick={()=>setCode(starterCode)}>Insert example</button>}<button type="button" className="tv-workbench-secondary" disabled={Boolean(busy)||!sourceReady||!code.trim()||savedCode===code||venue==='ctrader'} onClick={()=>void perform('save',async signal=>{await save(signal);setNotice('Signal strategy saved.')})}>Save strategy</button></div>
       <button type="button" className="tv-workbench-primary" disabled={Boolean(busy)||!sourceReady||!code.trim()||venue==='ctrader'} onClick={()=>setView('backtest')}>Set up backtest <ArrowRight size={16}/></button>
      </div>
     </div>}
@@ -273,24 +273,24 @@ export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, 
       <div className="tv-workbench-presets"><span>Quick range</span>{presets.map(preset=><button type="button" key={preset.days} disabled={Boolean(busy)} onClick={()=>presetRange(preset.days)}>{preset.name}</button>)}</div>
      </div>
      <div className="tv-workbench-summary"><div><Play size={17}/><span><strong>{asset||'Select a market'} · {venueLabel[venue]}</strong><small>Executes your saved strategy against available completed candles</small></span></div><span className="tv-workbench-utc">UTC</span></div>
-     <div className="tv-workbench-toolbar"><button type="button" className="tv-workbench-secondary" disabled={Boolean(busy)} onClick={()=>setView('write')}>Edit robot</button><button type="button" className="tv-workbench-primary" disabled={Boolean(busy)||!sourceReady||!code.trim()||!from||!to||venue==='ctrader'} onClick={backtest}><Play size={16}/>{busy==='backtest'?'Backtesting…':'Run backtest'}</button></div>
+     <div className="tv-workbench-toolbar"><button type="button" className="tv-workbench-secondary" disabled={Boolean(busy)} onClick={()=>setView('write')}>Edit strategy</button><button type="button" className="tv-workbench-primary" disabled={Boolean(busy)||!sourceReady||!code.trim()||!from||!to||venue==='ctrader'} onClick={backtest}><Play size={16}/>{busy==='backtest'?'Backtesting…':'Run backtest'}</button></div>
      {(busy==='generate'||busy==='backtest')&&progress&&!progress.startsWith('Saving')&&<button type="button" className="tv-workbench-cancel" onClick={()=>operation.current?.abort()}>Cancel operation</button>}
     </div>}
-    {view==='result'&&<section ref={resultsSection} className="tv-workbench-content tv-workbench-results" aria-label="Robot backtest result">
-      <div className="tv-workbench-section-intro"><div><span className="tv-workbench-section-kicker">03 / RESULTS & EXECUTION</span><h4>Research before execution.</h4><p>Inspect every trade, review the exact source revision, then authorize deployment separately.</p></div><Activity className="tv-workbench-heading-icon" size={26}/></div>
+    {view==='result'&&<section ref={resultsSection} className="tv-workbench-content tv-workbench-results" aria-label="Signal strategy backtest result">
+      <div className="tv-workbench-section-intro"><div><span className="tv-workbench-section-kicker">03 / RESULTS & SIGNALS</span><h4>Research before tracking.</h4><p>Inspect each simulated trade, verify the exact source revision, then create a Telegram signal tracker.</p></div><Activity className="tv-workbench-heading-icon" size={26}/></div>
       {card?<><BacktestChatCard data={card} onInspect={tradeId=>setInspectedTradeId(tradeId)}/>
         {run&&inspectedTradeId!==null&&run.result.trades.some(trade=>trade.id===inspectedTradeId)&&
          <BacktestTradeInspector run={run} tradeId={inspectedTradeId} theme={theme} onClose={()=>setInspectedTradeId(null)} onAskAI={onAuditTrade?trade=>onAuditTrade(run,trade,savedBot):undefined}/>}
-        <p className="tv-workbench-result-status">{runSaved?(currentRun?'Saved results match the current robot source.':'The saved backtest belongs to an older revision. Run it again before deploying.'):'Simulation complete, but the result has not yet been saved.'}</p>
+        <p className="tv-workbench-result-status">{runSaved?(currentRun?'Saved results match the current signal strategy source.':'The saved backtest belongs to an older revision. Run it again before activating tracking.'):'Simulation complete, but the result has not yet been saved.'}</p>
         {run?.logs?.length?<details className="tv-workbench-logs"><summary>Simulation methodology and logs</summary><pre>{run.logs.join('\n')}</pre></details>:null}
-       </>:<div className="tv-workbench-empty-result"><Activity size={23}/><strong>{loadingRun?'Loading saved research…':'No backtest results yet'}</strong><p>Choose a completed UTC date range and run your robot against available historical candles.</p><button type="button" className="tv-workbench-secondary" onClick={()=>setView('backtest')}>Go to backtest <ArrowRight size={14}/></button></div>}
+       </>:<div className="tv-workbench-empty-result"><Activity size={23}/><strong>{loadingRun?'Loading saved research…':'No backtest results yet'}</strong><p>Choose a completed UTC date range and run your signal rules against available historical candles.</p><button type="button" className="tv-workbench-secondary" onClick={()=>setView('backtest')}>Go to backtest <ArrowRight size={14}/></button></div>}
       <div className="tv-workbench-toolbar">
        {run&&!runSaved&&savedBot&&<button type="button" className="tv-workbench-secondary" disabled={Boolean(busy)||!currentRun||savedCode!==code} onClick={()=>void perform('save result',()=>persistRun(savedBot,run))}>Retry saving result</button>}
        <button type="button" className="tv-workbench-secondary" disabled={Boolean(busy)} onClick={()=>setView('backtest')}>Change dates</button>
-       {canReview&&savedBot&&<button type="button" className="tv-workbench-primary" disabled={Boolean(busy)} onClick={reviewDeployment}><ShieldCheck size={16}/> Deploy robot <ArrowRight size={15}/></button>}
+       {canReview&&savedBot&&<button type="button" className="tv-workbench-primary" disabled={Boolean(busy)} onClick={reviewDeployment}><ShieldCheck size={16}/> Track signals <ArrowRight size={15}/></button>}
       </div>
-      {venue==='hyperliquid'&&<p className="tv-workbench-quiet">Hyperliquid research is available, but robot deployment through this workspace is not supported.</p>}
-      {venue==='propdao'&&!canReview&&<p className="tv-workbench-quiet">To deploy: save the current robot code and complete a saved backtest of that exact revision. Deployment always requires an explicit PropDAO authorization.</p>}
+      {venue==='hyperliquid'&&<p className="tv-workbench-quiet">Hyperliquid research is available, but live signal monitoring for this venue is not yet supported.</p>}
+      {venue==='propdao'&&!canReview&&<p className="tv-workbench-quiet">To track this strategy: save the current code and complete a backtest, then review its Gold signal monitor. No broker trade will be placed.</p>}
     </section>}
    </div>
   </Dialog>;
