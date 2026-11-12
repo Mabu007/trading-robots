@@ -4,7 +4,7 @@ import {createChart,CandlestickSeries,LineSeries,createSeriesMarkers,ColorType} 
 import {historicalData} from '../history-cache';
 import type {CloudClient} from '../firebase';
 import type {AppTheme} from '../theme';
-import {aggregateReplayBars,beginReplay,DEFAULT_REPLAY_COSTS,replayAdvance,replayClose,replayEMA,replayEnter,replayMark,replayMetrics,replayVisibleBars,validateReplayBars,validateReplayCosts,type ReplayBar,type ReplayCosts,type ReplaySession,type ReplaySide} from '../market-replay-engine';
+import {aggregateReplayBars,beginReplay,DEFAULT_REPLAY_COSTS,replayAdvance,replayClose,replayEMA,replayEnter,replayMark,replayMetrics,replayModifyPosition,replayVisibleBars,validateReplayBars,validateReplayCosts,type ReplayBar,type ReplayCosts,type ReplaySession,type ReplaySide} from '../market-replay-engine';
 import './market-replay.css';
 
 type Props={client:CloudClient;theme:AppTheme;onClose:()=>void};
@@ -31,6 +31,7 @@ export function MarketReplay({client,theme,onClose}:Props){
  const [playing,setPlaying]=useState(false),[speed,setSpeed]=useState<number>(2),[timeframe,setTimeframe]=useState<1|5|15|60>(1);
  const [expanded,setExpanded]=useState(false),[emaVisible,setEmaVisible]=useState(true),[showCosts,setShowCosts]=useState(false);
  const [quantity,setQuantity]=useState('1'),[stopDistance,setStopDistance]=useState('6'),[targetDistance,setTargetDistance]=useState('12');
+ const [adjustStop,setAdjustStop]=useState(''),[adjustTarget,setAdjustTarget]=useState('');
  const [costs,setCosts]=useState<ReplayCosts>(DEFAULT_REPLAY_COSTS),[notes,setNotes]=useState(''),[annotations,setAnnotations]=useState<Record<string,string>>({});
  const [selectedTrade,setSelectedTrade]=useState<string|null>(null),[showHelp,setShowHelp]=useState(false);
  const [progressTime,setProgressTime]=useState(0);
@@ -73,7 +74,9 @@ export function MarketReplay({client,theme,onClose}:Props){
      }
     }
    }catch{/* Invalid browser-only practice saves are ignored. */}
-   setBars(candles);setFirstIndex(initial);setCurrent(next);setPlaying(false);setProgressTime(Date.now());
+   setBars(candles);setFirstIndex(initial);setCurrent(next);
+   setAdjustStop(next.position?String(next.position.stop):'');setAdjustTarget(next.position?String(next.position.target):'');
+   setPlaying(false);setProgressTime(Date.now());
    setNotice(resume?'Your last practice session is restored.':'Market replay ready. Future candles are hidden. Good trading.');
   }catch(e){setError(e instanceof Error?e.message:'Historical candles unavailable. Try another date.')}
   finally{setLoading(false)}
@@ -100,16 +103,36 @@ export function MarketReplay({client,theme,onClose}:Props){
   if(!sessionRef.current)return;
   setPlaying(false);setError('');
   try{const next=replayEnter(sessionRef.current,bars,side,number(quantity),number(stopDistance),number(targetDistance),costs);
-   setCurrent(next);setNotice(side==='BUY'?'Long opened. Manage the risk; the next candle is still hidden.':'Short opened. Let the market reveal the next candle.');
+   setCurrent(next);setAdjustStop(String(next.position!.stop));setAdjustTarget(String(next.position!.target));setNotice(side==='BUY'?'Long opened. Manage the risk; the next candle is still hidden.':'Short opened. Let the market reveal the next candle.');
   }catch(e){setError(e instanceof Error?e.message:'Order rejected')}
  };
  const close=()=>{
   if(!sessionRef.current)return;setPlaying(false);
   const next=replayClose(sessionRef.current,bars,costs);if(next!==sessionRef.current){setCurrent(next);setNotice('Position closed at the current revealed price.')}
  };
+ const modifyPosition=(breakEven=false)=>{
+  if(!sessionRef.current?.position)return;setPlaying(false);setError('');
+  try{
+   const p=sessionRef.current.position;
+   const next=replayModifyPosition(sessionRef.current,bars,costs,breakEven?p.entry:Number(adjustStop),Number(adjustTarget));
+   setCurrent(next);setAdjustStop(String(next.position!.stop));setAdjustTarget(String(next.position!.target));
+   setNotice(breakEven?'Stop moved to break-even price.':'Protective orders updated for the next candle.');
+  }catch(e){setError(e instanceof Error?e.message:'Could not modify this position.')}
+ };
+ const captureChart=()=>{
+  try{
+   const chart=chartRef.current?.chart;if(!chart)throw Error('Chart not ready.');
+   const canvas=chart.takeScreenshot() as HTMLCanvasElement;
+   canvas.toBlob(blob=>{
+    if(!blob){setError('Chart image could not be captured.');return}
+    const uri=URL.createObjectURL(blob),a=document.createElement('a');a.href=uri;a.download='trading-vibes-gold-replay-'+day+'-'+(currentBar?currentBar.time:'chart')+'.png';
+    a.click();window.setTimeout(()=>URL.revokeObjectURL(uri),1500);setNotice('Replay chart captured as PNG.');
+   },'image/png');
+  }catch(e){setError(e instanceof Error?e.message:'Chart capture failed.')}
+ };
  const reset=()=>{
   if(!bars.length||!window.confirm('Reset this replay session? This clears all paper trades and practice progress for this date.'))return;
-  setPlaying(false);setCurrent(beginReplay(bars,firstIndex,number(startingBalance)));setAnnotations({});setNotes('');setNotice('Practice reset. Start a new attempt.');
+  setPlaying(false);setCurrent(beginReplay(bars,firstIndex,number(startingBalance)));setAdjustStop('');setAdjustTarget('');setAnnotations({});setNotes('');setNotice('Practice reset. Start a new attempt.');
  };
  useEffect(()=>{
   if(!sessionOpen)return;
@@ -189,12 +212,15 @@ export function MarketReplay({client,theme,onClose}:Props){
     <div className="tv-replay-progress"><span style={{width:percent+'%'}}/></div>
     <div className="tv-replay-controls"><div className="tv-replay-playback"><button className="tv-replay-play" type="button" disabled={replayAtEnd} onClick={()=>setPlaying(v=>!v)} aria-label={playing?'Pause replay':'Play replay'}>{playing?<Pause size={17}/>:<Play size={17}/>} {playing?'Pause':'Play'}</button><button type="button" disabled={replayAtEnd} onClick={()=>advance(1)} title="Next M1 candle (→)"><SkipForward size={17}/> Step</button><button type="button" disabled={replayAtEnd} onClick={()=>advance(5)} title="Reveal next 5 completed M1 candles"><FastForward size={17}/> +5</button>
      <label className="tv-replay-speed"><span>Speed</span><select value={speed} onChange={e=>setSpeed(Number(e.target.value))}>{speeds.map(v=><option value={v} key={v}>{v}×</option>)}</select></label></div>
-     <div className="tv-replay-chart-controls"><label>Chart <select value={timeframe} onChange={e=>setTimeframe(Number(e.target.value) as 1|5|15|60)}><option value={1}>M1</option><option value={5}>M5</option><option value={15}>M15</option><option value={60}>H1</option></select></label><button type="button" className={emaVisible?'is-selected':''} onClick={()=>setEmaVisible(v=>!v)}>EMA 20 / 50</button><button type="button" onClick={()=>setShowHelp(v=>!v)} title="Keyboard shortcuts">?</button></div></div>
+     <div className="tv-replay-chart-controls"><label>Chart <select value={timeframe} onChange={e=>setTimeframe(Number(e.target.value) as 1|5|15|60)}><option value={1}>M1</option><option value={5}>M5</option><option value={15}>M15</option><option value={60}>H1</option></select></label><button type="button" className={emaVisible?'is-selected':''} onClick={()=>setEmaVisible(v=>!v)}>EMA 20 / 50</button><button type="button" onClick={captureChart} title="Save a clean chart image for your trading journal or content"><Download size={15}/> Chart PNG</button><button type="button" onClick={()=>setShowHelp(v=>!v)} title="Keyboard shortcuts">?</button></div></div>
     {showHelp&&<div className="tv-replay-shortcuts">Space: Play/pause · →: Next candle · B: Buy · S: Sell · X: Close trade · ?: Help</div>}
     <div className="tv-replay-grid"><div className="tv-replay-chart-panel"><div className="tv-replay-chart-heading"><span><Activity size={15}/> GOLD · {timeframe===60?'H1':'M'+timeframe} · COMPLETED CANDLES</span><strong>{Math.max(0,bars.length-1-session.index)} M1 candles remaining</strong></div><div className="tv-replay-chart" ref={chartDiv} aria-label="Historical candlestick chart with only revealed candles"/>
      <div className="tv-replay-chart-footer"><span><i className="tv-replay-up"/> Bull candle</span><span><i className="tv-replay-down"/> Bear candle</span><span>Scroll to zoom · Drag to inspect</span></div></div>
      <aside className="tv-replay-ticket"><span className="tv-replay-eyebrow">PAPER EXECUTION</span><h3>{session.position?'Position running':'Place a trade'}</h3>
-      {session.position?<div className="tv-replay-position"><div><span className={session.position.side==='BUY'?'is-profit':'is-loss'}>{session.position.side==='BUY'?'LONG':'SHORT'}</span><strong className={mark&&mark.unrealized>=0?'is-profit':'is-loss'}>{mark?(mark.unrealized>=0?'+':'')+money(mark.unrealized):'—'}</strong></div><dl><dt>Entry</dt><dd>{price(session.position.entry)}</dd><dt>Stop loss</dt><dd>{price(session.position.stop)}</dd><dt>Take profit</dt><dd>{price(session.position.target)}</dd><dt>Size</dt><dd>{session.position.quantity} oz</dd></dl><button type="button" className="tv-replay-close-position" onClick={close}>Close position (X)</button></div>:
+      {session.position?<div className="tv-replay-position"><div><span className={session.position.side==='BUY'?'is-profit':'is-loss'}>{session.position.side==='BUY'?'LONG':'SHORT'}</span><strong className={mark&&mark.unrealized>=0?'is-profit':'is-loss'}>{mark?(mark.unrealized>=0?'+':'')+money(mark.unrealized):'—'}</strong></div><dl><dt>Entry</dt><dd>{price(session.position.entry)}</dd><dt>Stop loss</dt><dd>{price(session.position.stop)}</dd><dt>Take profit</dt><dd>{price(session.position.target)}</dd><dt>Size</dt><dd>{session.position.quantity} oz</dd></dl>
+       <div className="tv-replay-edit-position"><label>New stop price<input type="number" step="0.01" value={adjustStop} onChange={e=>setAdjustStop(e.target.value)}/></label><label>New target price<input type="number" step="0.01" value={adjustTarget} onChange={e=>setAdjustTarget(e.target.value)}/></label></div>
+       <div className="tv-replay-position-actions"><button type="button" onClick={()=>modifyPosition(false)}>Update SL / TP</button><button type="button" onClick={()=>modifyPosition(true)}>Move stop to entry</button></div>
+       <button type="button" className="tv-replay-close-position" onClick={close}>Close position (X)</button></div>:
       <><div className="tv-replay-ticket-inputs"><label>Quantity · oz<input type="number" min="0.01" step="0.1" value={quantity} onChange={e=>setQuantity(e.target.value)}/></label><label>Stop distance · $/oz<input type="number" min="0.01" step="0.5" value={stopDistance} onChange={e=>setStopDistance(e.target.value)}/></label><label>Target distance · $/oz<input type="number" min="0.01" step="0.5" value={targetDistance} onChange={e=>setTargetDistance(e.target.value)}/></label></div>
       <div className="tv-replay-risk"><div><span>Estimated stop loss</span><strong>{money(Math.max(0,(number(stopDistance)+costs.spread+2*costs.slippage+2*costs.feePerOunce)*number(quantity)||0))}</strong></div><div><span>Risk / reward</span><strong>1 : {number(stopDistance)>0?(number(targetDistance)/number(stopDistance)).toFixed(2):'—'}</strong></div></div>
       <div className="tv-replay-orders"><button type="button" className="tv-replay-buy" onClick={()=>enter('BUY')} disabled={replayAtEnd}><TrendingUp size={16}/> BUY / LONG</button><button type="button" className="tv-replay-sell" onClick={()=>enter('SELL')} disabled={replayAtEnd}><TrendingDown size={16}/> SELL / SHORT</button></div></>}
