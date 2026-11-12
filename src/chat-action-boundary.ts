@@ -11,7 +11,7 @@ export function explicitActionRequest(message:string):boolean{
  if(/^\s*(?:what|why|when|where|how|which|is|are|was|were|did|does|any|has|have|who|do you know|tell me|show me)\b/i.test(m))return false;
  if(/^\s*(?:i(?:'m| am) talking about|no,? i mean|papi|bro)\b/i.test(m)&&!explicitBacktestRequest(m))return false;
  return explicitBacktestRequest(m)||
-  /^(?:please\s+|now\s+|can you\s+|could you\s+|would you\s+|let's\s+|lets\s+){0,3}(?:deploy|stop|pause|resume|start(?: the)? bot|create|build|generate|write|edit|update|modify|rewrite|rename|delete|remove|connect|disconnect|backtest|retest|run a backtest|set up (?:a )?watch|monitor|alert|analy[sz]e|scan)\b/i.test(m);
+  /^(?:please\s+|now\s+|can you\s+|could you\s+|would you\s+|let's\s+|lets\s+){0,3}(?:deploy|stop|pause|resume|start(?: the)? bot|create|build|generate|write|edit|update|modify|rewrite|rename|delete|remove|connect|disconnect|backtest|retest|run a backtest|set (?:up )?(?:an? )?(?:alert|signal|watch)|monitor|watch|notify|track|alert|analy[sz]e|scan)\b/i.test(m);
 }
 export function isPendingCreateAnswer(message:string):boolean{
  return /^\s*(?:propdao|hyperliquid|valr|ctrader)\s*(?:[,/-]\s*|\s+)(?:gold|goldusdc|xauusd|btc|btcusdc|eth|ethusdc)\s*$/i.test(message)
