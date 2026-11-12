@@ -812,7 +812,7 @@ app.post('/api/ai', async (req, res) => {
     try{available=await openRouterAccounts.models()}catch{return res.status(503).json({error:'Cannot verify the selected OpenRouter model right now. Retry model selection.'})}
     if(!available.some(m=>m.id===requestedModel))return res.status(400).json({error:'This OpenRouter model is not in the current model catalogue.'});
   }
-  const model = requestedModel || personalAI?.model || process.env.OPENROUTER_MODEL?.trim() || DEFAULT_OPENROUTER_MODEL;
+  const model = requestedModel || personalAI?.model || DEFAULT_OPENROUTER_MODEL;
   // Only conversational public-info queries can use web research; editing
   // strategy.js and all live execution paths remain unchanged.
   const lastUser=[...messages].reverse().find((m:any)=>m.role==='user');
@@ -994,7 +994,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     try{available=await openRouterAccounts.models()}catch{return res.status(503).json({error:'Cannot verify the selected OpenRouter model right now. Retry model selection.'})}
     if(!available.some(m=>m.id===requestedModel))return res.status(400).json({error:'This OpenRouter model is not in the current model catalogue.'});
   }
-  const model = phase2SharedModelTestEnabled(uid,process.env,req.headers['x-tv-phase2-qa']) ? 'openrouter/free' : (requestedModel || personalAI?.model || process.env.OPENROUTER_MODEL?.trim() || DEFAULT_OPENROUTER_MODEL);
+  const model = phase2SharedModelTestEnabled(uid,process.env,req.headers['x-tv-phase2-qa']) ? 'openrouter/free' : (requestedModel || personalAI?.model || DEFAULT_OPENROUTER_MODEL);
   // Only conversational public-info queries can use web research; editing
   // strategy.js and all live execution paths remain unchanged.
   const lastUser=[...messages].reverse().find((m:any)=>m.role==='user');
