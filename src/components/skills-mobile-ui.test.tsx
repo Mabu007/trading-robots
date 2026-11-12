@@ -24,7 +24,7 @@ describe('Skills, chat model and mobile shell',()=>{
   expect(html).toContain('alertdialog');expect(html).toContain('Gold research');expect(html).toContain('Delete chat');
  });
  it('keeps the selected model when switching chats and forwards it to streaming AI',()=>{
-  expect(app).toContain('setConversationModel(record?.model||null)');
+  expect(app).toContain("['stealth/crouton-alpha','stealth/crouton-alpha:free','openrouter/stealth'].includes(record?.model||'')?null:record?.model||null");
   expect(app).toContain('await cloudClient.selectConversationModel(conversationId,model)');
   expect(app).toContain('modelOverride?{model:modelOverride}');
   expect(firebase).toContain('loadConversationRecord:');
