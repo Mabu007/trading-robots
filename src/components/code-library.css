@@ -102,3 +102,10 @@
 }
 .tv-code-deployments .tv-code-inspect-button:hover svg,
 .tv-code-deployments .tv-code-inspect-button:focus-visible svg{color:inherit!important}
+
+/* New historical practice entry point, theme-matched to the Backtest library. */
+.tv-code-replay{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:42px;padding:10px 15px;border:1px solid var(--tv-shell-line);border-radius:11px;background:var(--tv-shell-panel);color:var(--tv-shell-ink);font:inherit;font-size:12px;font-weight:660;white-space:nowrap;cursor:pointer}
+.tv-code-replay:hover{background:var(--tv-shell-hover);border-color:var(--tv-shell-accent)}
+.tv-code-replay:focus-visible{outline:2px solid var(--tv-shell-accent);outline-offset:2px}
+.tv-code-replay:disabled{opacity:.5;cursor:not-allowed}
+@media(max-width:680px){.tv-code-head{align-items:flex-start;flex-direction:column}.tv-code-head .tv-code-item-actions{width:100%;flex-wrap:wrap}.tv-code-replay,.tv-code-head .tv-code-new{flex:1;justify-content:center}}

@@ -27,7 +27,6 @@ type Props = {
   theme?: AppTheme;
   onClose: () => void;
 };
-const writableVenues = ['propdao', 'hyperliquid', 'valr'] as const;
 const errorText = (error: unknown) => error instanceof Error ? error.message : 'Something went wrong. Try again.';
 const yesterdayUtc = () => new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
 
@@ -36,8 +35,8 @@ export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, 
   const [savedBot, setSavedBot] = useState(bot?.storageKey ? bot : null);
   const [view, setView] = useState(initialView);
   const [name, setName] = useState(bot?.name || '');
-  const [venue, setVenue] = useState<Venue>(bot ? venueOf(bot.venue) : 'propdao');
-  const [asset, setAsset] = useState(bot?.asset || '');
+  const [venue] = useState<Venue>(bot ? venueOf(bot.venue) : 'research');
+  const [asset, setAsset] = useState(bot?.asset || 'XAUUSD');
   const [rules, setRules] = useState(bot?.prompt || '');
   const [code, setCode] = useState(bot?.code || '');
   const [savedCode, setSavedCode] = useState<string | null>(null);
@@ -62,8 +61,8 @@ export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, 
   const endpoint = `/api/user-bots/${encodeURIComponent(id)}`;
   const lockedIdentity = Boolean(savedBot);
   const currentRun = Boolean(run && run.strategyCode === code && run.venue === venue && run.asset === asset);
-  const canReview = Boolean(savedBot && sourceReady && savedCode === code && workbenchDeployable(venue)
-    && (venue !== 'propdao' || (runSaved && currentRun)));
+  const canReview = Boolean(savedBot && sourceReady && savedCode === code &&
+    (venue === 'research' || workbenchDeployable(venue)) && runSaved && currentRun);
 
   useEffect(() => {
     if (bot?.storageKey || venue === 'ctrader') return;
@@ -173,7 +172,7 @@ export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, 
     if (!rules.trim()) throw Error('Describe the strategy rules first.');
     setProgress('Generating strategy.js…');
     const system = 'Generate a concise, complete deterministic Trading Vibes strategy.js in a single JavaScript code fence. Use a static export const config = {timeframes:["m1"],executionTimeframe:"m1",riskPercent:1,riskReward:2}; with a trailing semicolon. Allowed timeframe strings: m1,m5,m15,m30,h1,h4,d1. Export function onCandle(ctx). Only use COMPLETED candles in ctx.timeframes. Return BUY or SELL with positive stopLoss and takeProfit, or WAIT; include warmup and zero-volatility guards. Use short, clear functions and no dependencies. No imports, network, broker keys, future candles or hard-coded prices. No explanations, tests, comments or markdown outside the code fence. Keep under 350 lines.';
-    const user = 'Venue: '+venueLabel[market.venue]+'. Instrument: '+market.asset+'.\nStrategy rules: '+rules.trim();
+    const user = 'Market: '+market.asset+'. Historical research candles: Dukascopy bid.\nStrategy rules: '+rules.trim();
     const source = await generateStrategyWithRecovery({
       system,user,signal,
       progress:setProgress,
@@ -226,7 +225,7 @@ export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, 
   return <Dialog title={bot ? bot.name : 'Build a strategy'} className="tv-strategy-workbench" busy={Boolean(busy)} onClose={onClose}>
    <div className="tv-workbench-studio">
     <div className="tv-workbench-hero">
-     <div className="tv-workbench-hero-brand"><span className="tv-workbench-orb"><Bot size={21}/></span><div><span className="tv-workbench-eyebrow">TRADING VIBES / BACKTEST STUDIO</span><h3>{name.trim()||'Your next backtest strategy'}</h3><p>{savedBot?'Saved strategy · '+venueLabel[venue]+' · '+asset:'Create the idea, backtest it, then track your signals.'}</p></div></div>
+     <div className="tv-workbench-hero-brand"><span className="tv-workbench-orb"><Bot size={21}/></span><div><span className="tv-workbench-eyebrow">TRADING VIBES / BACKTEST STUDIO</span><h3>{name.trim()||'Your next backtest strategy'}</h3><p>{savedBot?'Saved strategy · '+asset:'Create the idea, backtest it, then track your signals.'}</p></div></div>
      <span className={'tv-workbench-pill'+(savedBot?' is-saved':'')}><span className="tv-workbench-dot"/>{savedBot?'Saved':'Draft'}</span>
     </div>
     <div className="tv-workbench-stepper" role="tablist" aria-label="Strategy backtesting workflow">
@@ -238,13 +237,12 @@ export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, 
     {(error||marketError)&&<div className="tv-workbench-alert" role="alert"><strong>Action needed</strong><p>{error||marketError}</p>{marketError&&<button type="button" className="tv-workbench-text-action" onClick={()=>setReloadMarkets(value=>value+1)}>Retry loading markets</button>}</div>}
     {(progress||notice)&&<div className="tv-workbench-feedback" role="status"><CheckCircle2 size={16}/>{progress||notice}</div>}
     {view==='write'&&<div className="tv-workbench-content">
-     <div className="tv-workbench-section-intro"><div><span className="tv-workbench-section-kicker">01 / STRATEGY RULES</span><h4>Make it yours.</h4><p>Define the market, then write your rules or have VIBES draft the JavaScript.</p></div></div>
+     <div className="tv-workbench-section-intro"><div><span className="tv-workbench-section-kicker">01 / STRATEGY RULES</span><h4>Make it yours.</h4><p>Write your rules or have VIBES draft the JavaScript. Historical testing uses shared Dukascopy candles.</p></div></div>
      {!lockedIdentity&&<div className="tv-workbench-identity">
       <label className="tv-workbench-input"><span>Strategy name</span><input value={name} maxLength={64} disabled={Boolean(busy)} onChange={event=>setName(event.target.value)} placeholder="e.g. Gold Session Scalper" data-dialog-initial-focus/></label>
-      <label className="tv-workbench-input"><span>Trading venue</span><select value={venue} disabled={Boolean(busy)} onChange={event=>{setVenue(event.target.value as Venue);setAsset('');setMarkets([])}}>{writableVenues.map(item=><option key={item} value={item}>{venueLabel[item]}</option>)}</select></label>
       <label className="tv-workbench-input"><span>Instrument</span><input value={asset} list={marketsId} maxLength={64} disabled={Boolean(busy)} onChange={event=>setAsset(event.target.value)} placeholder={markets.length?'Search symbols…':'Loading symbols…'}/><datalist id={marketsId}>{markets.map(symbol=><option key={symbol} value={symbol}/>)}</datalist></label>
      </div>}
-     {lockedIdentity&&<div className="tv-workbench-locked"><ShieldCheck size={17}/><span>Strategy identity is locked to <strong>{asset}</strong> on <strong>{venueLabel[venue]}</strong>. Edits won't silently switch the trading instrument.</span></div>}
+     {lockedIdentity&&<div className="tv-workbench-locked"><ShieldCheck size={17}/><span>Strategy identity is locked to <strong>{asset}</strong> on <strong>{asset==='XAUUSD'?'historical Gold':'its saved instrument'}</strong>. Edits won't silently switch the instrument.</span></div>}
      <details className="tv-workbench-ai">
       <summary><span className="tv-workbench-ai-icon"><Sparkles size={19}/></span><span><strong>Generate with VIBES</strong><small>Describe your strategy in plain English. Review all generated code.</small></span><span className="tv-workbench-ai-caret">Expand</span></summary>
       <div className="tv-workbench-ai-body"><label className="tv-workbench-input"><span>Trading rules</span><textarea rows={5} value={rules} maxLength={12_000} disabled={Boolean(busy)} onChange={event=>setRules(event.target.value)} placeholder="Example: Trade Gold on M1, follow the H1 trend, enter after a pullback and use a fixed 1:2 risk/reward ratio…"/></label>
@@ -272,7 +270,7 @@ export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, 
       </div>
       <div className="tv-workbench-presets"><span>Quick range</span>{presets.map(preset=><button type="button" key={preset.days} disabled={Boolean(busy)} onClick={()=>presetRange(preset.days)}>{preset.name}</button>)}</div>
      </div>
-     <div className="tv-workbench-summary"><div><Play size={17}/><span><strong>{asset||'Select a market'} · {venueLabel[venue]}</strong><small>Executes your saved strategy against available completed candles</small></span></div><span className="tv-workbench-utc">UTC</span></div>
+     <div className="tv-workbench-summary"><div><Play size={17}/><span><strong>{asset||'XAUUSD'} · Dukascopy historical</strong><small>Executes your saved strategy against available completed candles</small></span></div><span className="tv-workbench-utc">UTC</span></div>
      <div className="tv-workbench-toolbar"><button type="button" className="tv-workbench-secondary" disabled={Boolean(busy)} onClick={()=>setView('write')}>Edit strategy</button><button type="button" className="tv-workbench-primary" disabled={Boolean(busy)||!sourceReady||!code.trim()||!from||!to||venue==='ctrader'} onClick={backtest}><Play size={16}/>{busy==='backtest'?'Backtesting…':'Run backtest'}</button></div>
      {(busy==='generate'||busy==='backtest')&&progress&&!progress.startsWith('Saving')&&<button type="button" className="tv-workbench-cancel" onClick={()=>operation.current?.abort()}>Cancel operation</button>}
     </div>}
