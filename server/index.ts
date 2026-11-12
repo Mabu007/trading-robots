@@ -1,3 +1,5 @@
+import {marketAlertRoutes} from './market-alert-service.ts';
+import {AlertHistory} from './alert-history.ts';
 import {vibesPersona,vibesResearchStyle} from '../shared/vibes-persona.ts';
 import {validateAIMessageBudget} from './ai-message-limits.ts';
 import {intervalMs} from './market-data.ts';
@@ -180,6 +182,9 @@ async function firebaseUidOrReply(req: express.Request, res: express.Response): 
 const propdaoAccounts=new PropDAOAccounts({read:readR2Object,write:writeR2Object,remove:deleteR2Object});
 
 const openRouterAccounts = new OpenRouterAccounts({read:readR2Object,write:writeR2Object,remove:deleteR2Object});
+const marketAlertService=marketAlertRoutes(app,{uid:firebaseUidOrReply,store:marketplace.store,accounts:openRouterAccounts,read:readR2Object});
+const alertHistory=new AlertHistory({read:readR2Object,write:writeR2Object});
+app.post('/api/market-alert-history',async(req,res)=>{const uid=await firebaseUidOrReply(req,res);if(!uid)return;try{res.json(await alertHistory.day(req.body?.day,req.body?.timeframe))}catch(e){res.status(503).json({error:e instanceof Error?e.message:'History unavailable'})}});
 openRouterRoutes(app,openRouterAccounts,firebaseUidOrReply);
 openRouterOAuthRoutes(app,openRouterAccounts,firebaseUidOrReply);
 chatToolRoutes(app,openRouterAccounts,firebaseUidOrReply);
@@ -1405,7 +1410,8 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     }:undefined;
     // Each model turn may request a small batch of independent reads.
     let started=0,running=0;
-    const tools=marketTools&&Object.keys(marketTools).length?Object.fromEntries(Object.entries(marketTools).map(([name,definition])=>{
+    const effectiveTools={...marketTools,...(!researchMode?marketAlertService.tools(uid):{})};
+    const tools=Object.keys(effectiveTools).length?Object.fromEntries(Object.entries(effectiveTools).map(([name,definition])=>{
      const entry=definition as {execute:(...args:any[])=>unknown};
      return [name,{...definition,execute:async(...args:any[])=>{
       if(clientAbort.signal.aborted||started>=6||running>=2)return {available:false,reason:'Read budget reached for this response.'};
