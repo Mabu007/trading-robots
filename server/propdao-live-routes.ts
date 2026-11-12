@@ -704,8 +704,12 @@ export function propDAOLiveRoutes(app:Express,deps:Dependencies){
  });
  app.get('/api/venues/propdao/bots/:botId/live',route((uid,id,req)=>service.status(uid,id,typeof req.query.accountId==='string'?req.query.accountId:undefined)));
  app.get('/api/venues/propdao/bots/:botId/live/market',route((uid,id)=>service.market(uid,id)));
- app.post('/api/venues/propdao/bots/:botId/live/review',route((uid,id,req)=>deps.exclusive?deps.exclusive(uid,id,()=>service.review(uid,id,req)):service.review(uid,id,req)));
+ app.post('/api/venues/propdao/bots/:botId/live/review',route((uid,id,req)=>{
+  if(process.env.VERCEL_ENV==='production'&&process.env.TRADING_VIBES_ENABLE_BROKER_TRADING!=='true')throw Error('Broker trade deployment is paused. Use signal trackers instead.');
+  return deps.exclusive?deps.exclusive(uid,id,()=>service.review(uid,id,req)):service.review(uid,id,req);
+ }));
  app.post('/api/venues/propdao/bots/:botId/live',route((uid,id,req)=>{
+  if(process.env.VERCEL_ENV==='production'&&process.env.TRADING_VIBES_ENABLE_BROKER_TRADING!=='true'&&['deploy','resume'].includes(req.body?.action))throw Error('Broker trade execution is paused. Existing deployments can still be stopped and reconciled.');
   const work=()=>req.body?.action==='deploy'?service.deploy(uid,id,req):req.body?.action==='stop'?service.stop(uid,id,req):req.body?.action==='pause'?service.pause(uid,id,req):req.body?.action==='resume'?service.resume(uid,id,req):req.body?.action==='reconcile'?service.reconcile(uid,id,req):Promise.reject(Error('Unknown action'));
   return deps.exclusive?deps.exclusive(uid,id,work):work();
  }));
