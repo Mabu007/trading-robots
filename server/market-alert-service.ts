@@ -10,6 +10,7 @@ import {z} from 'zod';
 import type {RecordStore} from './firestore-store.ts';
 import type {OpenRouterAccounts} from './openrouter-account.ts';
 import {validateAlertRule,describeCondition,type AlertRule} from '../shared/market-alerts.ts';
+import {signalRuleFromText} from '../shared/signal-description.ts';
 import {biquoteSnapshot} from '../shared/biquote.ts';
 const hash=(v:string)=>createHash('sha256').update(v).digest('hex');
 const validId=(v:string)=>/^[a-f0-9]{32}$/.test(v);
@@ -88,6 +89,15 @@ export class MarketAlertService{
 export function marketAlertRoutes(app:Express,deps:Deps){const svc=new MarketAlertService(deps);const auth=(work:(uid:string,req:Request)=>Promise<any>)=>async(req:Request,res:Response)=>{res.setHeader('Cache-Control','private,no-store');const uid=await deps.uid(req,res);if(!uid)return;try{res.json(await work(uid,req))}catch(e){res.status(400).json({error:e instanceof Error?e.message:'Alert request failed'});}};
  app.get('/api/market-alerts',auth(uid=>svc.list(uid)));
  app.get('/api/signals/history',auth((uid,req)=>svc.signalHistory(uid,typeof req.query.cursor==='string'?req.query.cursor:undefined)));
+ app.post('/api/signals/from-text',auth(async(uid,req)=>{
+  const rule=signalRuleFromText(req.body?.text);
+  const row=await svc.draft(uid,rule);
+  if(req.body?.activate!==true)return {alert:row,active:false,text:'Signal created as a draft. Review and start it from Signals.'};
+  try{
+   const status=await svc.control(uid,row.id,'start',row.revision);
+   return {alert:row,active:status.running===true,text:status.running===true?'Signal created and watching for '+row.rule.name+'. You will receive Telegram notifications when it matches.':'Signal saved. Monitoring could not be confirmed; review its status in Signals.'};
+  }catch(error){return {alert:row,active:false,text:'Signal saved as a draft: '+(error instanceof Error?error.message:'Connect Telegram and activate it in Signals.')};}
+ }));
  app.post('/api/market-alerts/describe',auth(async(uid,req)=>{if(typeof req.body?.text!=='string'||req.body.text.length>4000)throw Error('Describe your conditions in under 4000 characters');return {text:await svc.reply(uid,req.body.text,{purpose:'Prepare alert rules for review. Ask for missing level, timeframe, period or session details. Never activate.',previous:req.body?.previous||null})};}));
  app.post('/api/market-alerts/from-strategy',auth((uid,req)=>svc.strategyDraft(uid,String(req.body?.botId||''))));
  app.get('/api/market-alerts/:id/source',auth((uid,req)=>svc.source(uid,String(req.params.id))));
