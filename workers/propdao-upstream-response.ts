@@ -10,6 +10,11 @@ export class TemporaryReadError extends Error {
 export function retryableReadError(error:unknown):boolean {
  return error instanceof TemporaryReadError;
 }
+/** A successful HTTP response is not proof of flat broker exposure. */
+export function requireKnownExposure(snapshot:any):void {
+ if(!Array.isArray(snapshot?.positions)||!Array.isArray(snapshot?.orders))
+  throw new TemporaryReadError('Broker exposure is unknown; refusing new entries.');
+}
 const temporaryStatus=(s:number)=>s===408||s===425||s===429||s>=500;
 const clean=(v:unknown)=>typeof v==='string'?v.replace(/[\u0000-\u001f]/g,' ').slice(0,200):'';
 

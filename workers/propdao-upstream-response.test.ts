@@ -1,8 +1,13 @@
 import {describe,it,expect} from 'vitest';
-import {parseUpstreamJson,retryableReadError,TemporaryReadError} from './propdao-upstream-response';
+import {parseUpstreamJson,retryableReadError,TemporaryReadError,requireKnownExposure} from './propdao-upstream-response';
 
 const plain=(text:string,status:number)=>new Response(text,{status,headers:{'content-type':'text/plain'}});
 describe('PropDAO live upstream response classification',()=>{
+ it('refuses an incomplete snapshot instead of treating unknown exposure as flat',()=>{
+  for(const snapshot of [null,{}, {positions:[],orders:null}, {positions:null,orders:[]}])
+   expect(()=>requireKnownExposure(snapshot)).toThrow(TemporaryReadError);
+  expect(()=>requireKnownExposure({positions:[],orders:[]})).not.toThrow();
+ });
  it('continues after a Cloudflare 520 plain-text account snapshot instead of exposing a JSON syntax error',async()=>{
   const error=await parseUpstreamJson(plain('error code: 520 ',520),'Control API').catch(e=>e);
   expect(error).toBeInstanceOf(TemporaryReadError);
