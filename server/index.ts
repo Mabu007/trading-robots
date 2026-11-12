@@ -584,15 +584,7 @@ app.delete('/api/user-bots/:botId', async (req, res) => {
   if (!getR2Config()) return res.status(503).json({ error: 'Robot storage is not configured.' });
   try {
     if(!FirestoreStore.configured())throw Error('Cannot safely verify live bot state while account locking is unavailable.');
-    await valrExclusive(uid,()=>propBotExclusive(uid,botId,async()=>{
-    await propdaoLiveService.retireSourceForDeletion(uid,botId);
-    const grant=await liveService.grant(uid);if(grant?.botId===botId)await liveService.beforeKeyChange(uid);
-    const prefix = `${userBotRoot(uid, botId)}/`;
-    const keys = await listR2Objects(prefix, 1001);
-    if (keys.length > 1000) throw Error('This robot has too many stored versions to delete safely. Contact support.');
-    await publications.removePublication(uid, botId);
-    for (let i = 0; i < keys.length; i += 10) await Promise.all(keys.slice(i, i + 10).map(deleteR2Object));
-    }));
+    await valrExclusive(uid,()=>propBotExclusive(uid,botId,()=>approvedRobotDelete(uid,botId)));
     return res.json({ deleted: true });
   } catch (error) {
     console.error('Robot deletion failed', { botId, error });
