@@ -10,9 +10,9 @@ describe('seamless workspace layout',()=>{
   expect(app).not.toContain('aria-label="Collapse sidebar"');
   expect(app.match(/className="icon-button tv-sidebar-toggle"/g)?.length).toBe(1);
  });
- it('uses one scroll container for Robots, Apps, and chats',()=>{
+ it('uses one scroll container for Signals, Apps, and chats',()=>{
   const start=app.indexOf('<div className="tv-sidebar-scroll">');
-  const code=app.indexOf('<span>Robots</span>',start);
+  const code=app.indexOf('<span>Signals</span>',start);
   const skills=app.indexOf('<span>Skills</span>',start);
   const apps=app.indexOf('<span>Apps</span>',start);
   const chats=app.indexOf('className="tv-sidebar-chats"',start);
