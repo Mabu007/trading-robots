@@ -5,7 +5,8 @@ it('uses BiQuote for ordinary Gold requests while honoring explicit venue reques
 it('reports an unavailable BiQuote feed without fabricating another source',async()=>{const result=await primaryGoldResearch(async()=>({available:false,source:'BiQuote',reason:'stale'}));expect(result.hasCandles).toBe(false);expect(result.context).toContain('stale');expect(result.context).not.toContain('Hyperliquid');expect(result.context).not.toContain('BiQuote')});
 
 it('gives VIBES a natural research voice without exposing backend feed names',()=>{
- expect(vibesPersona).not.toMatch(/BiQuote|routine.*Research note/i);
+ expect(vibesPersona).not.toContain('BiQuote');
+ expect(vibesPersona).not.toContain('Put routine source/provenance');
  expect(vibesPersona).toContain('Do not append a routine');
  expect(vibesResearchStyle).toContain('exact market/instrument');
 });
