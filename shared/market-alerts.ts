@@ -1,16 +1,19 @@
 /** Pure alert rules shared by live monitoring and browser historical replay. */
-export const ALERT_TF = {m1:60,m5:300,m15:900,m30:1800,h1:3600,h4:14400} as const;
+export const ALERT_TF = {m1:60,m5:300,m15:900,m30:1800,h1:3600,h4:14400,d1:86400} as const;
 export type AlertBar={time:number;open:number;high:number;low:number;close:number;volume?:number};
-export type Condition={id:string;kind:'above'|'below'|'ema_above'|'ema_below'|'rsi_above'|'rsi_below'|'sweep_high'|'sweep_low'|'break_high'|'break_low';value?:number;period?:number;lookback?:number};
-export type AlertRule={name:string;symbol:'XAUUSD';timeframe:keyof typeof ALERT_TF;mode:'any'|'all'|'stages';conditions:Condition[];notifyStages:boolean;cooldownSeconds:number;sequenceSeconds:number;expiresAt:number;repeat:boolean;session:null|{timezone:string;start:string;end:string};basis:'completed-candle';strategy:null|{id:string;sourceHash:string};};
+export type Condition={id:string;timeframe?:keyof typeof ALERT_TF;kind:'touch'|'above'|'below'|'ema_above'|'ema_below'|'rsi_above'|'rsi_below'|'sweep_high'|'sweep_low'|'break_high'|'break_low';value?:number;period?:number;lookback?:number};
+export type AlertRule={name:string;symbol:'XAUUSD';timeframe:keyof typeof ALERT_TF;mode:'any'|'all'|'stages';conditions:Condition[];notifyStages:boolean;cooldownSeconds:number;sequenceSeconds:number;expiresAt:number;repeat:boolean;session:null|{timezone:string;start:string;end:string};basis:'completed-candle'|'live-price';strategy:null|{id:string;sourceHash:string};};
 export type RuleState={lastBar:number;stage:number;stageStarted:number;latched:string[];lastSent:number;finished:boolean};
 export const emptyRuleState=():RuleState=>({lastBar:0,stage:0,stageStarted:0,latched:[],lastSent:0,finished:false});
 export function validateAlertRule(v:any):asserts v is AlertRule{
- if(!v||typeof v.name!=='string'||!v.name.trim()||v.name.length>80||v.symbol!=='XAUUSD'||!Object.hasOwn(ALERT_TF,v.timeframe)||!['any','all','stages'].includes(v.mode)||v.basis!=='completed-candle'||!Array.isArray(v.conditions)||v.conditions.length<1||v.conditions.length>6||typeof v.repeat!=='boolean'||typeof v.notifyStages!=='boolean'||!Number.isSafeInteger(v.expiresAt)||!Number.isInteger(v.cooldownSeconds)||v.cooldownSeconds<60||v.cooldownSeconds>86400||!Number.isInteger(v.sequenceSeconds)||v.sequenceSeconds<60||v.sequenceSeconds>86400)throw Error('Choose XAUUSD, completed candles, 1–6 precise conditions and valid alert settings.');
+ if(!v||typeof v.name!=='string'||!v.name.trim()||v.name.length>80||v.symbol!=='XAUUSD'||!Object.hasOwn(ALERT_TF,v.timeframe)||!['any','all','stages'].includes(v.mode)||!['completed-candle','live-price'].includes(v.basis)||!Array.isArray(v.conditions)||v.conditions.length<1||v.conditions.length>6||typeof v.repeat!=='boolean'||typeof v.notifyStages!=='boolean'||!Number.isSafeInteger(v.expiresAt)||!Number.isInteger(v.cooldownSeconds)||v.cooldownSeconds<60||v.cooldownSeconds>86400||!Number.isInteger(v.sequenceSeconds)||v.sequenceSeconds<60||v.sequenceSeconds>86400)throw Error('Choose XAUUSD, completed candles, 1–6 precise conditions and valid alert settings.');
  const ids=new Set<string>();for(const c of v.conditions){
   if(!c||typeof c.id!=='string'||!/^c[1-6]$/.test(c.id)||ids.has(c.id))throw Error('Conditions need unique IDs c1–c6.');ids.add(c.id);
-  if(!['above','below','ema_above','ema_below','rsi_above','rsi_below','sweep_high','sweep_low','break_high','break_low'].includes(c.kind))throw Error('Unsupported condition. Define it with the supported price, EMA, RSI or previous-range rules.');
-  if(['above','below'].includes(c.kind)&&!(Number.isFinite(c.value)&&c.value>0))throw Error('A positive price level is required.');
+  if(!['touch','above','below','ema_above','ema_below','rsi_above','rsi_below','sweep_high','sweep_low','break_high','break_low'].includes(c.kind))throw Error('Unsupported condition. Define it with the supported price, EMA, RSI or previous-range rules.');
+  if(c.timeframe&&!Object.hasOwn(ALERT_TF,c.timeframe))throw Error('Invalid condition timeframe');
+  if(v.basis==='live-price'&&(!['touch','above','below'].includes(c.kind)||c.timeframe))throw Error('Live-price alerts support touch/above/below levels only.');
+  if(c.kind==='touch'&&v.basis!=='live-price')throw Error('Touch conditions need live-price basis');
+  if(['touch','above','below'].includes(c.kind)&&!(Number.isFinite(c.value)&&c.value>0))throw Error('A positive price level is required.');
   if(c.kind.startsWith('rsi')&&!(Number.isFinite(c.value)&&c.value>=0&&c.value<=100))throw Error('RSI threshold must be 0–100.');
   if(/ema|rsi/.test(c.kind)&&!(Number.isInteger(c.period)&&c.period>=2&&c.period<=200))throw Error('Indicator period must be 2–200.');
   if(/sweep|break/.test(c.kind)&&!(Number.isInteger(c.lookback)&&c.lookback>=2&&c.lookback<=200))throw Error('Previous-range lookback must be 2–200.');
@@ -30,13 +33,13 @@ export function conditionMet(c:Condition,bars:AlertBar[]):boolean{
  if(c.kind==='sweep_high')return last.high>high&&last.close<high;if(c.kind==='sweep_low')return last.low<low&&last.close>low;
  return c.kind==='break_high'?last.close>high:last.close<low;
 }
-export function evaluateAlert(rule:AlertRule,old:RuleState,bars:AlertBar[],now:number){
+export function evaluateAlert(rule:AlertRule,old:RuleState,bars:AlertBar[],now:number,datasets:Record<string,AlertBar[]>={}){
  const state={...old,latched:[...old.latched]},last=bars.at(-1),events:{key:string;time:number;matched:string[];stage:number;complete:boolean;price:number}[]=[];
  if(!last||state.finished||last.time<=state.lastBar||last.time+ALERT_TF[rule.timeframe]>now||now>=rule.expiresAt)return {state,events,matched:[] as string[]};
  if(state.lastBar&&last.time-state.lastBar>ALERT_TF[rule.timeframe]){state.stage=0;state.stageStarted=0;state.latched=[];}
  state.lastBar=last.time;
  if(rule.session){const time=new Intl.DateTimeFormat('en-GB',{timeZone:rule.session.timezone,hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date((last.time+ALERT_TF[rule.timeframe])*1000));const {start,end}=rule.session;const inside=start<end?time>=start&&time<end:time>=start||time<end;if(!inside){state.stage=0;state.stageStarted=0;state.latched=[];return {state,events,matched:[]};}}
- const matched=rule.conditions.filter(c=>conditionMet(c,bars)).map(c=>c.id);let emit:string[]=[],complete=false;
+ const matched=rule.conditions.filter(c=>conditionMet(c,(c.timeframe&&c.timeframe!==rule.timeframe?(datasets[c.timeframe]||[]):bars).filter(b=>b.time+ALERT_TF[c.timeframe||rule.timeframe]<=last.time+ALERT_TF[rule.timeframe]))).map(c=>c.id);let emit:string[]=[],complete=false;
  if(rule.mode==='stages'){
   if(state.stage===0&&last.time-state.lastSent<rule.cooldownSeconds)return {state,events,matched};
   if(state.stage&&last.time-state.stageStarted>rule.sequenceSeconds){state.stage=0;state.stageStarted=0;}
@@ -47,3 +50,16 @@ export function evaluateAlert(rule:AlertRule,old:RuleState,bars:AlertBar[],now:n
  return {state,events,matched};
 }
 export function describeCondition(c:Condition){return `${c.id}: ${c.kind.replaceAll('_',' ')}${c.value!==undefined?' '+c.value:''}${c.period?' (period '+c.period+')':''}${c.lookback?' (previous '+c.lookback+' candles)':''}`;}
+
+export type TickState={previous:number|null;lastTime:number;engine:RuleState};
+export function evaluateTick(rule:AlertRule,old:TickState,quote:{mid:number;timestamp:number},now:number){
+ const state:TickState={...old,engine:{...old.engine,latched:[...old.engine.latched]}};
+ if(!Number.isFinite(quote.mid)||quote.mid<=0||!Number.isSafeInteger(quote.timestamp)||quote.timestamp<=old.lastTime||now-quote.timestamp>15000||quote.timestamp>now+5000)return {state,events:[]};
+ const previous=old.previous;state.previous=quote.mid;state.lastTime=quote.timestamp;
+ // A missing initial/reference quote is baseline only, never proof of crossing.
+ if(previous===null)return {state,events:[]};
+ const mapped={...rule,basis:'completed-candle' as const,timeframe:'m1' as const,conditions:rule.conditions.map(c=>({...c,kind:'above' as const,value:(c.kind==='touch'?((previous<c.value!&&quote.mid>=c.value!)||(previous>c.value!&&quote.mid<=c.value!)):c.kind==='above'?quote.mid>c.value!:quote.mid<c.value!)?0:Number.MAX_VALUE}))};
+ const time=quote.timestamp/1000;const engine={...state.engine,lastBar:0};
+ const out=evaluateAlert(mapped,engine,[{time:time-60,open:1,high:1,low:1,close:1}],now/1000);
+ state.engine={...out.state,lastBar:0};return {state,events:out.events.map(e=>({...e,key:'tick:'+quote.timestamp+':'+e.matched.join('-'),time:Math.floor(time),price:quote.mid}))};
+}

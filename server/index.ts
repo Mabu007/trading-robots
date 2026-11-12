@@ -182,8 +182,10 @@ async function firebaseUidOrReply(req: express.Request, res: express.Response): 
 const propdaoAccounts=new PropDAOAccounts({read:readR2Object,write:writeR2Object,remove:deleteR2Object});
 
 const openRouterAccounts = new OpenRouterAccounts({read:readR2Object,write:writeR2Object,remove:deleteR2Object});
-const marketAlertService=marketAlertRoutes(app,{uid:firebaseUidOrReply,store:marketplace.store,accounts:openRouterAccounts,read:readR2Object});
+const marketAlertService=marketAlertRoutes(app,{uid:firebaseUidOrReply,store:marketplace.store,accounts:openRouterAccounts,read:readR2Object,history:(day,tf)=>alertHistory.day(day,tf)});
+app.get('/api/venues/research/markets',(_req,res)=>res.json({markets:[{symbol:'XAUUSD',timeframes:['m1','m5','m15','m30','h1','h4']}],source:'BiQuote live / Dukascopy historical'}));
 const alertHistory=new AlertHistory({read:readR2Object,write:writeR2Object});
+app.post('/api/market-alert-ticks',async(req,res)=>{if(!await firebaseUidOrReply(req,res))return;try{res.json(await alertHistory.ticks(req.body?.day,req.body?.hour))}catch(e){res.status(503).json({error:e instanceof Error?e.message:'Historical ticks unavailable'})}});
 app.post('/api/market-alert-history',async(req,res)=>{const uid=await firebaseUidOrReply(req,res);if(!uid)return;try{res.json(await alertHistory.day(req.body?.day,req.body?.timeframe))}catch(e){res.status(503).json({error:e instanceof Error?e.message:'History unavailable'})}});
 openRouterRoutes(app,openRouterAccounts,firebaseUidOrReply);
 openRouterOAuthRoutes(app,openRouterAccounts,firebaseUidOrReply);
@@ -1223,6 +1225,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     const wantsFreshMarket=!backtestId&&!researchMode&&
      /\b(?:market|right now|currently|volatility|rsi|atr|ema|price action|market conditions|suitable|trending|consolidat|choppy)\b/i.test(currentQuestion);
     if(wantsFreshMarket)currentMarketEvidence=await runRead('getCurrentMarketConditions',{botId:effectiveRobotId??null,asset:selectedAsset??null},async()=>{
+     if(!/propdao|hyperliquid/i.test(currentQuestion)){if(selectedAsset&&!['XAUUSD','GOLDUSDC'].includes(selectedAsset))return {available:false,reason:'Primary live research currently supports Gold/XAUUSD; do not substitute it for another requested symbol.'};return marketAlertService.market();}
      try{
       if(robotContextIntent&&!effectiveRobotId)
        return {available:false,reason:'Robot discovery did not identify one verified deployment. Do not substitute a generic GOLD market for an unknown robot instrument.'};
@@ -1308,7 +1311,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
         description:'STAGE creation of a new saved strategy; does not create, backtest or deploy. Requires user clicking Approve & Apply. Complete source must include static config and onCandle.',
         inputSchema:z.object({name:z.string().min(2).max(64),
          asset:z.string().regex(/^[A-Za-z0-9_:.@-]{1,64}$/),
-         venue:z.enum(['propdao','hyperliquid','valr']),
+         venue:z.enum(['research','propdao','hyperliquid','valr']),
          code:z.string().min(60).max(12000),prompt:z.string().max(2000).optional()}).strict(),
         execute:async(input)=>{
          try{return {available:true,...await robotCrud.stageCreate(uid,input)}}
@@ -1410,7 +1413,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     }:undefined;
     // Each model turn may request a small batch of independent reads.
     let started=0,running=0;
-    const effectiveTools={...marketTools,...(!researchMode?marketAlertService.tools(uid):{})};
+    const effectiveTools={...marketTools,...marketAlertService.tools(uid)};
     const tools=Object.keys(effectiveTools).length?Object.fromEntries(Object.entries(effectiveTools).map(([name,definition])=>{
      const entry=definition as {execute:(...args:any[])=>unknown};
      return [name,{...definition,execute:async(...args:any[])=>{

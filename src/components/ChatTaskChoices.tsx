@@ -12,12 +12,12 @@ export function ChatTaskChoices({task,prefs,bots,onChoose,onCancel,disabled=fals
  if(task.kind==='create'){
   question=!task.asset?'Which market should this new robot trade?':'Where should '+task.asset+' run?';
   if(!task.asset)choices=[
-   {label:prefs.useDefaults?'Use my default: '+prefs.preferredAsset+' · '+prefs.preferredVenue:'Gold · PropDAO',value:prefs.useDefaults?prefs.preferredAsset+' on '+prefs.preferredVenue:'GOLDUSDC on propdao',description:'Recommended starting point'},
-   {label:'Bitcoin · Hyperliquid',value:'BTCUSDC on hyperliquid'}
+   {label:prefs.useDefaults?'Use my default: '+prefs.preferredAsset+' · '+prefs.preferredVenue:'Gold · Market research',value:prefs.useDefaults?prefs.preferredAsset+' on '+prefs.preferredVenue:'XAUUSD on research',description:'Recommended starting point'},
+   {label:'Gold · Custom strategy rules',value:'XAUUSD on research'}
   ];
   else choices=[
    {label:'PropDAO',value:'on propdao',description:'Demo account supported'},
-   {label:'Hyperliquid',value:'on hyperliquid'}
+   {label:'Market research',value:'on research'}
   ];
  }else if(task.kind==='choose-robot'){
   question='Which saved robot do you mean?';

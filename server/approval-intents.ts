@@ -6,7 +6,7 @@ const id=z.string().regex(/^[A-Za-z0-9_-]{1,100}$/);
 const finiteValue=z.union([z.string().max(500),z.number().finite(),z.boolean(),z.null()]);
 export const approvalActionSchema=z.object({
  operation:z.enum(['strategy.apply','strategy.create','strategy.delete','strategy.deploy','order.open','order.modify','order.close','risk.change','app.execute']),
- connectionId:id,accountId:id,venue:z.enum(['propdao','ctrader','valr','hyperliquid','composio']),instrument:z.string().min(1).max(64),
+ connectionId:id,accountId:id,venue:z.enum(['research','propdao','ctrader','valr','hyperliquid','composio']),instrument:z.string().min(1).max(64),
  strategyId:id,strategyVersion:z.string().min(1).max(128),
  parameters:z.record(z.string().regex(/^[A-Za-z0-9_.-]{1,80}$/),finiteValue),
  riskContext:z.record(z.string().regex(/^[A-Za-z0-9_.-]{1,80}$/),finiteValue)

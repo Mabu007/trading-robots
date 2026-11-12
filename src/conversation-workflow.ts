@@ -4,13 +4,13 @@ export type TradingPreferences={
  defaultBacktestDays:7|30;useDefaults:boolean;
 };
 export const defaultTradingPreferences:TradingPreferences={
- preferredAsset:'GOLDUSDC',preferredVenue:'propdao',preferredTimeframe:'m1',defaultBacktestDays:7,useDefaults:true
+ preferredAsset:'XAUUSD',preferredVenue:'research',preferredTimeframe:'m1',defaultBacktestDays:7,useDefaults:true
 };
 export type ConversationTask=
  |{kind:'create';seed:string;asset?:string;venue?:Venue;name?:string}
  |{kind:'backtest';botId:string;botName:string}
  |{kind:'choose-robot';action:'edit'|'backtest'|'deploy'|'status'|'stop';robotIds:string[];question?:string};
-const venues:Venue[]=['propdao','hyperliquid','valr','ctrader'];
+const venues:Venue[]=['research','propdao','hyperliquid','valr','ctrader'];
 export function verifiedPreferences(raw:unknown):TradingPreferences{
  const o=raw&&typeof raw==='object'?raw as Record<string,unknown>:{};
  return {
@@ -30,7 +30,7 @@ export function parseMarket(text:string):string|null{
  return null;
 }
 export function parseVenue(text:string):Venue|null{
- const m=text.match(/\b(propdao|hyperliquid|valr|ctrader)\b/i)?.[1]?.toLowerCase();
+ const m=text.match(/\b(research|propdao|hyperliquid|valr|ctrader)\b/i)?.[1]?.toLowerCase();
  return m&&venues.includes(m as Venue)?m as Venue:null;
 }
 export function parseRobotName(text:string):string|null{

@@ -14,7 +14,11 @@ export class AlertHistory{
  bars=checkedBars([...seen.values()].sort((a,b)=>a.time-b.time),60);if(bars.length)await this.store.write(path,JSON.stringify({schema:1,source:'Dukascopy',day,priceBasis:'bid',bars,fetchedAt:Date.now()}));
  }finally{if(timer)clearTimeout(timer);}}
  const missingIntervals=1440-bars.length,seconds=ALERT_TF[timeframe],groups=new Map<number,AlertBar[]>();for(const b of bars){const t=Math.floor(b.time/seconds)*seconds;groups.set(t,[...(groups.get(t)||[]),b]);}
- const candles=[...groups.entries()].filter(([,items])=>items.length===seconds/60).map(([time,items])=>({time,open:items[0].open,high:Math.max(...items.map(b=>b.high)),low:Math.min(...items.map(b=>b.low)),close:items.at(-1)!.close}));
- return {source:'Dukascopy',asset:'XAUUSD',priceBasis:'bid',day,timeframe,candles,cached,missingIntervals,coverage:'Observed candles only. Missing minutes may reflect closures or data gaps; not filled.',estimate:true};
+ const candles=[...groups.entries()].filter(([,items])=>items.length===seconds/60).map(([time,items])=>({time,open:items[0].open,high:Math.max(...items.map(b=>b.high)),low:Math.min(...items.map(b=>b.low)),close:items.at(-1)!.close,volume:0}));
+ return {source:'Dukascopy',asset:'XAUUSD',priceBasis:'bid',volumeAvailable:false,day,timeframe,candles,cached,missingIntervals,coverage:'Observed candles only. Missing minutes may reflect closures or data gaps; not filled.',estimate:true};
  }
+ async ticks(day:string,hour:number){const start=Date.parse(day+'T00:00:00Z')+hour*3600000;if(!/^\d{4}-\d{2}-\d{2}$/.test(day)||!Number.isInteger(hour)||hour<0||hour>23||!Number.isFinite(start)||start+3600000>Date.now())throw Error('Choose a completed historical UTC hour');const key=`market-alert-history/v1/dukascopy/XAUUSD/ticks/${day}/${hour}.json`;const cached=await this.store.read(key);if(cached){const r=JSON.parse(cached);if(r.source==='Dukascopy'&&r.start===start&&Array.isArray(r.ticks))return r;}
+ const rows=await this.download({instrument:'xauusd',dates:{from:new Date(start),to:new Date(start+3600000)},timeframe:'tick',format:'json',volumes:false,useCache:false,retryCount:1,failAfterRetryCount:true,wafMode:'off'});const ticks=(rows as any[]).map(t=>({timestamp:t.timestamp,mid:(t.askPrice+t.bidPrice)/2})).filter(t=>t.timestamp>=start&&t.timestamp<start+3600000);let previous=0;for(const t of ticks){if(!Number.isSafeInteger(t.timestamp)||t.timestamp<previous||!Number.isFinite(t.mid)||t.mid<=0)throw Error('Invalid historical tick data');previous=t.timestamp;}if(ticks.length>15000)throw Error('Tick hour exceeds replay limit');const r={source:'Dukascopy',start,ticks};if(ticks.length)await this.store.write(key,JSON.stringify(r));return r;
+ }
+
 }
