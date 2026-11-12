@@ -427,7 +427,7 @@ const strategyReviews=new ReviewedStrategyUpdates({
 // Mission-critical source CRUD shares the exact existing owner and runtime
 // locks. The SDK can only create a PENDING review, never approve/apply it.
 async function approvedRobotDelete(uid:string,botId:string){
- await propdaoLiveService.assertDeletable(uid,botId);
+ await propdaoLiveService.retireSourceForDeletion(uid,botId);
  const valrGrant=await liveService.grant(uid);
  if(valrGrant?.botId===botId)await liveService.beforeKeyChange(uid);
  const owned=await marketplace.store.get(`users/${uid}/bots/${botId}`);
@@ -465,7 +465,7 @@ const robotCrud=new RobotCrudIntents({
  approvals:new ApprovalIntents(marketplace.store),
  store:marketplace.store,read:readR2Object,write:writeR2Object,remove:deleteR2Object,
  withLock:(uid,botId,run)=>valrExclusive(uid,()=>propBotExclusive(uid,botId,run)),
- assertDeletable:(uid,botId)=>propdaoLiveService.assertDeletable(uid,botId),
+ assertDeletable:(uid,botId)=>propdaoLiveService.assertDeletionReviewable(uid,botId),
  deleteOwned:approvedRobotDelete
 });
 app.get('/api/agent/capabilities',async(req,res)=>{
@@ -583,7 +583,7 @@ app.delete('/api/user-bots/:botId', async (req, res) => {
   try {
     if(!FirestoreStore.configured())throw Error('Cannot safely verify live bot state while account locking is unavailable.');
     await valrExclusive(uid,()=>propBotExclusive(uid,botId,async()=>{
-    await propdaoLiveService.assertDeletable(uid,botId);
+    await propdaoLiveService.retireSourceForDeletion(uid,botId);
     const grant=await liveService.grant(uid);if(grant?.botId===botId)await liveService.beforeKeyChange(uid);
     const prefix = `${userBotRoot(uid, botId)}/`;
     const keys = await listR2Objects(prefix, 1001);
@@ -595,7 +595,7 @@ app.delete('/api/user-bots/:botId', async (req, res) => {
   } catch (error) {
     console.error('Robot deletion failed', { botId, error });
     const message=error instanceof Error?error.message:'';
-    if(/Stop and reconcile|safely verify live bot state|Broker exposure is unknown or not flat/.test(message))return res.status(409).json({error:message});
+    if(/Stop and reconcile|safely verify live bot state|Broker exposure is unknown or not flat|runtime is not configured/.test(message))return res.status(409).json({error:message});
     return res.status(502).json({ error: 'Could not delete all robot files. Retry the deletion.' });
   }
 });
