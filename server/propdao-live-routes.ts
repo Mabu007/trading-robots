@@ -676,6 +676,8 @@ export class PropDAOLiveService{
   if(grant.revokedAt||Date.now()>=grant.expiresAt)throw Error('Live authorization expired');
   if(action==='snapshot')return this.deps.accounts.accountRisk(uid,grant.accountId);
   if(action==='execute'){
+   // Existing Workers may still be alive after the signal-first pivot. Fail closed on new entries.
+   if(process.env.VERCEL_ENV==='production'&&process.env.TRADING_VIBES_ENABLE_BROKER_TRADING!=='true')throw Error('New broker orders are paused in Signals mode. Stop and reconcile legacy bots.');
    if(!this.configured())throw Error('Live execution disabled');
    if(payload?.symbol!==grant.symbol||payload?.intentId!==`tv-${grant.id}-${payload?.candleClose}`)throw Error('Order does not match authorized strategy');
    return this.deps.accounts.executeOrder(uid,grant.accountId,{symbol:grant.symbol,side:payload.side,price:payload.price,stop:payload.stop,target:payload.target,leverage:grant.leverage,riskUsd:grant.riskUsd,riskReward:grant.riskReward??parseStrategyConfig(grant.code).riskReward,intentId:payload.intentId,quoteTime:payload.quoteTime});
