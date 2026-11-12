@@ -1,5 +1,5 @@
 import {describe,it,expect} from 'vitest';
-import {aggregateReplayBars,beginReplay,DEFAULT_REPLAY_COSTS,replayAdvance,replayClose,replayEMA,replayEnter,replayMetrics,replayStep,replayVisibleBars,validateReplayBars,type ReplayBar} from './market-replay-engine';
+import {aggregateReplayBars,beginReplay,DEFAULT_REPLAY_COSTS,replayAdvance,replayClose,replayEMA,replayEnter,replayMetrics,replayModifyPosition,replayStep,replayVisibleBars,validateReplayBars,type ReplayBar} from './market-replay-engine';
 const base=Date.parse('2026-11-06T08:00:00Z')/1000;
 const bars:ReplayBar[]=Array.from({length:9},(_,i)=>({time:base+i*60,open:4000,high:4001,low:3999,close:4000}));
 const costs={...DEFAULT_REPLAY_COSTS,spread:0,slippage:0,feePerOunce:0,leverage:20};
@@ -63,6 +63,19 @@ describe('market replay has no lookahead or broker execution',()=>{
   const short=replayEnter(beginReplay(sample,1),sample,'SELL',2,5,10,spreadCosts);
   expect(short.position?.entry).toBeCloseTo(3999.9);
   expect(replayClose(short,sample,spreadCosts).trades[0].exit).toBeCloseTo(4000.7);
+ });
+
+ it('only modifies protection using currently revealed prices, without retroactive fills',()=>{
+  const nextBar={time:base+120,open:4000,high:4004,low:3998,close:4003};
+  const input=[bars[0],bars[1],nextBar,bars[3]];
+  const opened=replayEnter(beginReplay(input,1,10000),input,'BUY',1,8,12,costs);
+  const revealed=replayStep(opened,input,costs);
+  expect(revealed.position).not.toBeNull();
+  const modified=replayModifyPosition(revealed,input,costs,4000,4012);
+  expect(modified.position).toMatchObject({stop:4000,target:4012});
+  expect(modified.trades).toHaveLength(0);
+  expect(()=>replayModifyPosition(revealed,input,costs,4004,4012)).toThrow(/stop below/);
+  expect(()=>replayModifyPosition(beginReplay(input,1),input,costs,4000,4010)).toThrow(/No open position/);
  });
  it('supports indicator overlays and aggregated chart data from visible candles only',()=>{
   const revealed=replayVisibleBars(bars,beginReplay(bars,6));
