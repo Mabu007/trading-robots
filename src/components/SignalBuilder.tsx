@@ -3,6 +3,8 @@ import {Activity,ArrowRight,Bell,Check,Clock3,Plus,RefreshCw,Trash2} from 'lucid
 import type {CloudClient} from '../firebase';
 import {sharingRequest} from './BotSharing';
 import {ALERT_TF,validateAlertRule,type AlertRule,type Condition} from '../../shared/market-alerts';
+import {readSignalDescription} from '../../shared/signal-description';
+export {readSignalDescription} from '../../shared/signal-description';
 import './signal-builder.css';
 
 type Saved={id:string;name:string;asset:string};
@@ -19,21 +21,6 @@ type Kind=typeof kinds[number]['value'];
 const isPrice=(kind:Kind)=>['above','below','touch'].includes(kind);
 const isRsi=(kind:Kind)=>kind.startsWith('rsi');
 const isRange=(kind:Kind)=>kind.includes('sweep')||kind.includes('break');
-export function readSignalDescription(text:string):{kind:Kind;value:number|null;timeframe:keyof typeof ALERT_TF;lookback:number}|null{
- const t=text.toLowerCase();
- if(!/\b(?:gold|xauusd|price|rsi|sweep|break|high|low)\b/.test(t))return null;
- const tf=(t.match(/\b(m1|m5|m15|m30|h1|h4|d1)\b/i)?.[1]?.toLowerCase()||'m5') as keyof typeof ALERT_TF;
- const lookback=Math.min(200,Math.max(2,Number(t.match(/(?:previous|last)\s+(\d{1,3})\s+(?:candles?|bars?)/)?.[1]||5)));
- if(/\bsweep(?:s|ing)?\b/.test(t))return {kind:/\b(?:low|lows|sellside|sell-side)\b/.test(t)?'sweep_low':'sweep_high',value:null,timeframe:tf,lookback};
- if(/\bbreak(?:s|out)?\b/.test(t)&&/\b(?:high|low|range)\b/.test(t))return {kind:/\b(?:low|lows|below)\b/.test(t)?'break_low':'break_high',value:null,timeframe:tf,lookback};
- const numeric=t.match(/\b(?:above|over|below|under|touch|touches|reaches|cross(?:es)?|at)\s+(?:price\s+)?(\d+(?:[.,]\d+)?)/);
- const rsi=/\brsi\b/.test(t);
- const rsiNumber=t.match(/\brsi\s*(?:14)?\s*(?:above|below|over|under|cross(?:es)?|at|[<>])\s*(\d+(?:\.\d+)?)/);
- const value=Number((rsiNumber?.[1]||numeric?.[1]||'').replace(',','.'));
- if(!Number.isFinite(value)||value<=0)return null;
- const below=/\b(?:below|under|drops?|falls?|down)\b/.test(t);
- return {kind:rsi?(below?'rsi_below':'rsi_above'):/\btouch(?:es)?\b/.test(t)?'touch':below?'below':'above',value,timeframe:tf,lookback};
-}
 export function SignalBuilder({client,active,bots=[],initialStrategyId='',initialDraftText='',onOpenApps,onViewHistory}:{
  client:CloudClient|null;active:boolean;bots?:Saved[];initialStrategyId?:string;initialDraftText?:string;onOpenApps:()=>void;onViewHistory:()=>void
 }){
