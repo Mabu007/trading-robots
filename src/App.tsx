@@ -654,7 +654,7 @@ function App(){
 
   if(command==='watch'&&(/\b(?:gold|xauusd|goldusdc)\b/i.test(message)||venue==='research')){if(!cloudClient)throw Error('Sign in to create signals');setSignalDraftText(message);setPrimaryArea('scheduled');const response=await sharingRequest<{text:string}>(cloudClient,'/api/market-alerts/describe','POST',{text:message});setChat([...next,{role:'assistant',content:response.text+'\n\nReview and backtest this setup in Trackers before activating Telegram notifications. No broker orders are placed.'}]);return;}
   if(command==='watch'){
-   if(/\btelegram\b/i.test(message)){setChat([...next,{role:'assistant',content:'Telegram delivery is paused. I can prepare a watch that records detections or summarizes them with OpenRouter.'}]);return;}
+   if(/\btelegram\b/i.test(message)){setPrimaryArea('scheduled');setChat([...next,{role:'assistant',content:'Connect Telegram under Apps and review your signal trackers. Only reviewed signal monitors can send notifications.'}]);return;}
    if(!cloudClient){setChat([...next,{role:'assistant',content:'Sign in to prepare a Code watcher.'}]);return;}
    const kind:AnalysisKind=matchingAnalysis?.kind||(/\b(sweep|liquidity)\b/i.test(message)?'liquidity_sweeps':'volatility_profile');
    const targetAsset=message.match(/\b([A-Z]{2,12}(?:USDC|USDT|ZAR|USD))\b/)?.[1]||matchingAnalysis?.asset||(/\bgold\b/i.test(message)?'GOLDUSDC':asset);
@@ -1422,8 +1422,7 @@ SAVED CODE CATALOGUE (user-owned names/metadata; load the exact source before de
   const saved=m.context!.data as BacktestCardData;
   const selected=cloudBots.find(bot=>bot.id===saved.botId);
    if(!selected)return;
-   if(selected.venue==='propdao'){setLibraryDeployment({bot:selected,riskPercent:1});return}
-   void sendChat('Prepare deployment for "'+saved.name+'".',undefined,false,{tool:'deploy',botId:saved.botId});
+   setSignalStrategyId(saved.botId);setPrimaryArea('scheduled');setSidebarOpen(false);
  }:undefined} onInspect={id=>void openSavedTradeInspection(m.context!.data as BacktestCardData,id)}/>}</div>{m.context&&m.context.kind!=='backtest-result'&&m.context.kind!=='market-analysis'&&<button type="button" className="chat-context-chip" onClick={()=>setContextModal(m.context!)}><Braces size={12}/>{m.context.label}</button>}{aiError&&i===chat.length-1&&m.role==='assistant'&&<button className="ai-retry-button" onClick={retryChat} disabled={!!busy}><RotateCcw size={12}/> Retry</button>}</div>)}{createError&&<button className="retry-generation" onClick={()=>void create(true)} disabled={!!busy}><RotateCcw size={12}/> Retry generation</button>}{chatRiskQuestion&&<AgentQuestionCard key={chatRiskQuestion.question.id} question={chatRiskQuestion.question}
   onAnswer={async answer=>{
    setChatRiskQuestion(null);
