@@ -15,7 +15,7 @@ describe('fresh on-demand news and calendar intelligence',()=>{
    make('Dollar and Fed news','https://news.example/usd','2026-11-12T10:00:00Z','Bloomberg'),
    make('Old gold report','https://news.example/old','2026-09-01T10:00:00Z')
   ],[]);
-  const result=await getMarketNews({symbol:'XAUUSD',topic:'gold',from:'2026-11-11',to:'2026-11-13',limit:8},fetcher as any,now);
+  const result=await getMarketNews({symbol:'GOLDUSDC',topic:'gold',from:'2026-11-11',to:'2026-11-13',limit:8},fetcher as any,now);
   expect(result.available).toBe(true);
   if(!result.available)throw Error('unavailable');
   expect(result.items).toHaveLength(2);
