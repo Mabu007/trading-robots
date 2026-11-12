@@ -52,6 +52,18 @@ describe('market replay has no lookahead or broker execution',()=>{
   const metrics=replayMetrics(closed,bars,costs);
   expect(metrics.trades).toBe(1);expect(metrics.winRate).toBe(0);expect(metrics.returnPercent).toBe(0);
  });
+ it('uses Dukascopy bid as the chart price and charges spread when buying at estimated ask',()=>{
+  const sample=[bars[0],bars[1],{time:base+120,open:4000,high:4001,low:3999,close:4000}];
+  const spreadCosts={...costs,spread:0.6,slippage:0.1,feePerOunce:0.05};
+  const long=replayEnter(beginReplay(sample,1),sample,'BUY',2,5,10,spreadCosts);
+  expect(long.position?.entry).toBeCloseTo(4000.7);
+  const completed=replayClose(long,sample,spreadCosts);
+  expect(completed.trades[0].exit).toBeCloseTo(3999.9);
+  expect(completed.trades[0].net).toBeCloseTo(-1.8);
+  const short=replayEnter(beginReplay(sample,1),sample,'SELL',2,5,10,spreadCosts);
+  expect(short.position?.entry).toBeCloseTo(3999.9);
+  expect(replayClose(short,sample,spreadCosts).trades[0].exit).toBeCloseTo(4000.7);
+ });
  it('supports indicator overlays and aggregated chart data from visible candles only',()=>{
   const revealed=replayVisibleBars(bars,beginReplay(bars,6));
   const aggregated=aggregateReplayBars(revealed,5);
