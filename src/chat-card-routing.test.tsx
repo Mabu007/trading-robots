@@ -22,9 +22,9 @@ describe('question-intent evidence cards',()=>{
    desk,env,trace('getRobotContextCard')])).toBe('robot');
   expect(selectChatCard('ai 2 robot losses and stop-out investigation',[desk,env])).toBe('robot');
  });
- it('uses the desk only for a portfolio/account-wide question',()=>{
-  expect(selectChatCard('Why are we losing trades today across my accounts?',[desk])).toBe('desk');
-  expect(selectChatCard('Show the entire account trading desk',[desk])).toBe('desk');
+ it('never injects a broker desk card into signal-first chats',()=>{
+  expect(selectChatCard('Why are we losing trades today across my accounts?',[desk])).toBe('none');
+  expect(selectChatCard('Show the entire account trading desk',[desk])).toBe('none');
  });
  it('routes reference-market questions to market data rather than account P/L',()=>{
   expect(selectChatCard('What are the gold market conditions?',[

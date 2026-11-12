@@ -2,6 +2,7 @@ import {useEffect,useState} from 'react';
 import type {CloudClient} from '../firebase';
 import {sharingRequest} from './BotSharing';
 import {Dialog} from './Dialog';
+const DEFAULT_MODEL='baidu/ernie-5.5-flash-preview:free';
 import './marketplace.css';
 
 type Model={id:string;name:string;pricing:{prompt:string;completion:string}};
@@ -9,7 +10,7 @@ export function OpenRouterDialog({client,onClose}:{client:CloudClient;onClose:()
  const [spending,setSpending]=useState<{limit:number|null;remaining:number|null;usage:number|null;settingsUrl:string}|null>(null);
  const [models,setModels]=useState<Model[]>([]),[model,setModel]=useState(''),[connected,setConnected]=useState(false),[busy,setBusy]=useState(true),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const [apiKey,setApiKey]=useState(''),[showKey,setShowKey]=useState(false);
- useEffect(()=>{let active=true;Promise.all([sharingRequest<{models:Model[]}>(client,'/api/openrouter/models'),sharingRequest<{connected:boolean;model?:string}>(client,'/api/openrouter/account'),sharingRequest<any>(client,'/api/openrouter/spending').catch(()=>null)]).then(([list,status,usage])=>{if(!active)return;setModels(list.models);setConnected(status.connected);setModel(status.model||list.models.find(m=>m.id.endsWith(':free'))?.id||list.models[0]?.id||'');if(usage?.connected)setSpending(usage)}).catch(e=>{if(active)setError(e instanceof Error?e.message:'Could not load AI settings.')}).finally(()=>{if(active)setBusy(false)});return()=>{active=false}},[client]);
+ useEffect(()=>{let active=true;Promise.all([sharingRequest<{models:Model[]}>(client,'/api/openrouter/models'),sharingRequest<{connected:boolean;model?:string}>(client,'/api/openrouter/account'),sharingRequest<any>(client,'/api/openrouter/spending').catch(()=>null)]).then(([list,status,usage])=>{if(!active)return;setModels(list.models);setConnected(status.connected);setModel(status.connected&&status.model?status.model:list.models.some(m=>m.id===DEFAULT_MODEL)?DEFAULT_MODEL:list.models.find(m=>m.id.endsWith(':free'))?.id||list.models[0]?.id||'');if(usage?.connected)setSpending(usage)}).catch(e=>{if(active)setError(e instanceof Error?e.message:'Could not load AI settings.')}).finally(()=>{if(active)setBusy(false)});return()=>{active=false}},[client]);
  const action=async(path:string,body:object)=>{
   setBusy(true);setError('');setNotice('');
   try{

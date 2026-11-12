@@ -676,6 +676,8 @@ export class PropDAOLiveService{
   if(grant.revokedAt||Date.now()>=grant.expiresAt)throw Error('Live authorization expired');
   if(action==='snapshot')return this.deps.accounts.accountRisk(uid,grant.accountId);
   if(action==='execute'){
+   // Existing Workers may still be alive after the signal-first pivot. Fail closed on new entries.
+   if(process.env.VERCEL_ENV==='production')throw Error('New broker orders are paused in Signals mode. Stop and reconcile legacy bots.');
    if(!this.configured())throw Error('Live execution disabled');
    if(payload?.symbol!==grant.symbol||payload?.intentId!==`tv-${grant.id}-${payload?.candleClose}`)throw Error('Order does not match authorized strategy');
    return this.deps.accounts.executeOrder(uid,grant.accountId,{symbol:grant.symbol,side:payload.side,price:payload.price,stop:payload.stop,target:payload.target,leverage:grant.leverage,riskUsd:grant.riskUsd,riskReward:grant.riskReward??parseStrategyConfig(grant.code).riskReward,intentId:payload.intentId,quoteTime:payload.quoteTime});
@@ -704,8 +706,12 @@ export function propDAOLiveRoutes(app:Express,deps:Dependencies){
  });
  app.get('/api/venues/propdao/bots/:botId/live',route((uid,id,req)=>service.status(uid,id,typeof req.query.accountId==='string'?req.query.accountId:undefined)));
  app.get('/api/venues/propdao/bots/:botId/live/market',route((uid,id)=>service.market(uid,id)));
- app.post('/api/venues/propdao/bots/:botId/live/review',route((uid,id,req)=>deps.exclusive?deps.exclusive(uid,id,()=>service.review(uid,id,req)):service.review(uid,id,req)));
+ app.post('/api/venues/propdao/bots/:botId/live/review',route((uid,id,req)=>{
+  if(process.env.VERCEL_ENV==='production')throw Error('Broker trade deployment is paused. Use signal trackers instead.');
+  return deps.exclusive?deps.exclusive(uid,id,()=>service.review(uid,id,req)):service.review(uid,id,req);
+ }));
  app.post('/api/venues/propdao/bots/:botId/live',route((uid,id,req)=>{
+  if(process.env.VERCEL_ENV==='production'&&['deploy','resume'].includes(req.body?.action))throw Error('Broker trade execution is paused. Existing deployments can still be stopped and reconciled.');
   const work=()=>req.body?.action==='deploy'?service.deploy(uid,id,req):req.body?.action==='stop'?service.stop(uid,id,req):req.body?.action==='pause'?service.pause(uid,id,req):req.body?.action==='resume'?service.resume(uid,id,req):req.body?.action==='reconcile'?service.reconcile(uid,id,req):Promise.reject(Error('Unknown action'));
   return deps.exclusive?deps.exclusive(uid,id,work):work();
  }));
