@@ -465,6 +465,25 @@ export class PropDAOLiveService{
    source:'Per-robot Cloudflare Durable Objects and legacy account runtime',
    caveat:'Signals and submissions are not broker fills. Confirm live exposure and closed trades using PropDAO.'};
  }
+ /** Deleting a saved strategy is not a broker-exposure operation. Preserve the grant/ledger
+  * and revoke new orders before removing the R2 source. This does not close positions. */
+ async retireSourceForDeletion(uid:string,botId:string){
+  const grant=await this.grant(uid,botId);
+  if(!grant)return {authorizationRevoked:true,hadGrant:false,runtimeStopped:null};
+  if(!grant.revokedAt){
+   await this.deps.write(this.key(uid,botId),JSON.stringify({...grant,revokedAt:Date.now()}));
+  }
+  // A dead/old Worker must not hold the user's source hostage. Production's provider
+  // rejects new execution regardless; retain the grant for later broker reconciliation.
+  let runtimeStopped:boolean|null=null;
+  try{const stopped=await this.runtime(grant,'stop',{},8000);runtimeStopped=stopped?.running===false}
+  catch{runtimeStopped=null}
+  return {authorizationRevoked:true,hadGrant:true,runtimeStopped,
+   accountId:grant.accountId,needsBrokerReview:runtimeStopped!==true};
+ }
+ async assertDeletionReviewable(uid:string,botId:string){
+  await this.grant(uid,botId); // Validates ownership; no broker-flat condition.
+ }
  async assertDeletable(uid:string,botId:string){
   const grant=await this.grant(uid,botId);
   if(!grant)return;

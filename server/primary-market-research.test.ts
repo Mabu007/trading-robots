@@ -16,5 +16,6 @@ it('keeps market levels and data-quality warnings while hiding the vendor from c
  expect(result.context).toContain('3953.961');
  expect(result.context).toContain('61.8');
  expect(result.context).not.toMatch(/BiQuote|Primary live source:/i);
- expect(result.context).toMatch(/not a broker-executable quote/);
+ expect(result.context).not.toContain('broker-executable quote');
+ expect(result.context).toContain('Gold market intelligence');
 });

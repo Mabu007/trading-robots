@@ -1,11 +1,16 @@
-/** Default Gold research to BiQuote, preserving explicitly requested venues. */
+/** Spot Gold context is composed from fresh completed candles and on-demand macro context. */
 export function usePrimaryGoldResearch(question:string,asset?:string|null){
  return !/\b(?:hyperliquid|propdao|xyz:gold)\b/i.test(question) && (/\b(?:gold|xauusd|goldusdc)\b/i.test(question)||['XAUUSD','GOLDUSDC'].includes((asset||'').toUpperCase()));
 }
-export async function primaryGoldResearch(read:()=>Promise<any>){
- const market=await read();
- // Keep the feed identity in the server-side market receipt, not in the LLM-facing prose.
+export async function primaryGoldResearch(read:()=>Promise<any>,readMacro?:()=>Promise<any>){
+ const [market,macro]=await Promise.all([read().catch((error:unknown)=>({available:false,reason:error instanceof Error?error.message:'Gold market unavailable'})),readMacro?readMacro().catch(()=>null):Promise.resolve(null)]);
  const {source:_internalSource,provider:_internalProvider,...facts}=market&&typeof market==='object'?market:{available:false,reason:'Market snapshot unavailable'};
- if(typeof facts.reason==='string')facts.reason=facts.reason.replace(/\bbiquote\b/gi,'market-data feed');
- return {context:'Gold XAUUSD completed-candle market facts (a market reference, not a broker-executable quote). Explain regime, volatility and useful levels naturally. Do not mention internal market-data suppliers or append a routine research note. Volume, liquidity, broker fills and robot filter passes are not verified by this snapshot; flag missing or stale evidence when it changes the conclusion. Facts: '+JSON.stringify(facts),hasNews:false,hasCandles:market?.available===true,hasQuote:false,hasVolume:false,hasTrades:false,snapshotOnly:true,chart:null,sources:[],quote:null,volume:null,trades:null};
+ if(typeof facts.reason==='string')facts.reason=facts.reason.replace(/\bbiquote\b/gi,'market feed');
+ const news=macro?.news?.available?macro.news.items:null,calendar=macro?.calendar?.available?macro.calendar.items:null;
+ const evidence={asOf:new Date().toISOString(),market:facts,
+  ...(news?{newsHeadlines:news,newsAsOf:macro.news.asOf}:{}),
+  ...(calendar?{macroEvents:calendar,calendarAsOf:macro.calendar.asOf}:{})};
+ return {context:'Gold market intelligence. Explain price structure, momentum, volatility, important headlines and coming macro releases naturally. Distinguish observed movement from possible drivers; headlines alone cannot establish causality. Mention data gaps only when material and never append a standard disclaimer or vendor label. Give source links and UTC event/news times when helpful. Evidence: '+JSON.stringify(evidence),
+  hasNews:!!news?.length,hasCandles:market?.available===true,hasQuote:false,hasVolume:false,hasTrades:false,snapshotOnly:true,chart:null,
+  sources:news?.map((x:any)=>({url:x.url,title:x.title,publishedAt:x.publishedAt}))||[],quote:null,volume:null,trades:null};
 }
