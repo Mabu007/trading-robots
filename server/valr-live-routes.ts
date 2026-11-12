@@ -52,7 +52,7 @@ export class ValrLiveService{
  if(o?.pair!==g.pair)throw Error('Live market authorization mismatch');
  if(action==='snapshot'){await this.accounts.inspect(credentials);return exchange.snapshot(g.pair);}
  if(o?.botId!==g.botId)throw Error('Live bot authorization mismatch');
- if(action==='entry'){if(!this.enabled()||!this.allowedKey(g.keyId))throw Error('Live entries are disabled');validateLiveGrant(g,Date.now());await this.accounts.inspect(credentials);if(!Number.isSafeInteger(o.expiresAt)||Date.now()>o.expiresAt)throw Error('Live entry deadline expired');return exchange.limitBuy(g.pair,o.quantity,o.limitPrice,o.entryId);}
+ if(action==='entry'){if(process.env.VERCEL_ENV==='production'&&process.env.TRADING_VIBES_ENABLE_BROKER_TRADING!=='true')throw Error('New broker orders are paused in Signals mode.');if(!this.enabled()||!this.allowedKey(g.keyId))throw Error('Live entries are disabled');validateLiveGrant(g,Date.now());await this.accounts.inspect(credentials);if(!Number.isSafeInteger(o.expiresAt)||Date.now()>o.expiresAt)throw Error('Live entry deadline expired');return exchange.limitBuy(g.pair,o.quantity,o.limitPrice,o.entryId);}
  if(action==='entrySummary')return exchange.orderSummary(o.entryId);
  if(action==='protection')return exchange.spotProtection(g.pair,o.protectableQuantity,o.stopLoss,o.takeProfit,o.protectionId);
  if(action==='protectionStatus')return exchange.protectionStatus(g.pair,o.protectionId,o.protectionOrderId);
