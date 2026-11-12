@@ -61,8 +61,8 @@ export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, 
   const endpoint = `/api/user-bots/${encodeURIComponent(id)}`;
   const lockedIdentity = Boolean(savedBot);
   const currentRun = Boolean(run && run.strategyCode === code && run.venue === venue && run.asset === asset);
-  const canReview = Boolean(savedBot && sourceReady && savedCode === code && workbenchDeployable(venue)
-    && (venue !== 'propdao' || (runSaved && currentRun)));
+  const canReview = Boolean(savedBot && sourceReady && savedCode === code &&
+    (venue === 'research' || workbenchDeployable(venue)) && runSaved && currentRun);
 
   useEffect(() => {
     if (bot?.storageKey || venue === 'ctrader') return;
