@@ -154,14 +154,14 @@ export function AgentLibrary({ mode='strategies', bots, current, runtime, search
   </section>;
 }
 
-export function YouHub({ onAISettings, onBroker }: {
-  onAISettings: () => void; onBroker: () => void;
+export function YouHub({ onAISettings, onTelegram }: {
+  onAISettings: () => void; onBroker?: () => void; onTelegram: () => void;
 }) {
   return <section className="tv-destination tv-you-hub" aria-labelledby="tv-apps-title">
-    <header className="tv-destination-heading"><div><span className="tv-destination-kicker"><Plug size={15}/> CONNECTED APPS</span><h1 id="tv-apps-title">Apps</h1><p>Connect the AI and broker services Trading Vibes can use on your behalf.</p></div></header>
+    <header className="tv-destination-heading"><div><span className="tv-destination-kicker"><Plug size={15}/> CONNECTED APPS</span><h1 id="tv-apps-title">Apps</h1><p>Connect AI and Telegram notifications. Broker order execution is paused while we focus on signals.</p></div></header>
     <div className="tv-you-list tv-app-connections">
       <button type="button" onClick={onAISettings}><span><Sparkles size={18}/></span><span><strong>OpenRouter AI</strong><small>Connect your account, choose a model and manage spending limits</small></span><ArrowRight size={15}/></button>
-      {([['propdao','PropDAO','Connect your PropDAO developer key'],['ctrader','cTrader','Connect your cTrader ID'],['valr','VALR','Connect your VALR account']] as const).map(([id,label,description])=><button type="button" key={id} disabled={id!=='propdao'} onClick={onBroker}><span><Wallet size={18}/></span><span><strong>{label}</strong><small>{description}</small></span>{id==='propdao'?<ArrowRight size={15}/>:<span className="tv-paused-label">Paused</span>}</button>)}
+      <button type="button" onClick={onTelegram}><span><Plug size={18}/></span><span><strong>Telegram</strong><small>Connect your own bot and get notified when a tracked setup appears</small></span><ArrowRight size={15}/></button>
       
     </div>
   </section>;
