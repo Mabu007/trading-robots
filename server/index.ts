@@ -1,3 +1,4 @@
+import {usePrimaryGoldResearch,primaryGoldResearch} from './primary-market-research.ts';
 import {marketAlertRoutes} from './market-alert-service.ts';
 import {AlertHistory} from './alert-history.ts';
 import {vibesPersona,vibesResearchStyle} from '../shared/vibes-persona.ts';
@@ -593,7 +594,7 @@ app.delete('/api/user-bots/:botId', async (req, res) => {
   } catch (error) {
     console.error('Robot deletion failed', { botId, error });
     const message=error instanceof Error?error.message:'';
-    if(/Stop and reconcile|safely verify live bot state/.test(message))return res.status(409).json({error:message});
+    if(/Stop and reconcile|safely verify live bot state|Broker exposure is unknown or not flat/.test(message))return res.status(409).json({error:message});
     return res.status(502).json({ error: 'Could not delete all robot files. Retry the deletion.' });
   }
 });
@@ -822,7 +823,7 @@ app.post('/api/ai', async (req, res) => {
   if(researchMode){
     const sanitizePublicQuestion=(value:string)=>value.replace(/https?:\/\/\S+|[\w.+-]+@[\w.-]+\.\w+|sk-[a-z0-9-]+|\b[a-f0-9]{40,}\b/gi,'').slice(0,950);
     const latestQuestion=(referentialFollowup&&earlierPublicQuestion?'Previous public research topic: '+sanitizePublicQuestion(String(earlierPublicQuestion.content))+'\nFollow-up: ':'')+sanitizePublicQuestion(String(lastUser.content));
-    const evidence=await researchBrief({query:latestQuestion,asset:selectedAsset},{market:venueMarketData,book:getHyperliquidBook,trades:getHyperliquidTradeSummary});
+    const evidence=usePrimaryGoldResearch(latestQuestion,selectedAsset)?await primaryGoldResearch(()=>marketAlertService.market()):await researchBrief({query:latestQuestion,asset:selectedAsset},{market:venueMarketData,book:getHyperliquidBook,trades:getHyperliquidTradeSummary});
     publicEvidence=evidence;
     // Do not forward proprietary strategy source, broker data, previous
     // messages or personal account context to external web search.
@@ -1015,7 +1016,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
   if(researchMode){
     const sanitizePublicQuestion=(value:string)=>value.replace(/https?:\/\/\S+|[\w.+-]+@[\w.-]+\.\w+|sk-[a-z0-9-]+|\b[a-f0-9]{40,}\b/gi,'').slice(0,950);
     const latestQuestion=(referentialFollowup&&earlierPublicQuestion?'Previous public research topic: '+sanitizePublicQuestion(String(earlierPublicQuestion.content))+'\nFollow-up: ':'')+sanitizePublicQuestion(String(lastUser.content));
-    const evidence=officialResearch?{context:'Use the finance source directory and public page fetch. Cite exact period, units and source, and say when a dataset requires credentials or is inaccessible.',hasQuote:false,hasCandles:false,hasNews:false,hasVolume:false,hasTrades:false,snapshotOnly:false,chart:null,sources:[],quote:null,volume:null,trades:null}:await researchBrief({query:latestQuestion,asset:selectedAsset},{
+    const evidence=officialResearch?{context:'Use the finance source directory and public page fetch. Cite exact period, units and source, and say when a dataset requires credentials or is inaccessible.',hasQuote:false,hasCandles:false,hasNews:false,hasVolume:false,hasTrades:false,snapshotOnly:false,chart:null,sources:[],quote:null,volume:null,trades:null}:usePrimaryGoldResearch(latestQuestion,selectedAsset)?await primaryGoldResearch(()=>marketAlertService.market()):await researchBrief({query:latestQuestion,asset:selectedAsset},{
       market:venueMarketData,book:getHyperliquidBook,trades:getHyperliquidTradeSummary,request:(input,init)=>fetch(input,{...init,signal:AbortSignal.any([clientAbort.signal,...(init?.signal?[init.signal]:[])])})
     });
     publicEvidence=evidence;
