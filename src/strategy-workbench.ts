@@ -28,7 +28,7 @@ export function validateWorkbenchSource(code: string) {
 }
 
 export async function strategyMarkets(venue: Venue, signal: AbortSignal) {
-  const endpoint = venue === 'valr' ? '/api/valr/markets' : `/api/venues/${venue}/markets`;
+  const endpoint = '/api/venues/research/markets';
   const response = await fetch(endpoint, {signal});
   const {markets} = await readApiJson<{markets: {symbol: string}[]}>(response, 'Venue markets');
   return markets.map(market => market.symbol);
@@ -52,13 +52,14 @@ export async function simulateWorkbench(input: {venue: Venue; asset: string; str
   signal: AbortSignal, onProgress: (message: string) => void): Promise<StrategyRun> {
   const config = validateWorkbenchSource(input.strategyCode);
   const {start, end} = backtestRange(input.from, input.to, config.timeframes);
+  if(!['XAUUSD','GOLDUSDC'].includes(input.asset))throw Error('Dukascopy strategy backtesting currently supports Gold/XAUUSD.');
   const candles: Record<string, Candle[]> = {};
   const sources = new Set<string>();
   const notes: string[] = [];
   for (const timeframe of config.timeframes) {
     onProgress(`Loading ${input.asset} ${timeframe.toUpperCase()} candles…`);
     const data = await historicalData({
-      venue: input.venue, asset: input.asset, timeframe,
+      venue: 'research', asset: 'XAUUSD', timeframe,
       from: new Date(start - 200 * TF_SECONDS[timeframe] * 1000).toISOString(),
       to: new Date(end - 1000).toISOString(),
     }, signal, () => onProgress('Market data rate limit reached. Waiting to retry…'));
