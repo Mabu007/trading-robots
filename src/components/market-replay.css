@@ -78,3 +78,11 @@
 @media(max-width:850px){.tv-replay-grid{grid-template-columns:1fr}.tv-replay-ticket-inputs{grid-template-columns:repeat(3,minmax(0,1fr))}.tv-replay-setup{grid-template-columns:1fr}.tv-replay-setup-main{padding:10px}.tv-replay-setup-aside{display:none}.tv-replay-chart{height:340px;min-height:300px}}
 @media(max-width:560px){.tv-replay-backdrop{padding:0}.tv-replay-modal,.tv-replay-modal.is-expanded{max-height:100dvh;height:100dvh;border-radius:0;border:0}.tv-replay-top{padding:11px 13px}.tv-replay-top h2{font-size:16px}.tv-replay-top h2 span{font-size:10px;display:block}.tv-replay-setup{padding:17px}.tv-replay-setup-main{padding:9px 0}.tv-replay-setup-fields{grid-template-columns:1fr}.tv-replay-terminal{padding:0 9px 14px}.tv-replay-market-stats{gap:13px}.tv-replay-market-stats strong{font-size:12px}.tv-replay-market-stats>div{text-align:left}.tv-replay-chart{height:300px;min-height:270px}.tv-replay-ticket-inputs{grid-template-columns:1fr 1fr}.tv-replay-stats{grid-template-columns:1fr 1fr}.tv-replay-review{padding:12px}.tv-replay-ticket{padding:14px}.tv-replay-chart-controls{width:100%}.tv-replay-chart-heading{padding:10px}.tv-replay-marketbar{align-items:flex-start}}
 @media(prefers-reduced-motion:reduce){.tv-replay-modal *{transition:none!important;animation:none!important}}
+
+/* Position management is intentionally visible beside the open trade, not hidden in settings. */
+.tv-replay-edit-position{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.tv-replay-edit-position label{display:flex;flex-direction:column;gap:5px;color:var(--tv-shell-muted);font-size:10px;font-weight:650}
+.tv-replay-edit-position input{box-sizing:border-box;width:100%;min-width:0;min-height:36px;padding:8px;border-radius:9px;border:1px solid var(--tv-shell-line);background:var(--tv-shell-panel-muted);color:var(--tv-shell-ink);font-size:12px}
+.tv-replay-position-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.tv-replay-position-actions button{min-height:38px;padding:8px 6px;border-radius:9px;border:1px solid var(--tv-shell-line);background:var(--tv-shell-panel-muted);color:var(--tv-shell-ink);font-size:10px;font-weight:650;cursor:pointer}
+.tv-replay-position-actions button:hover{background:var(--tv-shell-hover)}
