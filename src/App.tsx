@@ -560,7 +560,7 @@ function App(){
   let referenced=requestedBot?{bot:requestedBot,confidence:'exact' as const}:requestedCode?null:named??(subject?{bot:subject,confidence:'unique' as const}:null);
   const tradingDeskQuestion=false; // Signal-first: no automatic broker-account digressions.
   const matchingAnalysis=codeAnalyses.find(a=>message.toLowerCase().includes(a.name.toLowerCase()));
-  const directWatch=/\b(track|monitor|watch|notify|alert)\b/i.test(message)&&/\b(sweep|liquidity|volatility|atr)\b/i.test(message);
+  const directWatch=/\b(track|monitor|watch|notify|alert|ping|signal)\b/i.test(message)&&/\b(gold|xauusd|goldusdc|sweep|liquidity|volatility|atr|break|above|below|ema|rsi|price|touch|cross|setup)\b/i.test(message);
   const directMarketAnalysis=(/\b(liquidity sweeps?|volatility profile|market volatility|atr\s*14|volatility of)\b/i.test(message)&&/\b(how many|today|yesterday|last|what|show|scan|calculate|run|check|analy[sz]e|find|count|profile)\b/i.test(message))||Boolean(matchingAnalysis&&/\b(run|execute|scan|check|analy[sz]e|calculate)\b/i.test(message));
   setBusy('chat');
   try{
