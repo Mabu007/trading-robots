@@ -792,7 +792,7 @@ function App(){
     return;
    }
     if(command!=='deploy'&&command!=='stop')return;
-    if(command==='deploy'){setAssistantTask(null);setSignalStrategyId(referenced?.bot?.id||draftId);setPrimaryArea('scheduled');setChat([...next,{role:'assistant',content:'Broker deployment is paused. Open Trackers to review this strategy as a signal monitor. BUY and SELL become Telegram notifications, never orders.'}]);return;}
+    if(String(command)==='deploy'){setAssistantTask(null);setSignalStrategyId(referenced?.bot?.id||draftId);setPrimaryArea('scheduled');setChat([...next,{role:'assistant',content:'Broker deployment is paused. Open Trackers to review this strategy as a signal monitor. BUY and SELL become Telegram notifications, never orders.'}]);return;}
     if(command==='deploy'&&referenced?.bot){
      const bot=referenced.bot;
      if(bot.venue==='propdao'){
