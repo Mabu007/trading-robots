@@ -1,0 +1,36 @@
+.tv-telegram-settings{box-sizing:border-box;max-width:1000px;margin:24px auto 50px;padding:clamp(16px,2.6vw,32px);color:var(--tv-shell-ink)}
+.tv-telegram-header{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding-bottom:22px;border-bottom:1px solid var(--tv-shell-line)}
+.tv-telegram-icon{width:52px;height:52px;flex:none;display:grid;place-items:center;border-radius:15px;background:var(--tv-shell-panel-muted);color:var(--tv-shell-accent);border:1px solid var(--tv-shell-line)}
+.tv-telegram-header>div{flex:1;min-width:200px}.tv-telegram-kicker{font-size:10px;letter-spacing:.12em;font-weight:750;color:var(--tv-shell-accent)}
+.tv-telegram-settings h2{margin:6px 0 4px;font-size:25px;letter-spacing:-.03em}.tv-telegram-settings h3{margin:0 0 6px;font-size:15px;font-weight:670}
+.tv-telegram-settings p{color:var(--tv-shell-muted);font-size:12px;line-height:1.6;margin:0}
+.tv-telegram-settings a,.tv-telegram-settings button{font:inherit;cursor:pointer}
+.tv-telegram-settings button:disabled{cursor:not-allowed;opacity:.5}
+.tv-telegram-refresh,.tv-telegram-secondary,.tv-telegram-link,.tv-telegram-danger{display:inline-flex;align-items:center;gap:7px;padding:10px 13px;min-height:39px;box-sizing:border-box;border:1px solid var(--tv-shell-line);background:var(--tv-shell-panel-muted);color:var(--tv-shell-ink);border-radius:10px;font-size:12px;font-weight:650;text-decoration:none}
+.tv-telegram-link{margin-top:15px;background:var(--tv-shell-panel);width:max-content;max-width:100%}.tv-telegram-refresh:hover,.tv-telegram-secondary:hover,.tv-telegram-link:hover{background:var(--tv-shell-hover)}
+.tv-telegram-status{display:flex;gap:13px;align-items:center;margin:21px 0;padding:17px 20px;border:1px solid var(--tv-shell-line);border-radius:13px;background:var(--tv-shell-panel-muted)}
+.tv-telegram-status>span{display:grid;place-items:center;width:35px;height:35px;border-radius:50%;color:var(--tv-shell-muted);background:var(--tv-shell-panel);flex:none}
+.tv-telegram-status.is-connected>span{color:#199b65;background:#199b651b}
+.tv-telegram-status strong{font-size:13px}.tv-telegram-status p{margin-top:4px}
+.tv-telegram-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.tv-telegram-card{box-sizing:border-box;min-width:0;padding:22px;border:1px solid var(--tv-shell-line);border-radius:16px;background:var(--tv-shell-panel)}
+.tv-telegram-step-head{display:flex;align-items:flex-start;gap:11px}
+.tv-telegram-step-number{display:grid;place-items:center;width:30px;height:30px;flex:none;border-radius:10px;background:var(--tv-shell-panel-muted);color:var(--tv-shell-accent);font-size:12px;font-weight:750}
+.tv-telegram-primary{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:42px;box-sizing:border-box;background:var(--tv-shell-ink);color:var(--tv-shell-panel);border:1px solid var(--tv-shell-ink);border-radius:10px;padding:10px 14px;font-size:12px;font-weight:650;text-decoration:none}
+.tv-telegram-primary:hover{opacity:.87}
+.tv-telegram-form,.tv-telegram-connect-chat{display:flex;flex-direction:column;gap:12px;margin-top:18px}
+.tv-telegram-form>label:first-child{font-size:12px;font-weight:650}
+.tv-telegram-token{display:flex;align-items:center;border:1px solid var(--tv-shell-line);border-radius:11px;background:var(--tv-shell-panel-muted)}
+.tv-telegram-token:focus-within{border-color:var(--tv-shell-accent)}
+.tv-telegram-token input{min-width:0;width:100%;padding:11px 12px;border:0;outline:0;background:transparent;color:var(--tv-shell-ink);font:inherit;font-size:12px}
+.tv-telegram-icon-button{display:grid;place-items:center;border:0;background:transparent;color:var(--tv-shell-muted);width:36px;height:36px}
+.tv-telegram-checkbox{display:flex;align-items:flex-start;gap:9px;font-size:11px;line-height:1.5;color:var(--tv-shell-muted)}
+.tv-telegram-checkbox input{width:16px;height:16px;accent-color:var(--tv-shell-accent);flex:none;margin:0}
+.tv-telegram-connected{display:flex;align-items:center;gap:8px;margin-top:18px;padding:12px;border-radius:10px;background:var(--tv-shell-panel-muted);font-size:12px;color:var(--tv-shell-accent);overflow-wrap:anywhere}
+.tv-telegram-footer{display:flex;gap:9px;align-items:center;color:var(--tv-shell-accent);margin:20px 0}
+.tv-telegram-advanced{margin-top:18px;border-top:1px solid var(--tv-shell-line);padding-top:18px;color:var(--tv-shell-muted);font-size:12px}
+.tv-telegram-advanced summary{cursor:pointer}.tv-telegram-advanced>div{display:flex;flex-wrap:wrap;gap:9px;margin-top:12px}
+.tv-telegram-danger{color:#d45b5b;border-color:color-mix(in srgb,#d45b5b 35%,var(--tv-shell-line))}
+.tv-telegram-error{color:#d45b5b!important;margin-top:13px!important}.tv-telegram-notice{color:var(--tv-shell-accent)!important;margin-top:13px!important}
+@media(max-width:880px){.tv-telegram-steps{grid-template-columns:1fr}.tv-telegram-card{padding:20px}}
+@media(max-width:560px){.tv-telegram-header{align-items:flex-start}.tv-telegram-refresh{width:100%;justify-content:center}.tv-telegram-settings{padding:16px}}
