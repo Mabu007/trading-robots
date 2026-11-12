@@ -1,7 +1,6 @@
 import type {ToolTrace} from './tool-trace.ts';
-import {wantsLiveTradeEvidence} from './live-trade-intent.ts';
 import {wantsRobotEnvironment} from './robot-environment-intent.ts';
-export type ChatCardKind='robot'|'desk'|'market'|'none';
+export type ChatCardKind='robot'|'market'|'none';
 export function selectChatCard(question:string,trace:ToolTrace[]):ChatCardKind{
  const completed=(name:string)=>trace.some(t=>t.state==='completed'&&t.name===name);
  const hasReview=trace.some(t=>t.state==='completed'&&
@@ -14,8 +13,6 @@ export function selectChatCard(question:string,trace:ToolTrace[]):ChatCardKind{
    (completed('discoverRunningPropDAORobots')||completed('getPropDAORobotOperations')||
     completed('getRunningPropDAORobotEnvironment')))
   return 'robot';
- if(completed('getTradingDeskToday')&&(wantsLiveTradeEvidence(question)||
-  /\b(?:trading desk|account activity|portfolio|all accounts|all trades)\b/i.test(question)))return 'desk';
  if(completed('getCurrentMarketConditions'))return 'market';
  return 'none';
 }

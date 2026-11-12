@@ -2,6 +2,7 @@ import {usePrimaryGoldResearch,primaryGoldResearch} from './primary-market-resea
 import {marketAlertRoutes} from './market-alert-service.ts';
 import {AlertHistory} from './alert-history.ts';
 import {vibesPersona,vibesResearchStyle} from '../shared/vibes-persona.ts';
+import {DEFAULT_OPENROUTER_MODEL} from './openrouter-account.ts';
 import {validateAIMessageBudget} from './ai-message-limits.ts';
 import {intervalMs} from './market-data.ts';
 import {explicitBacktestRequest} from '../src/chat-action-boundary.ts';
@@ -811,7 +812,7 @@ app.post('/api/ai', async (req, res) => {
     try{available=await openRouterAccounts.models()}catch{return res.status(503).json({error:'Cannot verify the selected OpenRouter model right now. Retry model selection.'})}
     if(!available.some(m=>m.id===requestedModel))return res.status(400).json({error:'This OpenRouter model is not in the current model catalogue.'});
   }
-  const model = requestedModel || personalAI?.model || process.env.OPENROUTER_MODEL?.trim() || 'minimax/minimax-m3:free';
+  const model = requestedModel || personalAI?.model || process.env.OPENROUTER_MODEL?.trim() || DEFAULT_OPENROUTER_MODEL;
   // Only conversational public-info queries can use web research; editing
   // strategy.js and all live execution paths remain unchanged.
   const lastUser=[...messages].reverse().find((m:any)=>m.role==='user');
@@ -993,7 +994,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     try{available=await openRouterAccounts.models()}catch{return res.status(503).json({error:'Cannot verify the selected OpenRouter model right now. Retry model selection.'})}
     if(!available.some(m=>m.id===requestedModel))return res.status(400).json({error:'This OpenRouter model is not in the current model catalogue.'});
   }
-  const model = phase2SharedModelTestEnabled(uid,process.env,req.headers['x-tv-phase2-qa']) ? 'openrouter/free' : (requestedModel || personalAI?.model || process.env.OPENROUTER_MODEL?.trim() || 'minimax/minimax-m3:free');
+  const model = phase2SharedModelTestEnabled(uid,process.env,req.headers['x-tv-phase2-qa']) ? 'openrouter/free' : (requestedModel || personalAI?.model || process.env.OPENROUTER_MODEL?.trim() || DEFAULT_OPENROUTER_MODEL);
   // Only conversational public-info queries can use web research; editing
   // strategy.js and all live execution paths remain unchanged.
   const lastUser=[...messages].reverse().find((m:any)=>m.role==='user');
@@ -1008,7 +1009,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     Boolean(priorRobotContext&&/\b(?:it|its|that|the same|why|no trades|how come|again|working|running)\b/i.test(currentQuestion));
   // Account-wide broker history remains useful for a named robot diagnosis,
   // but its evidence must be labelled account-scoped, not robot performance.
-  const deskIntent=!backtestId&&req.body?.auditMode!==true&&wantsLiveTradeEvidence(currentQuestion);
+  const deskIntent=false; // Signal-first: never auto-fetch legacy account-wide broker P/L for market or signal questions.
   const officialResearch=publicFinanceRequested(currentQuestion);
   const researchMode=!deskIntent&&!strategySourceRequested&&!robotContextIntent&&!robotId&&!strategyId&&!backtestId&&req.body?.researchMode===true&&req.body?.auditMode!==true&&(officialResearch||researchRequested(lastUser?.content)||Boolean(referentialFollowup&&earlierPublicQuestion));
   let aiMessages=[{role:'system',content:vibesPersona},...messages];

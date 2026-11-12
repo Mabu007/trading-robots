@@ -26,6 +26,25 @@ export class MarketAlertService{
  async transaction(paths:string[],fn:Parameters<NonNullable<RecordStore['transaction']>>[1]){if(!this.store.transaction)throw Error('Transactional storage unavailable');await this.store.transaction(paths,fn);}
  configured(){return Boolean(this.env.TELEGRAM_BOT_TOKEN&&/^[\w]{5,32}$/.test(this.env.TELEGRAM_BOT_USERNAME||'')&&(this.env.TELEGRAM_WEBHOOK_SECRET||'').length>=32);}
  async telegram(method:string,body:any,uid?:string){const bot=uid?await this.userTelegram.load(uid):null;const token=bot?.token||this.env.TELEGRAM_BOT_TOKEN;if(!token)throw Error('Telegram is not configured');let r:globalThis.Response;try{r=await this.request(`https://api.telegram.org/bot${token}/${method}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(12000),redirect:'error'});}catch{throw Error('Telegram outcome unknown; automatic resend disabled.');}const data=await r.json().catch(()=>null) as any;if(!r.ok||data?.ok!==true){const e=Error('Telegram rejected the message.') as Error&{confirmedRejected?:boolean;retryAfter?:number};e.confirmedRejected=data?.ok===false;if(r.status===429&&data?.ok===false)e.retryAfter=Math.min(3600,Math.max(1,Number(data.parameters?.retry_after)||60));throw e;}return data.result;}
+ async signalHistory(uid:string,cursor?:string){
+  if(cursor!==undefined&&!/^[a-f0-9]{64}$/.test(cursor))throw Error('Invalid signal history cursor');
+  const root='serverMarketAlertOwners/'+hash(uid)+'/deliveries';
+  const page=this.store.page?await this.store.page(root,'delivery','sent',cursor,100):
+   {items:(await this.store.query(root)).filter(r=>r.delivery==='sent').slice(0,100),next:null};
+  const signals=page.items.filter(row=>row.delivery==='sent'&&row.event&&typeof row.event.id==='string').map(row=>({
+   id:String(row.id||hash(String(row.alertId)+':'+String(row.event.id))),
+   alertId:String(row.alertId||''),
+   name:typeof row.name==='string'?row.name:'Signal tracker',
+   symbol:typeof row.symbol==='string'?row.symbol:'XAUUSD',
+   timeframe:typeof row.timeframe==='string'?row.timeframe:null,
+   action:row.event.action==='BUY'||row.event.action==='SELL'?row.event.action:null,
+   matched:Array.isArray(row.event.matched)?row.event.matched.filter((x:unknown)=>typeof x==='string').slice(0,6):[],
+   price:Number.isFinite(row.event.price)?row.event.price:null,
+   time:Number.isSafeInteger(row.event.time)?row.event.time:null,
+   delivery:'sent' as const
+  })).sort((a,b)=>(b.time||0)-(a.time||0));
+  return {signals,nextCursor:page.next};
+ }
  async list(uid:string){const rows=this.store.page? (await this.store.page(`serverMarketAlertOwners/${hash(uid)}/alerts`,undefined,undefined,undefined,30)).items:(await this.store.query(`serverMarketAlertOwners/${hash(uid)}/alerts`)).slice(0,30);return {alerts:rows.filter(r=>!r.deleted).map(({uid:_,...r})=>({...r,runtimeVerified:false,state:r.state==='active'?'status not checked':r.state}))};}
  async draft(uid:string,input:unknown){const rule=alertRuleSchema.parse(input);validateAlertRule(rule);if(rule.expiresAt<=Date.now()/1000||rule.expiresAt>Date.now()/1000+30*86400)throw Error('Alert expiry must be within the next 30 days');
  if((await this.list(uid)).alerts.length>=20)throw Error('Maximum 20 alerts.');
@@ -52,7 +71,7 @@ export class MarketAlertService{
  const receipt=`serverMarketAlertOwners/${hash(uid)}/deliveries/${hash(id+':'+event.id)}`;let claimed=false,attempt=0;await this.transaction([path,receipt],([current,seen])=>{claimed=false;if(!current?.deliveryAuthorized||current.revision!==revision||(seen&&!(seen.delivery==='retry'&&seen.nextAttempt<=Date.now())))return {};claimed=true;attempt=Number(seen?.attempt||0)+1;return {[receipt]:{attempt,id:event.id,alertId:id,revision,event,delivery:'sending',createdAt:Date.now()}};});
  if(!claimed){const previous=await this.store.get(receipt);return {delivery:previous?.delivery==='sending'?'unknown':previous?.delivery==='retry'?'pending':previous?.delivery||'cancelled',messageId:previous?.messageId||null};}
  try{const result=await this.telegram('sendMessage',{chat_id:link.chatId,disable_notification:false,text:`${row.rule.name}\n${row.rule.symbol} · ${row.rule.timeframe} · ${event.complete?'Setup matched':'Condition detected'}\n${(event.matched||[]).join(', ')} · reference price ${event.price}\n${new Date(event.time*1000).toISOString()} (${new Date(event.time*1000).toLocaleString('en-ZA',{timeZone:'Africa/Johannesburg'})} SAST)\nBased on ${row.rule.basis==='live-price'?'a live reference tick':'a completed market candle'}.\nReply to ask VIBES about this event, or reply: Pause this alert.\nhttps://trading-robots.vercel.app/?alert=${id}`},uid);
- const personalBot=await this.userTelegram.load(uid);await this.store.put(`telegramMessages/${hash(uid+':'+(personalBot?.id||'shared')+':'+link.chatId+':'+result.message_id)}`,{uid,id,revision,event,rule:row.rule});await this.store.put(receipt,{alertId:id,revision,event,delivery:'sent',messageId:result.message_id});return {delivery:'sent',messageId:result.message_id};
+ const personalBot=await this.userTelegram.load(uid);await this.store.put(`telegramMessages/${hash(uid+':'+(personalBot?.id||'shared')+':'+link.chatId+':'+result.message_id)}`,{uid,id,revision,event,rule:row.rule});await this.store.put(receipt,{alertId:id,revision,name:row.rule.name,symbol:row.rule.symbol,timeframe:row.rule.timeframe,event,delivery:'sent',messageId:result.message_id});return {delivery:'sent',messageId:result.message_id};
  }catch(error){const e=error as {retryAfter?:number;confirmedRejected?:boolean};const retry=Boolean(e.retryAfter&&attempt<6),delivery=retry?'retry':e.confirmedRejected?'failed':'unknown';await this.store.put(receipt,{attempt,alertId:id,revision,event,delivery,nextAttempt:retry?Date.now()+e.retryAfter!*1000:null,error:retry?'Telegram rate limited; retry scheduled.':delivery==='failed'?'Telegram rejected delivery. Check the connection.':'Send outcome unconfirmed; inspect Telegram before resending.'});return {delivery:retry?'pending':delivery};}}
  tools(uid:string){return {
  getTelegramConnection:tool({description:'Read your personal Telegram bot connection status. Tokens must be entered in Alerts settings, never in chat. Telegram OAuth requires app bot configuration; personal BotFather tokens are supported.',inputSchema:z.object({}).strict(),execute:async()=>{const bot=await this.userTelegram.load(uid);return {personalBot:bot?.username||null,linked:(await this.store.get('serverTelegramUsers/'+hash(uid)))?.active===true,settings:'Open Alerts → Use your own Telegram bot'};}}),
@@ -68,6 +87,7 @@ export class MarketAlertService{
 }
 export function marketAlertRoutes(app:Express,deps:Deps){const svc=new MarketAlertService(deps);const auth=(work:(uid:string,req:Request)=>Promise<any>)=>async(req:Request,res:Response)=>{res.setHeader('Cache-Control','private,no-store');const uid=await deps.uid(req,res);if(!uid)return;try{res.json(await work(uid,req))}catch(e){res.status(400).json({error:e instanceof Error?e.message:'Alert request failed'});}};
  app.get('/api/market-alerts',auth(uid=>svc.list(uid)));
+ app.get('/api/signals/history',auth((uid,req)=>svc.signalHistory(uid,typeof req.query.cursor==='string'?req.query.cursor:undefined)));
  app.post('/api/market-alerts/describe',auth(async(uid,req)=>{if(typeof req.body?.text!=='string'||req.body.text.length>4000)throw Error('Describe your conditions in under 4000 characters');return {text:await svc.reply(uid,req.body.text,{purpose:'Prepare alert rules for review. Ask for missing level, timeframe, period or session details. Never activate.',previous:req.body?.previous||null})};}));
  app.post('/api/market-alerts/from-strategy',auth((uid,req)=>svc.strategyDraft(uid,String(req.body?.botId||''))));
  app.get('/api/market-alerts/:id/source',auth((uid,req)=>svc.source(uid,String(req.params.id))));
