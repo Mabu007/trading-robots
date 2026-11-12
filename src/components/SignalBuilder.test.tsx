@@ -14,7 +14,7 @@ describe('separate Signal creation, delivery and backtesting UI',()=>{
  });
  it('renders independent signal configuration and strategy conversion',()=>{
   const html=renderToStaticMarkup(<SignalBuilder client={{} as any} active bots={[{id:'abc',name:'Gemini',asset:'GOLDUSDC'}]} onOpenApps={()=>{}} onViewHistory={()=>{}}/>);
-  expect(html).toContain('Create &amp; start');
+  expect(html).toContain('Save signal draft');
   expect(html).toContain('Create from strategy');
   expect(html).toContain('RSI falls below');
   expect(html).toContain('Gold · XAUUSD');
