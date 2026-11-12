@@ -651,7 +651,19 @@ function App(){
     message=completeCreatePrompt(waiting,tradingPreferences);setAssistantTask(null);
    }
 
-  if(command==='watch'&&(/\b(?:gold|xauusd|goldusdc)\b/i.test(message)||venue==='research')){if(!cloudClient)throw Error('Sign in to create signals');setSignalDraftText(message);setPrimaryArea('trades');const response=await sharingRequest<{text:string}>(cloudClient,'/api/market-alerts/describe','POST',{text:message});setChat([...next,{role:'assistant',content:response.text+'\n\nOpen Signals to review and activate this condition. Backtest strategies separately from the Backtest tab.'}]);return;}
+  if(command==='watch'&&(/\b(?:gold|xauusd|goldusdc)\b/i.test(message)||venue==='research')){
+   if(!cloudClient)throw Error('Sign in to create signals');
+   try{
+    const created=await sharingRequest<{text:string;active:boolean;alert:{id:string}}>(cloudClient,'/api/signals/from-text','POST',{text:message,activate:true});
+    checkpoint();setSignalDraftText('');setPrimaryArea('trades');
+    setChat([...next,{role:'assistant',content:created.text+'\n\nOpen Signals to view, edit or pause it.'}]);return;
+   }catch(error){
+    if(!/precise price level|Specify Gold|Describe your Gold|not yet supported/i.test(err(error)))throw error;
+    setSignalDraftText(message);setPrimaryArea('trades');
+    const response=await sharingRequest<{text:string}>(cloudClient,'/api/market-alerts/describe','POST',{text:message});
+    setChat([...next,{role:'assistant',content:response.text+'\n\nOpen Signals to review and create the condition. No market orders are placed.'}]);return;
+   }
+  }
   if(command==='watch'){
    if(/\btelegram\b/i.test(message)){setPrimaryArea('trades');setChat([...next,{role:'assistant',content:'Connect Telegram under Apps, then create and manage signals from Signals. Only reviewed signal monitors can send notifications.'}]);return;}
    if(!cloudClient){setChat([...next,{role:'assistant',content:'Sign in to prepare a Code watcher.'}]);return;}
