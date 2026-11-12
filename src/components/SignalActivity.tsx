@@ -10,6 +10,7 @@ type Signal={id:string;alertId:string;name:string;symbol:string;timeframe:string
 type Page={signals:Signal[];nextCursor:string|null};
 export function SignalActivity({client,active,bots=[],initialStrategyId='',initialDraftText='',onOpenApps}:{client:CloudClient|null;active:boolean;bots?:{id:string;name:string;asset:string}[];initialStrategyId?:string;initialDraftText?:string;onOpenApps:()=>void}){
  const [tab,setTab]=useState<'create'|'sent'>('create');
+ useEffect(()=>{if(initialStrategyId||initialDraftText)setTab('create')},[initialStrategyId,initialDraftText]);
  const [signals,setSignals]=useState<Signal[]>([]);
  const [cursor,setCursor]=useState<string|null>(null);
  const [loading,setLoading]=useState(false),[moreBusy,setMoreBusy]=useState(false),[error,setError]=useState('');
