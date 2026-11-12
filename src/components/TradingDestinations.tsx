@@ -1,7 +1,7 @@
 import {displayTime} from '../display-time';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type {CloudClient} from '../firebase';
-import { Activity, ArrowRight, Bot, ChartCandlestick, CircleHelp, Clock3, Code2, Database, Plug, Search, Sparkles, Wallet } from 'lucide-react';
+import { Activity, ArrowRight, Bot, ChartCandlestick, CircleHelp, Clock3, Code2, Database, Plug, Search, Sparkles } from 'lucide-react';
 import { venueLabel, type Venue } from '../../shared/venues';
 import type { CloudBot } from '../firebase';
 import type { Candle } from '../types';
