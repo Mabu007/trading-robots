@@ -38,10 +38,10 @@ describe('market replay has no lookahead or broker execution',()=>{
  });
  it('honors BUY and SELL take-profit without hindsight at the current close',()=>{
   const up=[bars[0],bars[1],{time:base+120,open:4000,high:4012,low:3999,close:4010}];
-  const out=replayAdvance(replayEnter(beginReplay(up,1),'BUY'===('SELL' as any)?'SELL':'BUY',1,5,10,costs),up,costs);
+  const out=replayAdvance(replayEnter(beginReplay(up,1),up,'BUY',1,5,10,costs),up,costs);
   expect(out.trades[0].reason).toBe('TARGET');expect(out.trades[0].net).toBe(10);
   const down=[bars[0],bars[1],{time:base+120,open:4000,high:4001,low:3988,close:3990}];
-  const short=replayAdvance(replayEnter(beginReplay(down,1),'SELL',1,5,10,costs),down,costs);
+  const short=replayAdvance(replayEnter(beginReplay(down,1),down,'SELL',1,5,10,costs),down,costs);
   expect(short.trades[0].net).toBe(10);
  });
  it('computes correct metrics and clean manual close on last revealed candle',()=>{
