@@ -59,6 +59,19 @@ export function replayEnter(state:ReplaySession,bars:ReplayBar[],side:ReplaySide
  if(position.stop<=0)throw Error('Your stop must be above zero.');
  return {...state,balance:state.balance-fee,position};
 }
+/** Revise protective orders at the current revealed price only; no retroactive fills. */
+export function replayModifyPosition(state:ReplaySession,bars:ReplayBar[],costs:ReplayCosts,stop:number,target:number):ReplaySession{
+ validateReplayCosts(costs);
+ const position=state.position;if(!position)throw Error('No open position to manage.');
+ if(!finite(stop)||!finite(target)||stop<=0||target<=0)throw Error('Enter valid positive stop and target prices.');
+ const bar=bars[state.index];if(!bar)throw Error('No revealed candle to price the modification.');
+ const currentBid=bar.close,currentAsk=bar.close+costs.spread;
+ if(position.side==='BUY'&&!(stop<currentBid&&target>currentBid))
+  throw Error('For a long trade, place the stop below current bid and target above it.');
+ if(position.side==='SELL'&&!(stop>currentAsk&&target<currentAsk))
+  throw Error('For a short trade, place the stop above current ask and target below it.');
+ return {...state,position:{...position,stop,target}};
+}
 function finish(state:ReplaySession,bar:ReplayBar,costs:ReplayCosts,exit:number,reason:ReplayTrade['reason']):ReplaySession{
  const p=state.position;if(!p)return state;
  const exitFee=p.quantity*costs.feePerOunce;
