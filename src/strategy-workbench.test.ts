@@ -17,7 +17,7 @@ describe('Strategy Library backtest', () => {
     expect(() => backtestRange('2026-01-01', '2026-11-01', ['m1'], now)).toThrow(/50,000 candles/);
   });
 
-  it('uses the chosen market and dates and retains source identity in the saved result', async () => {
+  it('uses shared Dukascopy Gold history regardless of legacy saved venue and preserves result identity', async () => {
     const time = Date.parse('2026-10-26T00:00:00Z') / 1000;
     const candles = [time, time + 60].map(time => ({time, open: 100, high: 101, low: 99, close: 100, volume: 1}));
     const input = {venue: 'propdao' as const, asset: 'GOLDUSDC', strategyCode: starterCode, from: '2026-10-26', to: '2026-10-26'};
@@ -28,7 +28,7 @@ describe('Strategy Library backtest', () => {
       metrics: {trades: 0, wins: 0, losses: 0, winRate: 0, netReturn: 0, profitFactor: 0, maxDrawdown: 0, endingBalance: 0},
     });
     const result = await simulateWorkbench(input, signal, () => {});
-    expect(historicalData).toHaveBeenCalledWith({venue: 'propdao', asset: 'GOLDUSDC', timeframe: 'm1',
+    expect(historicalData).toHaveBeenCalledWith({venue: 'research', asset: 'XAUUSD', timeframe: 'm1',
       from: '2026-10-25T20:40:00.000Z', to: '2026-10-26T23:59:59.000Z'}, signal, expect.any(Function));
     expect(runBacktest).toHaveBeenCalledWith(starterCode, {m1: candles}, 0, signal, time);
     expect(await decompressBacktest<StrategyRun>(await compressBacktest(result))).toMatchObject({
