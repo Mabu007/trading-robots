@@ -1,3 +1,6 @@
+import {usePrimaryGoldResearch,primaryGoldResearch} from './primary-market-research.ts';
+import {marketAlertRoutes} from './market-alert-service.ts';
+import {AlertHistory} from './alert-history.ts';
 import {vibesPersona,vibesResearchStyle} from '../shared/vibes-persona.ts';
 import {validateAIMessageBudget} from './ai-message-limits.ts';
 import {intervalMs} from './market-data.ts';
@@ -180,6 +183,11 @@ async function firebaseUidOrReply(req: express.Request, res: express.Response): 
 const propdaoAccounts=new PropDAOAccounts({read:readR2Object,write:writeR2Object,remove:deleteR2Object});
 
 const openRouterAccounts = new OpenRouterAccounts({read:readR2Object,write:writeR2Object,remove:deleteR2Object});
+const marketAlertService=marketAlertRoutes(app,{uid:firebaseUidOrReply,store:marketplace.store,accounts:openRouterAccounts,read:readR2Object,history:(day,tf)=>alertHistory.day(day,tf)});
+app.get('/api/venues/research/markets',(_req,res)=>res.json({markets:[{symbol:'XAUUSD',timeframes:['m1','m5','m15','m30','h1','h4']}],source:'BiQuote live / Dukascopy historical'}));
+const alertHistory=new AlertHistory({read:readR2Object,write:writeR2Object});
+app.post('/api/market-alert-ticks',async(req,res)=>{if(!await firebaseUidOrReply(req,res))return;try{res.json(await alertHistory.ticks(req.body?.day,req.body?.hour))}catch(e){res.status(503).json({error:e instanceof Error?e.message:'Historical ticks unavailable'})}});
+app.post('/api/market-alert-history',async(req,res)=>{const uid=await firebaseUidOrReply(req,res);if(!uid)return;try{res.json(await alertHistory.day(req.body?.day,req.body?.timeframe))}catch(e){res.status(503).json({error:e instanceof Error?e.message:'History unavailable'})}});
 openRouterRoutes(app,openRouterAccounts,firebaseUidOrReply);
 openRouterOAuthRoutes(app,openRouterAccounts,firebaseUidOrReply);
 chatToolRoutes(app,openRouterAccounts,firebaseUidOrReply);
@@ -586,7 +594,7 @@ app.delete('/api/user-bots/:botId', async (req, res) => {
   } catch (error) {
     console.error('Robot deletion failed', { botId, error });
     const message=error instanceof Error?error.message:'';
-    if(/Stop and reconcile|safely verify live bot state/.test(message))return res.status(409).json({error:message});
+    if(/Stop and reconcile|safely verify live bot state|Broker exposure is unknown or not flat/.test(message))return res.status(409).json({error:message});
     return res.status(502).json({ error: 'Could not delete all robot files. Retry the deletion.' });
   }
 });
@@ -815,7 +823,7 @@ app.post('/api/ai', async (req, res) => {
   if(researchMode){
     const sanitizePublicQuestion=(value:string)=>value.replace(/https?:\/\/\S+|[\w.+-]+@[\w.-]+\.\w+|sk-[a-z0-9-]+|\b[a-f0-9]{40,}\b/gi,'').slice(0,950);
     const latestQuestion=(referentialFollowup&&earlierPublicQuestion?'Previous public research topic: '+sanitizePublicQuestion(String(earlierPublicQuestion.content))+'\nFollow-up: ':'')+sanitizePublicQuestion(String(lastUser.content));
-    const evidence=await researchBrief({query:latestQuestion,asset:selectedAsset},{market:venueMarketData,book:getHyperliquidBook,trades:getHyperliquidTradeSummary});
+    const evidence=usePrimaryGoldResearch(latestQuestion,selectedAsset)?await primaryGoldResearch(()=>marketAlertService.market()):await researchBrief({query:latestQuestion,asset:selectedAsset},{market:venueMarketData,book:getHyperliquidBook,trades:getHyperliquidTradeSummary});
     publicEvidence=evidence;
     // Do not forward proprietary strategy source, broker data, previous
     // messages or personal account context to external web search.
@@ -1008,7 +1016,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
   if(researchMode){
     const sanitizePublicQuestion=(value:string)=>value.replace(/https?:\/\/\S+|[\w.+-]+@[\w.-]+\.\w+|sk-[a-z0-9-]+|\b[a-f0-9]{40,}\b/gi,'').slice(0,950);
     const latestQuestion=(referentialFollowup&&earlierPublicQuestion?'Previous public research topic: '+sanitizePublicQuestion(String(earlierPublicQuestion.content))+'\nFollow-up: ':'')+sanitizePublicQuestion(String(lastUser.content));
-    const evidence=officialResearch?{context:'Use the finance source directory and public page fetch. Cite exact period, units and source, and say when a dataset requires credentials or is inaccessible.',hasQuote:false,hasCandles:false,hasNews:false,hasVolume:false,hasTrades:false,snapshotOnly:false,chart:null,sources:[],quote:null,volume:null,trades:null}:await researchBrief({query:latestQuestion,asset:selectedAsset},{
+    const evidence=officialResearch?{context:'Use the finance source directory and public page fetch. Cite exact period, units and source, and say when a dataset requires credentials or is inaccessible.',hasQuote:false,hasCandles:false,hasNews:false,hasVolume:false,hasTrades:false,snapshotOnly:false,chart:null,sources:[],quote:null,volume:null,trades:null}:usePrimaryGoldResearch(latestQuestion,selectedAsset)?await primaryGoldResearch(()=>marketAlertService.market()):await researchBrief({query:latestQuestion,asset:selectedAsset},{
       market:venueMarketData,book:getHyperliquidBook,trades:getHyperliquidTradeSummary,request:(input,init)=>fetch(input,{...init,signal:AbortSignal.any([clientAbort.signal,...(init?.signal?[init.signal]:[])])})
     });
     publicEvidence=evidence;
@@ -1218,6 +1226,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     const wantsFreshMarket=!backtestId&&!researchMode&&
      /\b(?:market|right now|currently|volatility|rsi|atr|ema|price action|market conditions|suitable|trending|consolidat|choppy)\b/i.test(currentQuestion);
     if(wantsFreshMarket)currentMarketEvidence=await runRead('getCurrentMarketConditions',{botId:effectiveRobotId??null,asset:selectedAsset??null},async()=>{
+     if(!/propdao|hyperliquid/i.test(currentQuestion)){if(selectedAsset&&!['XAUUSD','GOLDUSDC'].includes(selectedAsset))return {available:false,reason:'Primary live research currently supports Gold/XAUUSD; do not substitute it for another requested symbol.'};return marketAlertService.market();}
      try{
       if(robotContextIntent&&!effectiveRobotId)
        return {available:false,reason:'Robot discovery did not identify one verified deployment. Do not substitute a generic GOLD market for an unknown robot instrument.'};
@@ -1303,7 +1312,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
         description:'STAGE creation of a new saved strategy; does not create, backtest or deploy. Requires user clicking Approve & Apply. Complete source must include static config and onCandle.',
         inputSchema:z.object({name:z.string().min(2).max(64),
          asset:z.string().regex(/^[A-Za-z0-9_:.@-]{1,64}$/),
-         venue:z.enum(['propdao','hyperliquid','valr']),
+         venue:z.enum(['research','propdao','hyperliquid','valr']),
          code:z.string().min(60).max(12000),prompt:z.string().max(2000).optional()}).strict(),
         execute:async(input)=>{
          try{return {available:true,...await robotCrud.stageCreate(uid,input)}}
@@ -1405,7 +1414,8 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     }:undefined;
     // Each model turn may request a small batch of independent reads.
     let started=0,running=0;
-    const tools=marketTools&&Object.keys(marketTools).length?Object.fromEntries(Object.entries(marketTools).map(([name,definition])=>{
+    const effectiveTools={...marketTools,...marketAlertService.tools(uid)};
+    const tools=Object.keys(effectiveTools).length?Object.fromEntries(Object.entries(effectiveTools).map(([name,definition])=>{
      const entry=definition as {execute:(...args:any[])=>unknown};
      return [name,{...definition,execute:async(...args:any[])=>{
       if(clientAbort.signal.aborted||started>=6||running>=2)return {available:false,reason:'Read budget reached for this response.'};

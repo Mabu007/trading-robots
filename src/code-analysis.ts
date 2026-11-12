@@ -1,6 +1,6 @@
 /** Auditable built-in market analysis tools. No generated JS is ever eval'd. */
 export type AnalysisKind='liquidity_sweeps'|'volatility_profile';
-export type CodeAnalysis={id:string;name:string;kind:AnalysisKind;asset:string;venue:'valr'|'propdao'|'hyperliquid'|'ctrader';timeframe:'m1'|'m5'|'m15'|'h1';lookback:number;source:string;updatedAt?:number};
+export type CodeAnalysis={id:string;name:string;kind:AnalysisKind;asset:string;venue:'research'|'valr'|'propdao'|'hyperliquid'|'ctrader';timeframe:'m1'|'m5'|'m15'|'h1';lookback:number;source:string;updatedAt?:number};
 export type MarketBar={time:number;open:number;high:number;low:number;close:number};
 export type MarketFinding={time:number;kind:string;price:number;level:number};
 export type MarketReport={kind:AnalysisKind;asset:string;timeframe:string;from:string;to:string;bars:number;gaps:number;findings:MarketFinding[];high:number|null;low:number|null;atr14:number|null;atrPercent:number|null;realizedVolatilityPercent:number|null;regime:string;explanation:string};

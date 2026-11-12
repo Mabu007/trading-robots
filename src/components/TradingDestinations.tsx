@@ -13,7 +13,7 @@ type History = { candles: Candle[]; source?: string };
 type HistoryRequest = { venue: Venue; asset: string; timeframe: string; from: string; to: string };
 type RuntimeSummary = { state: 'running' | 'stopped' | 'paused' | 'uncertain' | 'not-deployed' | 'unknown'; detail?: string };
 
-const venues: Venue[] = ['valr', 'propdao', 'hyperliquid', 'ctrader'];
+const venues: Venue[] = ['research'];
 const timeframeSeconds: Record<string, number> = { m1: 60, m5: 300, m15: 900, h1: 3600 };
 
 function lastClose(candles: Candle[]) {
@@ -52,7 +52,7 @@ export function MarketsHub({ active, loadHistory, onAskAI, onBuildStrategy }: {
   onAskAI: (prompt: string) => void;
   onBuildStrategy: (asset: string, venue: Venue) => void;
 }) {
-  const [venue, setVenue] = useState<Venue>('valr');
+  const [venue, setVenue] = useState<Venue>('research');
   const [markets, setMarkets] = useState<Market[]>([]);
   const [asset, setAsset] = useState('');
   const [search, setSearch] = useState('');
@@ -96,7 +96,7 @@ export function MarketsHub({ active, loadHistory, onAskAI, onBuildStrategy }: {
     if (!asset || !revision || venue === 'ctrader') return;
     let alive = true;
     const step = timeframeSeconds[timeframe] * 1000;
-    const toMs = Math.floor(Date.now() / step) * step;
+    const toMs = venue==='research'?Math.floor(Date.now()/86400000)*86400000:Math.floor(Date.now() / step) * step;
     const fromMs = toMs - step * 120;
     setLoadingHistory(true); setError(''); setCandles([]); setSource('');
     void loadHistory({ venue, asset, timeframe, from: new Date(fromMs).toISOString(), to: new Date(toMs).toISOString() })

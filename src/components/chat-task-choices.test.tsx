@@ -8,8 +8,8 @@ const props={prefs:defaultTradingPreferences,bots:[] as CloudBot[],onChoose:()=>
 describe('three-way conversational task choices',()=>{
  it('shows exactly two market choices plus a free-text answer',()=>{
   const html=renderToStaticMarkup(createElement(ChatTaskChoices,{...props,task:{kind:'create',seed:'build liquidity sweep robot'}}));
-  expect(html).toContain('GOLDUSDC');
-  expect(html).toContain('Bitcoin');
+  expect(html).toContain('XAUUSD');
+  expect(html).toContain('Custom strategy rules');
   expect(html).toContain('Type my answer');
   expect((html.match(/tv-task-choice-number/g)||[]).length).toBe(3);
  });

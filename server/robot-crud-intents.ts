@@ -6,7 +6,7 @@ import type {RecordStore} from './firestore-store.ts';
 type Meta={id:string;name:string;asset:string;venue:string;userId?:string;ownerUid?:string};
 type Stage={version:1;ownerUid:string;botId:string;intentId:string;
  operation:'strategy.create'|'strategy.delete';code:string;codeHash:string;
- meta:{name:string;asset:string;venue:'propdao'|'hyperliquid'|'valr';prompt:string};
+ meta:{name:string;asset:string;venue:'research'|'propdao'|'hyperliquid'|'valr';prompt:string};
  action:ApprovalAction;createdAt:number;expiresAt:number};
 type Dependencies={
  approvals:ApprovalIntents;store:RecordStore;
@@ -33,7 +33,7 @@ function validateCode(value:unknown){
    !/export\s+function\s+onCandle\s*\(/.test(value))throw Error('Complete valid strategy.js source is required');
  parseStrategyConfig(value);validateStrategySyntax(value);return value;
 }
-const supported=new Set(['propdao','hyperliquid','valr']);
+const supported=new Set(['research','propdao','hyperliquid','valr']);
 function venue(value:unknown):Stage['meta']['venue']{
  if(typeof value!=='string'||!supported.has(value))throw Error('Unsupported new strategy venue');
  return value as Stage['meta']['venue'];

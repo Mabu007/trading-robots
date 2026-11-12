@@ -47,7 +47,7 @@ export function validateSavedSourceOverwrite(
 ):{existing:boolean;venue:string}{
  if(typeof uid!=='string'||!uid||uid.length>128||uid.includes('/')||
    !/^[A-Za-z0-9_-]{1,100}$/.test(botId)||
-   !['propdao','valr','hyperliquid','ctrader'].includes(requestedVenue))
+   !['research','propdao','valr','hyperliquid','ctrader'].includes(requestedVenue))
    throw Error('Invalid saved source identity or venue');
  if(!raw)return {existing:false,venue:requestedVenue};
  let stored:Record<string,unknown>;
