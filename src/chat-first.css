@@ -130,7 +130,7 @@
 .tv-chat-first .proposal{border-color:#514866;background:#171621}
 .tv-chat-first .tv-agent-home{padding:0;max-width:none;overflow:auto;color:#f1eff7}
 .tv-chat-first .studio-body>.tv-agent-home{display:none}
-.tv-chat-first.tv-area-agents.tv-agent-workspace-overview .studio-body>.tv-agent-home{display:block!important;flex:1}
+.tv-chat-first.tv-area-agents.tv-agent-workspace-overview .studio-body>.tv-agent-home,.tv-chat-first.tv-area-scheduled .studio-body>.tv-agent-home{display:block!important;flex:1}
 .tv-chat-first.tv-area-agents.tv-agent-workspace-overview .studio-body>.main-column{display:none!important}
 .tv-chat-first.tv-area-agents.tv-agent-workspace-overview .studio-body>.chat-side{display:none!important}
 .tv-chat-first.tv-area-agents.tv-agent-workspace-backtest .studio-body>.main-column,
