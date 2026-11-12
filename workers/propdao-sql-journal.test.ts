@@ -1,6 +1,7 @@
 import {DatabaseSync} from 'node:sqlite';
 import {describe,it,expect} from 'vitest';
-import {PropDAOSqlJournal,reconciliationAlarm,type SqlHandle} from './propdao-sql-journal';
+import {requiresDurableJournal,type ExecutionStage} from '../shared/propdao-execution-journal';
+import {PropDAOSqlJournal,reconciliationAlarm,nextLiveArchiveAt,type SqlHandle} from './propdao-sql-journal';
 
 function fixture(){
  const db=new DatabaseSync(':memory:');
@@ -57,5 +58,38 @@ describe('robot stop lifecycle / offline reconciliation schedule',()=>{
  it('keeps paused robots observing and preserves regular candle alarm for running bots',()=>{
   expect(reconciliationAlarm({running:false,paused:true,pendingArchive:0,flatVerified:true,unresolvedIntent:false,now:1000})).toBe(301000);
   expect(reconciliationAlarm({running:true,paused:false,pendingArchive:0,flatVerified:false,unresolvedIntent:false,now:1000,nextTradingCandle:8000})).toBe(8000);
+ });
+});
+
+describe('incremental live Firestore archival schedule',()=>{
+ const now=1_800_000;
+ it('syncs a new pending SQL batch immediately and skips empty journals',()=>{
+  expect(nextLiveArchiveAt(now,0,0,3)).toBe(now);
+  expect(nextLiveArchiveAt(now,0,0,0)).toBeNull();
+ });
+ it('uses five-minute steady state intervals and faster bounded backlog draining',()=>{
+  expect(nextLiveArchiveAt(now,now,0,3)).toBe(now+300_000);
+  expect(nextLiveArchiveAt(now,now,0,61)).toBe(now+60_000);
+ });
+ it('retries failed delivery with exponential backoff capped at thirty minutes',()=>{
+  expect(nextLiveArchiveAt(now,now,1,3)).toBe(now+60_000);
+  expect(nextLiveArchiveAt(now,now,2,3)).toBe(now+120_000);
+  expect(nextLiveArchiveAt(now,now,6,3)).toBe(now+1_800_000);
+  expect(nextLiveArchiveAt(now,now,100,3)).toBe(now+1_800_000);
+ });
+ it('rejects invalid clock state instead of silently scheduling a spin loop',()=>{
+  expect(()=>nextLiveArchiveAt(Number.NaN,0,0,3)).toThrow();
+  expect(()=>nextLiveArchiveAt(now,0,Number.NaN,3)).toThrow();
+ });
+});
+
+describe('order-chain fail-closed journal policy',()=>{
+ it('requires durable records for signals, order submissions and broker outcomes',()=>{
+  for(const stage of ['SIGNAL','SUBMISSION_STARTED','PROTECTED_FILL','CANCELLED_UNFILLED'] as ExecutionStage[])
+   expect(requiresDurableJournal(stage)).toBe(true);
+ });
+ it('keeps observational events best-effort without treating them as fills',()=>{
+  for(const stage of ['ENTRY_SKIPPED','PRE_SUBMIT_REJECTED','OUTCOME_UNKNOWN'] as ExecutionStage[])
+   expect(requiresDurableJournal(stage)).toBe(false);
  });
 });

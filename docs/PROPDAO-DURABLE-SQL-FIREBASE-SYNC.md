@@ -42,6 +42,20 @@ is pending. To conclude, require two separately verified flat broker
 snapshots, at least five minutes since stop, and all archive rows ACKed.
 After verified completion, the extra alarm can be removed.
 
+## Fail-closed trade evidence
+Every BUY/SELL decision must be durably journaled with its code hash
+before order execution. A failed SQL write for SIGNAL or SUBMISSION_STARTED
+prevents the provider submission. When a pre-submit write fails after
+an account lock is acquired, the runtime attempts to release the lock;
+if cleanup cannot be verified, the pending intent remains locked for
+operator reconciliation.
+
+If a confirmed fill or cancellation cannot be durably recorded after
+the provider has responded, the robot halts new entries and retains the
+unresolved intent. This is deliberately conservative: the broker may
+already hold exposure and must be independently checked. WAIT telemetry
+remains best-effort and cannot authorize an order.
+
 ## Firebase
 - users/{uid}/liveTrades/{stableHash}: broker-confirmed closed trade,
   provider ID, account, symbol, side, size, entry/exit, timestamps,
@@ -54,8 +68,22 @@ After verified completion, the extra alarm can be removed.
   candle, reason, action, actual strategy checks, and the available
   timeframe candle snapshots for future historical diagnosis.
 
-While SQL is active, routine AI reads defer Firestore write-through.
-The Worker archives on stop, but Firestore remains a fallback for
+While SQL is active, the Cloudflare Worker now transfers pending rows to
+Firestore **while trading continues**, without needing AI calls or the user
+to be online. Each batch is at most 60 rows, idempotent and acknowledged.
+Healthy transfers run every five minutes, or every minute while a large
+backlog is draining. Failed transfers retry with exponentially increasing
+intervals, up to 30 minutes, without dropping or marking rows archived.
+
+A high-timeframe worker wakes at least every five minutes for read-only
+broker/ledger maintenance, even if the next strategy candle is hours away.
+Archival is deliberately scheduled after strategy execution, not before a
+new order. Firestore failures are visible as `sqlJournal.lastArchiveError`
+and `sqlJournal.archiveFailures`; they never become fabricated broker fills.
+
+The existing final flush and reconciliation on STOP remain in place. Routine
+AI reads still defer opportunistic Firestore write-through to avoid
+duplicating the Worker's archival writes. Firestore remains a fallback for
 older observations and when the live Worker is unavailable.
 
 ## Rollout and release gate

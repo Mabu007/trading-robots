@@ -9,6 +9,12 @@ export type ExecutionEvent={
  filledAt?:number;stopPrice?:number;targetPrice?:number;riskBudgetUsd?:number;
  decisionCandleClose?:number;codeHash?:string;reason?:string;
 };
+/** A missing durable write for these transitions can leave an order without
+ * an auditable causal chain. Never proceed to an order after such a failure. */
+export function requiresDurableJournal(stage:ExecutionStage):boolean{
+ return stage==='SIGNAL'||stage==='SUBMISSION_STARTED'||
+  stage==='PROTECTED_FILL'||stage==='CANCELLED_UNFILLED';
+}
 export const MAX_EXECUTION_EVENTS=200;
 const stages=new Set<ExecutionStage>(['SIGNAL','ENTRY_SKIPPED','SUBMISSION_STARTED',
  'PRE_SUBMIT_REJECTED','PROTECTED_FILL','CANCELLED_UNFILLED','OUTCOME_UNKNOWN']);

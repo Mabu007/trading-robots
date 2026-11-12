@@ -73,6 +73,21 @@ export class PropDAOSqlJournal{
 }
 
 
+
+/** Next bounded Firestore transfer for a live Durable Object.
+ * No pending evidence means no archive request; broker reconciliation still
+ * runs on its own schedule. Failed deliveries back off without losing rows. */
+export function nextLiveArchiveAt(now:number,lastAttempt:number,failures:number,pending:number):number|null{
+ if(pending<=0)return null;
+ if(!Number.isFinite(now)||!Number.isFinite(lastAttempt)||!Number.isFinite(failures))
+  throw Error('Invalid archival schedule');
+ const count=Math.max(0,Math.floor(failures));
+ const interval=count>0?
+  Math.min(30*60_000,60_000*2**Math.min(5,count-1)):
+  pending>60?60_000:5*60_000;
+ return lastAttempt>0?lastAttempt+interval:now;
+}
+
 /** Alarm planning is independent of the trading engine. A stopped robot can
  * still need broker close reconciliation or Firebase delivery; NO new entries. */
 export function reconciliationAlarm(input:{
