@@ -38,7 +38,7 @@ export const replayVisibleBars=(bars:ReplayBar[],state:ReplaySession)=>bars.slic
 export function replayMark(state:ReplaySession,bar:ReplayBar,costs:ReplayCosts){
  const p=state.position;
  if(!p)return {unrealized:0,equity:state.balance,marginUsed:0,liquidation:bar.close};
- const exit=p.side==='BUY'?bar.close-costs.spread/2-costs.slippage:bar.close+costs.spread/2+costs.slippage;
+ const exit=p.side==='BUY'?bar.close-costs.slippage:bar.close+costs.spread+costs.slippage;
  const gross=(p.side==='BUY'?exit-p.entry:p.entry-exit)*p.quantity;
  return {unrealized:gross-p.quantity*costs.feePerOunce,equity:state.balance+gross-p.quantity*costs.feePerOunce,
    marginUsed:p.quantity*p.entry/costs.leverage,liquidation:exit};
@@ -49,7 +49,7 @@ export function replayEnter(state:ReplaySession,bars:ReplayBar[],side:ReplaySide
  if(!['BUY','SELL'].includes(side)||!finite(quantity)||quantity<=0||quantity>10000||
    !finite(stopDistance)||stopDistance<=0||!finite(targetDistance)||targetDistance<=0)throw Error('Enter a positive trade size, stop distance and target distance.');
  const bar=bars[state.index];if(!bar)throw Error('No revealed candle at this time.');
- const entry=bar.close+(side==='BUY'?1:-1)*(costs.spread/2+costs.slippage);
+ const entry=side==='BUY'?bar.close+costs.spread+costs.slippage:bar.close-costs.slippage;
  const fee=quantity*costs.feePerOunce;
  const margin=entry*quantity/costs.leverage;
  if(margin>state.balance-fee)throw Error('Insufficient available replay equity for this position and leverage.');
@@ -72,7 +72,7 @@ export function replayClose(state:ReplaySession,bars:ReplayBar[],costs:ReplayCos
  validateReplayCosts(costs);
  if(!state.position)return state;
  const bar=bars[state.index];if(!bar)throw Error('No current candle.');
- const exit=bar.close+(state.position.side==='BUY'?-1:1)*(costs.spread/2+costs.slippage);
+ const exit=state.position.side==='BUY'?bar.close-costs.slippage:bar.close+costs.spread+costs.slippage;
  return finish(state,bar,costs,exit,reason);
 }
 /** At next completed candle: stop first when both SL & TP are inside the same bar;
@@ -85,13 +85,13 @@ export function replayStep(state:ReplaySession,bars:ReplayBar[],costs:ReplayCost
  const bar=bars[nextIndex],position=state.position;
  let out:ReplaySession={...state,index:nextIndex};
  if(!position)return out;
- const delta=costs.spread/2,slip=costs.slippage;
+ const spread=costs.spread,slip=costs.slippage;
  if(position.side==='BUY'){
-  const openingBid=bar.open-delta,lowBid=bar.low-delta,highBid=bar.high-delta;
+  const openingBid=bar.open,lowBid=bar.low,highBid=bar.high;
   if(lowBid<=position.stop)out=finish(out,bar,costs,Math.min(position.stop,openingBid)-slip,'STOP');
   else if(highBid>=position.target)out=finish(out,bar,costs,position.target-slip,'TARGET');
  }else{
-  const openingAsk=bar.open+delta,highAsk=bar.high+delta,lowAsk=bar.low+delta;
+  const openingAsk=bar.open+spread,highAsk=bar.high+spread,lowAsk=bar.low+spread;
   if(highAsk>=position.stop)out=finish(out,bar,costs,Math.max(position.stop,openingAsk)+slip,'STOP');
   else if(lowAsk<=position.target)out=finish(out,bar,costs,position.target+slip,'TARGET');
  }
