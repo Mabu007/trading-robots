@@ -1,4 +1,6 @@
 import {usePrimaryGoldResearch,primaryGoldResearch} from './primary-market-research.ts';
+import {goldMacroSnapshot} from './market-intelligence.ts';
+import {marketIntelligenceTools} from './market-intelligence-tools.ts';
 import {marketAlertRoutes} from './market-alert-service.ts';
 import {AlertHistory} from './alert-history.ts';
 import {vibesPersona,vibesResearchStyle} from '../shared/vibes-persona.ts';
@@ -824,7 +826,7 @@ app.post('/api/ai', async (req, res) => {
   if(researchMode){
     const sanitizePublicQuestion=(value:string)=>value.replace(/https?:\/\/\S+|[\w.+-]+@[\w.-]+\.\w+|sk-[a-z0-9-]+|\b[a-f0-9]{40,}\b/gi,'').slice(0,950);
     const latestQuestion=(referentialFollowup&&earlierPublicQuestion?'Previous public research topic: '+sanitizePublicQuestion(String(earlierPublicQuestion.content))+'\nFollow-up: ':'')+sanitizePublicQuestion(String(lastUser.content));
-    const evidence=usePrimaryGoldResearch(latestQuestion,selectedAsset)?await primaryGoldResearch(()=>marketAlertService.market()):await researchBrief({query:latestQuestion,asset:selectedAsset},{market:venueMarketData,book:getHyperliquidBook,trades:getHyperliquidTradeSummary});
+    const evidence=usePrimaryGoldResearch(latestQuestion,selectedAsset)?await primaryGoldResearch(()=>marketAlertService.market(),()=>goldMacroSnapshot()):await researchBrief({query:latestQuestion,asset:selectedAsset},{market:venueMarketData,book:getHyperliquidBook,trades:getHyperliquidTradeSummary});
     publicEvidence=evidence;
     // Do not forward proprietary strategy source, broker data, previous
     // messages or personal account context to external web search.
@@ -1017,7 +1019,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
   if(researchMode){
     const sanitizePublicQuestion=(value:string)=>value.replace(/https?:\/\/\S+|[\w.+-]+@[\w.-]+\.\w+|sk-[a-z0-9-]+|\b[a-f0-9]{40,}\b/gi,'').slice(0,950);
     const latestQuestion=(referentialFollowup&&earlierPublicQuestion?'Previous public research topic: '+sanitizePublicQuestion(String(earlierPublicQuestion.content))+'\nFollow-up: ':'')+sanitizePublicQuestion(String(lastUser.content));
-    const evidence=officialResearch?{context:'Use the finance source directory and public page fetch. Cite exact period, units and source, and say when a dataset requires credentials or is inaccessible.',hasQuote:false,hasCandles:false,hasNews:false,hasVolume:false,hasTrades:false,snapshotOnly:false,chart:null,sources:[],quote:null,volume:null,trades:null}:usePrimaryGoldResearch(latestQuestion,selectedAsset)?await primaryGoldResearch(()=>marketAlertService.market()):await researchBrief({query:latestQuestion,asset:selectedAsset},{
+    const evidence=officialResearch?{context:'Use the finance source directory and public page fetch. Cite exact period, units and source, and say when a dataset requires credentials or is inaccessible.',hasQuote:false,hasCandles:false,hasNews:false,hasVolume:false,hasTrades:false,snapshotOnly:false,chart:null,sources:[],quote:null,volume:null,trades:null}:usePrimaryGoldResearch(latestQuestion,selectedAsset)?await primaryGoldResearch(()=>marketAlertService.market(),()=>goldMacroSnapshot()):await researchBrief({query:latestQuestion,asset:selectedAsset},{
       market:venueMarketData,book:getHyperliquidBook,trades:getHyperliquidTradeSummary,request:(input,init)=>fetch(input,{...init,signal:AbortSignal.any([clientAbort.signal,...(init?.signal?[init.signal]:[])])})
     });
     publicEvidence=evidence;
@@ -1225,7 +1227,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     }
     let currentMarketEvidence:unknown;
     const wantsFreshMarket=!backtestId&&!researchMode&&
-     /\b(?:market|right now|currently|volatility|rsi|atr|ema|price action|market conditions|suitable|trending|consolidat|choppy)\b/i.test(currentQuestion);
+     /\b(?:gold|xauusd|market|right now|currently|volatility|rsi|atr|ema|price action|market conditions|suitable|trending|consolidat|choppy)\b/i.test(currentQuestion);
     if(wantsFreshMarket)currentMarketEvidence=await runRead('getCurrentMarketConditions',{botId:effectiveRobotId??null,asset:selectedAsset??null},async()=>{
      if(!/propdao|hyperliquid/i.test(currentQuestion)){if(selectedAsset&&!['XAUUSD','GOLDUSDC'].includes(selectedAsset))return {available:false,reason:'Primary live research currently supports Gold/XAUUSD; do not substitute it for another requested symbol.'};return marketAlertService.market();}
      try{
@@ -1244,6 +1246,10 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
        timeframe:'m1',bars:sample.candles,nowSeconds:Date.now()/1000});
      }catch(error){return {available:false,reason:error instanceof Error?error.message:'Fresh reference candles unavailable'};}
     });
+    // Fresh on-demand macro/news context accompanies a Gold price question, even if
+    // the model does not choose tools. No background task or event tracking.
+    const goldMacroEvidence=wantsFreshMarket&&usePrimaryGoldResearch(currentQuestion,selectedAsset)
+      ?await goldMacroSnapshot().catch(()=>null):null;
     let robotCard:unknown;
     if(robotEnvironmentEvidence&&!researchMode&&(robotContextIntent||Boolean(robotId))){
      robotCard=await runRead('getRobotContextCard',{botId:effectiveRobotId??null},async()=>robotCardEvidence(robotEnvironmentEvidence,deskEvidence));
@@ -1415,7 +1421,7 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
     }:undefined;
     // Each model turn may request a small batch of independent reads.
     let started=0,running=0;
-    const effectiveTools={...marketTools,...marketAlertService.tools(uid)};
+    const effectiveTools={...marketTools,...marketAlertService.tools(uid),...marketIntelligenceTools()};
     const tools=Object.keys(effectiveTools).length?Object.fromEntries(Object.entries(effectiveTools).map(([name,definition])=>{
      const entry=definition as {execute:(...args:any[])=>unknown};
      return [name,{...definition,execute:async(...args:any[])=>{
@@ -1433,7 +1439,8 @@ app.post('/api/ai-sdk/stream', async (req, res) => {
       'LIVE TRADE INVESTIGATIONS: Separate OWNER-VERIFIED account-wide broker trades from a SPECIFIC robot and deployment revision. Exact provider position, intent or order IDs can verify a robot link only when the owner-scoped Worker protected-fill journal agrees on broker account, symbol, side and identity. A unique entry-time, price and quantity match is PROBABLE, never proven. Missing evidence stays UNKNOWN. If the user names a robot or says “my running bot”, FIRST use the deployed grant, broker account, current Worker status, last decision and its verified/probable fill evidence; never attribute all account losses to that robot or to its newest revision. For a portfolio/account question, use the authenticated full Trading Desk. Distinguish stop labels from causality, preserve fee-inclusion uncertainty, and do not invent ATR, volatility, counter-trend or stop tightness without contemporaneous strategy-and-candle measurements. Never substitute saved backtest metrics for live trades. A stopped/unreachable Worker does NOT establish missing broker history. Never change source or orders as part of read-only loss analysis.',
       deskEvidence?'VERIFIED LIVE TRADING DESK FOR TODAY (SAST; all authenticated PropDAO accounts): '+JSON.stringify(deskEvidence):'',
       'Trader harness rules: Choose scope by USER INTENT. Named-running-robot question → robot card and only that grant’s exactly linked broker fills; desk data remains contextual and ACCOUNT-WIDE. Portfolio question → Trading Desk card and all owned accounts. Market conditions → independently dated completed-candle market evidence. A code mutation → human review and live-runtime gate, not P/L card. Never claim that an SL exit proves the stop was too small or that recent losses are caused by a trend regime. Missing Worker/provider receipts are unknown, not zero. Never silently increase risk or alter broker orders.',
-      currentMarketEvidence?'Latest read-only completed-candle market evidence. Distinguish the derivative reference market from the broker and deployed strategy filters: '+JSON.stringify(currentMarketEvidence):'',
+      currentMarketEvidence?'Latest independently fetched completed-candle market evidence with observation time: '+JSON.stringify(currentMarketEvidence):'',
+      goldMacroEvidence?'Current dated Gold news headlines and economic calendar; use only when relevant, do not treat headlines as proven causes: '+JSON.stringify(goldMacroEvidence):'',
       editableSourceEvidence?'USER-OWNED SAVED STRATEGY.JS READ (independent of tool selection): '+JSON.stringify(editableSourceEvidence)+'. If available=true you CAN inspect source; do not say the user must paste it. An incomplete window is not the full file; read more lines before editing an unseen section.': '',
       robotCard?'ROBOT-SCOPED EVIDENCE: '+JSON.stringify(robotCard)+'. NEVER substitute account-wide P/L for verified robot performance. Only exact broker provider identities are verified robot losses. Probable links are hypotheses and must be labelled. An SL code alone does not prove the stop is too tight, a reversal, ATR conditions, or time-of-day causality. Require entry-time candles and revision-specific decision/stop evidence to diagnose; clearly state unknowns.': '',
       robotEnvironmentEvidence?'AUTHENTICATED DEPLOYED ROBOT DISCOVERY AND ENVIRONMENT. This is the source of truth for robot selection and deployed strategy code; if kind=ambiguous ask which candidate, if kind=unverified do not claim running; do not say you cannot see deployed robots when this evidence is available. Never promise profitability or call conditions optimal without comparing actual code to current completed market candles: '+JSON.stringify(robotEnvironmentEvidence):'',
