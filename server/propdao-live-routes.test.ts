@@ -558,3 +558,18 @@ describe('stopped robot source mutation must confirm broker-flat exposure',()=>{
   await expect(svc.assertDeletable('alice','bot-1')).resolves.toBeUndefined();
  });
 });
+
+it('permits deleting owned saved source when broker exposure is unknown after order grant retirement',async()=>{
+ vi.stubEnv('PROPDAO_LIVE_ENABLED','true');
+ vi.stubEnv('PROPDAO_LIVE_RUNTIME_URL','https://runtime.example');
+ vi.stubEnv('PROPDAO_LIVE_INTERNAL_SECRET','t'.repeat(40));
+ const {svc,saved,fetcher,storage}=setup();
+ const key='propdao-live/v1/'+(process.env.VERCEL_ENV||'development')+'/'+Buffer.from('alice').toString('base64url')+'/bot-1.json';
+ saved.set(key,JSON.stringify({id:'grant-bot-1',uid:'alice',botId:'bot-1',accountId:'prop-1',symbol:'GOLDUSDC',expiresAt:Date.now()+100000}));
+ fetcher.mockRejectedValue(Error('Cloudflare unavailable'));
+ const result=await svc.retireSourceForDeletion('alice','bot-1');
+ expect(result).toMatchObject({authorizationRevoked:true,hadGrant:true,runtimeStopped:null});
+ expect(JSON.parse(saved.get(key)!).revokedAt).toBeTypeOf('number');
+ expect(storage.remove).not.toHaveBeenCalled();
+ await expect(svc.assertDeletionReviewable('alice','bot-1')).resolves.toBeUndefined();
+});
