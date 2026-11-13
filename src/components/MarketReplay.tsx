@@ -9,7 +9,7 @@ import type {AppTheme} from '../theme';
 import {aggregateReplayBars,beginReplay,DEFAULT_REPLAY_COSTS,replayAdvance,replayClose,replayEMA,replayEnter,replayPlacePending,replayCancelPending,replayMark,replayMetrics,replayModifyPosition,replayPositions,replayVisibleBars,validateReplayBars,validateReplayCosts,type ReplayBar,type ReplayCosts,type ReplaySession,type ReplaySide} from '../market-replay-engine';
 import './market-replay.css';
 
-type Props={client:CloudClient;theme:AppTheme;onClose:()=>void};
+type Props={client:CloudClient;theme:AppTheme;onClose:()=>void;initialWorkout?:boolean};
 const money=(value:number)=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(value);
 const price=(value:number)=>new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:3}).format(value);
 const utc=(timestamp:number)=>new Date(timestamp*1000).toLocaleString('en-GB',{timeZone:'UTC',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});
@@ -26,9 +26,9 @@ function exportJournal(session:ReplaySession,notes:Record<string,string>,day:str
  window.setTimeout(()=>URL.revokeObjectURL(url),1500);
 }
 const speeds=[0.5,1,2,4,8,16] as const;
-export function MarketReplay({client,theme,onClose}:Props){
+export function MarketReplay({client,theme,onClose,initialWorkout=false}:Props){
  const [day,setDay]=useState(yesterday),[startClock,setStartClock]=useState('08:00'),[startingBalance,setStartingBalance]=useState('10000');
- const [practiceSweep,setPracticeSweep]=useState(false);
+ const [practiceSweep,setPracticeSweep]=useState(initialWorkout);
  const [bars,setBars]=useState<ReplayBar[]>([]),[session,setSession]=useState<ReplaySession|null>(null),[firstIndex,setFirstIndex]=useState(0);
  const [loading,setLoading]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const [playing,setPlaying]=useState(false),[speed,setSpeed]=useState<number>(2),[timeframe,setTimeframe]=useState<1|5|15|60>(1);
