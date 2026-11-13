@@ -3,6 +3,7 @@ import {Activity,ArrowRight,BarChart3,CalendarDays,CheckCircle2,ChevronRight,Clo
 import {createChart,CandlestickSeries,LineSeries,createSeriesMarkers,ColorType} from 'lightweight-charts';
 import {historicalData} from '../history-cache';
 import {installChartTools} from '../chart-tools';
+import {findSweepMoments} from '../practice-moments';
 import type {CloudClient} from '../firebase';
 import type {AppTheme} from '../theme';
 import {aggregateReplayBars,beginReplay,DEFAULT_REPLAY_COSTS,replayAdvance,replayClose,replayEMA,replayEnter,replayPlacePending,replayCancelPending,replayMark,replayMetrics,replayModifyPosition,replayPositions,replayVisibleBars,validateReplayBars,validateReplayCosts,type ReplayBar,type ReplayCosts,type ReplaySession,type ReplaySide} from '../market-replay-engine';
@@ -27,6 +28,7 @@ function exportJournal(session:ReplaySession,notes:Record<string,string>,day:str
 const speeds=[0.5,1,2,4,8,16] as const;
 export function MarketReplay({client,theme,onClose}:Props){
  const [day,setDay]=useState(yesterday),[startClock,setStartClock]=useState('08:00'),[startingBalance,setStartingBalance]=useState('10000');
+ const [practiceSweep,setPracticeSweep]=useState(false);
  const [bars,setBars]=useState<ReplayBar[]>([]),[session,setSession]=useState<ReplaySession|null>(null),[firstIndex,setFirstIndex]=useState(0);
  const [loading,setLoading]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const [playing,setPlaying]=useState(false),[speed,setSpeed]=useState<number>(2),[timeframe,setTimeframe]=useState<1|5|15|60>(1);
@@ -43,7 +45,7 @@ export function MarketReplay({client,theme,onClose}:Props){
  const drawingRef=useRef<ReturnType<typeof installChartTools>|null>(null);
  const chartRef=useRef<{chart:any;series:any;ema20:any;ema50:any;markers:any;lines:any[]} |null>(null);
  const uid=client.getProfile()?.uid||'local';
- const sessionKey='trading-vibes:replay:v2:'+uid+':'+day;
+ const sessionKey='trading-vibes:replay:v2:'+uid+':'+day+(practiceSweep?':sweep-workout':'');
  const setCurrent=(next:ReplaySession)=>{sessionRef.current=next;setSession(next)};
  const currentBar=session?bars[session.index]:null;
  const replayAtEnd=Boolean(session&&session.index>=bars.length-1);
@@ -77,7 +79,9 @@ export function MarketReplay({client,theme,onClose}:Props){
    const candles=validateReplayBars(data.candles.map(c=>({time:c.time,open:c.open,high:c.high,low:c.low,close:c.close})));
    const clock=Date.parse(day+'T'+startClock+':00Z');
    if(!Number.isFinite(clock))throw Error('Select a valid UTC start time.');
-   const desired=candles.findIndex(c=>c.time*1000>=clock);
+   const moments=practiceSweep?findSweepMoments(candles):[];
+   if(practiceSweep&&!moments.length)throw Error('No matching sweeps found on this day. Try another completed trading day.');
+   const desired=practiceSweep?Math.max(0,moments[0]-5):candles.findIndex(c=>c.time*1000>=clock);
    if(desired<0||desired>=candles.length-1)throw Error('No candles after the chosen replay start time. Try another session or date.');
    const initial=Math.max(0,desired),startEquity=number(startingBalance);
    let next=beginReplay(candles,initial,startEquity),resume=false;
@@ -95,7 +99,7 @@ export function MarketReplay({client,theme,onClose}:Props){
    setBars(candles);setFirstIndex(initial);setCurrent(next);
    const restored=replayPositions(next)[0];setSelectedPositionId(restored?.id||'');setAdjustStop(restored?String(restored.stop):'');setAdjustTarget(restored?String(restored.target):'');
    setPlaying(false);setProgressTime(Date.now());
-   setNotice(resume?'Your last practice session is restored.':'Market replay ready. Future candles are hidden. Good trading.');
+   setNotice(resume?'Your last practice session is restored.':practiceSweep?`${moments.length} matching ${moments.length===1?'moment':'moments'} found. Replay begins before the first confirmation.`:'Market replay ready. Future candles are hidden. Good trading.');
   }catch(e){setError(e instanceof Error?e.message:'Historical candles unavailable. Try another date.')}
   finally{setLoading(false)}
  };
@@ -220,9 +224,11 @@ export function MarketReplay({client,theme,onClose}:Props){
      <span className="tv-replay-eyebrow"><CalendarDays size={14}/> BUILD YOUR PRACTICE SESSION</span>
      <h3>Trade the past like it's happening now.</h3>
      <p>Choose a completed trading day. Only candles available at your replay time will be visible. Practice entries, manage stops and targets, then review every decision.</p>
+     {import.meta.env.VITE_TRAINING_PREVIEW==='true'&&<label><input type="checkbox" checked={practiceSweep} disabled={loading} onChange={e=>setPracticeSweep(e.target.checked)}/> Liquidity sweep workout (early preview)</label>}
+     {practiceSweep&&<p>Find Gold M1 candles that sweep the previous 20 consecutive minutes' high or low and close back inside. Replay starts five candles before the first match. The pattern is confirmed only at the candle close.</p>}
      <div className="tv-replay-setup-fields">
       <label><span>Historical date · UTC</span><input aria-label="Historical replay date" type="date" max={yesterday()} value={day} disabled={loading} onChange={e=>setDay(e.target.value)}/></label>
-      <label><span>Start time · UTC</span><input aria-label="Replay start time" type="time" step={60} value={startClock} disabled={loading} onChange={e=>setStartClock(e.target.value)}/></label>
+      {!practiceSweep&&<label><span>Start time · UTC</span><input aria-label="Replay start time" type="time" step={60} value={startClock} disabled={loading} onChange={e=>setStartClock(e.target.value)}/></label>}
       <label><span>Practice balance · USD</span><input aria-label="Practice starting balance" type="number" min={100} max={1e8} value={startingBalance} disabled={loading} onChange={e=>setStartingBalance(e.target.value)}/></label>
      </div>
      <button className="tv-replay-launch" type="button" disabled={loading||!day} onClick={()=>void start()}>{loading?'Loading shared historical candles…':'Launch market replay'} <ArrowRight size={17}/></button>
