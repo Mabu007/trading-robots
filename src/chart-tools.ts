@@ -1,7 +1,7 @@
 import type { Candle } from './types';
 
 type Point = {time:number; price:number};
-type Shape = {id:string; kind:'trend'|'horizontal'|'vertical'|'rectangle'|'ellipse'; a:Point; b:Point};
+type Shape = {id:string; kind:'trend'|'horizontal'|'vertical'|'rectangle'|'ellipse'|'fibonacci'|'text'; a:Point; b:Point; text?:string};
 type Tool = 'pan'|'measure'|Shape['kind'];
 const NS='http://www.w3.org/2000/svg';
 const icons:Record<string,string>={pan:'<path d="M8 13V5a2 2 0 0 1 4 0v5-7a2 2 0 0 1 4 0v7-4a2 2 0 0 1 4 0v7l-1 4a5 5 0 0 1-5 4h-2a6 6 0 0 1-5-3l-3-4a2 2 0 0 1 3-2z"/>',measure:'<circle cx="12" cy="12" r="6"/><path d="M12 2v5m0 10v5M2 12h5m10 0h5"/>',draw:'<path d="M4 20 20 4M5 4h3M4 5v3M16 20h4v-4"/>',undo:'<path d="M9 7 4 12l5 5M4 12h9a6 6 0 0 1 6 6"/>',clear:'<path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v6m4-6v6"/>'};
@@ -22,7 +22,7 @@ export function installChartTools(el:HTMLElement, chart:any, series:any, candles
  const panButton=button('pan','Pan chart',()=>setTool('pan'));
  const measureButton=button('measure','Measure movement',()=>setTool('measure'));
  const dropdown=document.createElement('details');dropdown.className='drawing-dropdown';const summary=document.createElement('summary');summary.title='Drawings';summary.setAttribute('aria-label','Drawings');summary.innerHTML=icon('draw');dropdown.appendChild(summary);const menu=document.createElement('div');menu.className='drawing-menu';dropdown.appendChild(menu);toolbar.appendChild(dropdown);
- for(const [kind,name] of [['trend','Trendline'],['horizontal','Horizontal line'],['vertical','Vertical line'],['rectangle','Rectangle'],['ellipse','Ellipse']] as const){const b=document.createElement('button');b.type='button';b.textContent=name;b.addEventListener('click',()=>{dropdown.open=false;setTool(kind)});menu.appendChild(b)}
+ for(const [kind,name] of [['trend','Trendline'],['horizontal','Horizontal line'],['vertical','Vertical line'],['rectangle','Rectangle'],['ellipse','Ellipse'],['fibonacci','Fibonacci retracement'],['text','Text label']] as const){const b=document.createElement('button');b.type='button';b.textContent=name;b.addEventListener('click',()=>{dropdown.open=false;setTool(kind)});menu.appendChild(b)}
  button('undo','Undo drawing',()=>{if(undo.length){drawings=undo.pop()!;selected=null;persist();render()}});
  button('clear','Clear drawings',()=>{if(drawings.length&&window.confirm('Clear all drawings for this chart?')){checkpoint();drawings=[];selected=null;persist();render()}});
  const pipButton=button('Pip','Set pip size for measurement',()=>{const value=window.prompt('Pip size in price units (leave empty to show pips as unavailable):',pipSize?String(pipSize):'');if(value===null)return;const parsed=Number(value);pipSize=Number.isFinite(parsed)&&parsed>0?parsed:0;persist();render()});pipButton.className='drawing-pip';
@@ -42,22 +42,28 @@ export function installChartTools(el:HTMLElement, chart:any, series:any, candles
   else if(s.kind==='horizontal')n=node('line',{...common,x1:0,y1:a.y,x2:el.clientWidth-65,y2:a.y});
   else if(s.kind==='vertical')n=node('line',{...common,x1:a.x,y1:0,x2:a.x,y2:el.clientHeight-24});
   else if(s.kind==='rectangle')n=node('rect',{...common,x:Math.min(a.x,b.x),y:Math.min(a.y,b.y),width:Math.abs(b.x-a.x),height:Math.abs(b.y-a.y),fill:'#9ee3b626'});
-  else n=node('ellipse',{...common,cx:(a.x+b.x)/2,cy:(a.y+b.y)/2,rx:Math.abs(a.x-b.x)/2,ry:Math.abs(a.y-b.y)/2,fill:'#9ee3b626'});
+  else if(s.kind==='ellipse')n=node('ellipse',{...common,cx:(a.x+b.x)/2,cy:(a.y+b.y)/2,rx:Math.abs(a.x-b.x)/2,ry:Math.abs(a.y-b.y)/2,fill:'#9ee3b626'});
+  else if(s.kind==='fibonacci'){
+   for(const ratio of [0,.236,.382,.5,.618,.786,1]){const y=a.y+(b.y-a.y)*ratio;const l=node('line',{x1:Math.min(a.x,b.x),x2:Math.max(a.x,b.x),y1:y,y2:y,stroke:'#429cc0','stroke-width':1});l.style.pointerEvents='none';const t=node('text',{x:Math.min(a.x,b.x)+3,y:y-3,fill:'#3285a5','font-size':10});t.textContent=String(ratio);t.style.pointerEvents='none';}
+   n=node('line',{...common,x1:a.x,y1:a.y,x2:b.x,y2:b.y});
+  }else {const t=node('text',{x:a.x,y:a.y,fill:'var(--tv-shell-ink, #d5e6dc)','font-size':13});t.textContent=s.text||'';t.style.pointerEvents='none';n=node('rect',{...common,x:a.x-3,y:a.y-14,width:Math.max(14,(s.text||'').length*7),height:18});}
+
   if(!temporary){n.setAttribute('stroke-width','8');n.setAttribute('stroke-opacity','0.01');selectShape(n,s);const visible=n.cloneNode(false) as SVGElement;visible.setAttribute('stroke-width','1.5');visible.setAttribute('stroke-opacity','1');visible.style.pointerEvents='none';svg.appendChild(visible)}
   if(!temporary&&s.kind==='horizontal'){const t=node('text',{x:Math.max(2,el.clientWidth-63),y:a.y-4,fill:'#d5e6dc','font-size':10});t.textContent=s.a.price.toFixed(precision)}if(!temporary&&s.kind==='vertical'){const t=node('text',{x:a.x+3,y:el.clientHeight-27,fill:'#d5e6dc','font-size':10});t.textContent=new Date(s.a.time*1000).toISOString().slice(0,16).replace('T',' ')}
-  if(!temporary&&selected===s.id){const points=s.kind==='horizontal'||s.kind==='vertical'?[['a',a] as const]:[['a',a] as const,['b',b] as const];for(const [which,p] of points){const handle=node('circle',{cx:p.x!,cy:p.y!,r:5,fill:'#cbf7dc',stroke:'#1d4330','stroke-width':1});selectShape(handle,s,which)}}
+  if(!temporary&&selected===s.id){const points=s.kind==='horizontal'||s.kind==='vertical'||s.kind==='text'?[['a',a] as const]:[['a',a] as const,['b',b] as const];for(const [which,p] of points){const handle=node('circle',{cx:p.x!,cy:p.y!,r:5,fill:'#cbf7dc',stroke:'#1d4330','stroke-width':1});selectShape(handle,s,which)}}
  }
  function render(){svg.replaceChildren();remove.style.display=selected?'':'none';for(const s of drawings)renderShape(s);if(preview)renderShape(preview,true);
   if(measure){const a=screen(measure.a),b=screen(measure.b);if(a.x!==null&&a.y!==null&&b.x!==null&&b.y!==null){const diff=measure.b.price-measure.a.price,percent=measure.a.price?diff/measure.a.price*100:0;node('rect',{x:Math.min(a.x,b.x),y:Math.min(a.y,b.y),width:Math.max(1,Math.abs(b.x-a.x)),height:Math.max(1,Math.abs(b.y-a.y)),fill:diff>=0?'#42d8a426':'#e9777b26',stroke:diff>=0?'#42d8a4':'#e9777b','stroke-width':1});const duration=Math.abs(measure.b.time-measure.a.time);label.textContent=`${diff>=0?'↑':'↓'} ${measure.a.price.toFixed(precision)} → ${measure.b.price.toFixed(precision)} · Δ ${diff.toFixed(precision)} · ${pipSize?(diff/pipSize).toFixed(1)+' pips':'pips unavailable (set pip size)'} · ${percent.toFixed(2)}% · ${Math.round(Math.abs(timeToIndex(measure.b.time)-timeToIndex(measure.a.time)))} candles · ${Math.round(duration/60)} min`;label.style.left=`${Math.max(4,Math.min(el.clientWidth-230,b.x+8))}px`;label.style.top=`${Math.max(38,Math.min(el.clientHeight-55,b.y+8))}px`;label.classList.toggle('negative',diff<0);label.style.display='block'}}else label.style.display='none';
  }
  function down(e:PointerEvent){if(toolbar.contains(e.target as Node)||e.button!==0)return;const p=point(e);if(!p)return;if(tool==='pan'){if(!(e.target instanceof SVGElement)){selected=null;measure=null;render()}return}e.preventDefault();e.stopPropagation();el.setPointerCapture(e.pointerId);
   if(tool==='measure'){measure={a:p,b:p};drag={mode:'measure',start:p,moved:false};render();return}
-  if(tool==='trend'&&first){checkpoint();drawings.push({id:crypto.randomUUID(),kind:'trend',a:first,b:p});first=null;persist();setTool('pan');return}
-  if(tool==='trend'){first=p;preview={id:'preview',kind:'trend',a:p,b:p};render();return}
+  if((tool==='trend'||tool==='fibonacci')&&first){checkpoint();drawings.push({id:crypto.randomUUID(),kind:tool,a:first,b:p});first=null;persist();setTool('pan');return}
+  if(tool==='trend'||tool==='fibonacci'){first=p;preview={id:'preview',kind:tool,a:p,b:p};render();return}
+  if(tool==='text'){const text=window.prompt('Text label');if(text?.trim()){checkpoint();drawings.push({id:crypto.randomUUID(),kind:'text',a:p,b:p,text:text.trim().slice(0,120)});persist()}setTool('pan');return}
   if(tool==='horizontal'||tool==='vertical'){checkpoint();drawings.push({id:crypto.randomUUID(),kind:tool,a:p,b:p});persist();setTool('pan');return}
   preview={id:'preview',kind:tool,a:p,b:p};drag={mode:'create',start:p,moved:false};render();
  }
- function move(e:PointerEvent){const p=point(e);if(!p)return;if(!drag){if(tool==='trend'&&first&&preview){preview.b=p;render()}return}e.preventDefault();e.stopPropagation();drag.moved=true;
+ function move(e:PointerEvent){const p=point(e);if(!p)return;if(!drag){if((tool==='trend'||tool==='fibonacci')&&first&&preview){preview.b=p;render()}return}e.preventDefault();e.stopPropagation();drag.moved=true;
   if(drag.mode==='measure'&&measure)measure.b=p;
   else if(drag.mode==='create'&&preview)preview.b=p;
   else if(drag.shape){const original=drag.shape;drawings=drawings.map(s=>{if(s.id!==original.id)return s;if(drag!.mode==='a')return {...s,a:p};if(drag!.mode==='b')return {...s,b:p};const dt=p.time-drag!.start.time,dp=p.price-drag!.start.price;return {...s,a:{time:original.a.time+dt,price:original.a.price+dp},b:{time:original.b.time+dt,price:original.b.price+dp}}})}render();

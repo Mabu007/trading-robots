@@ -5,7 +5,7 @@ import {historicalData} from '../history-cache';
 import {installChartTools} from '../chart-tools';
 import type {CloudClient} from '../firebase';
 import type {AppTheme} from '../theme';
-import {aggregateReplayBars,beginReplay,DEFAULT_REPLAY_COSTS,replayAdvance,replayClose,replayEMA,replayEnter,replayPlacePending,replayCancelPending,replayMark,replayMetrics,replayModifyPosition,replayVisibleBars,validateReplayBars,validateReplayCosts,type ReplayBar,type ReplayCosts,type ReplaySession,type ReplaySide} from '../market-replay-engine';
+import {aggregateReplayBars,beginReplay,DEFAULT_REPLAY_COSTS,replayAdvance,replayClose,replayEMA,replayEnter,replayPlacePending,replayCancelPending,replayMark,replayMetrics,replayModifyPosition,replayPositions,replayVisibleBars,validateReplayBars,validateReplayCosts,type ReplayBar,type ReplayCosts,type ReplaySession,type ReplaySide} from '../market-replay-engine';
 import './market-replay.css';
 
 type Props={client:CloudClient;theme:AppTheme;onClose:()=>void};
@@ -37,6 +37,7 @@ export function MarketReplay({client,theme,onClose}:Props){
  const [adjustStop,setAdjustStop]=useState(''),[adjustTarget,setAdjustTarget]=useState('');
  const [costs,setCosts]=useState<ReplayCosts>(DEFAULT_REPLAY_COSTS),[notes,setNotes]=useState(''),[annotations,setAnnotations]=useState<Record<string,string>>({});
  const [selectedTrade,setSelectedTrade]=useState<string|null>(null),[showHelp,setShowHelp]=useState(false);
+ const [selectedPositionId,setSelectedPositionId]=useState(''),[showNewOrder,setShowNewOrder]=useState(false),[managePending,setManagePending]=useState(true);
  const [progressTime,setProgressTime]=useState(0);
  const sessionRef=useRef<ReplaySession|null>(null),chartDiv=useRef<HTMLDivElement|null>(null),modalRef=useRef<HTMLElement|null>(null);
  const drawingRef=useRef<ReturnType<typeof installChartTools>|null>(null);
@@ -51,6 +52,10 @@ export function MarketReplay({client,theme,onClose}:Props){
  const aggregates=useMemo(()=>aggregateReplayBars(visible,timeframe),[visible,timeframe]);
  const mark=useMemo(()=>session&&currentBar?replayMark(session,currentBar,costs):null,[session,currentBar,costs]);
  const sessionOpen=Boolean(session);
+ const positions=session?replayPositions(session):[];
+ const selectedPosition=positions.find(p=>p.id===selectedPositionId)||positions[0]||null;
+ const selectedMark=session&&currentBar&&selectedPosition?replayMark({...session,position:selectedPosition,positions:[selectedPosition]},currentBar,costs):null;
+ useEffect(()=>{setAdjustStop(selectedPosition?String(selectedPosition.stop):'');setAdjustTarget(selectedPosition?String(selectedPosition.target):'')},[selectedPosition?.id]);
  const riskPerOunce=Number(stopDistance)+costs.slippage+2*costs.feePerOunce;
  const estimatedRisk=Math.max(0,riskPerOunce*Number(quantity)||0);
  const riskPercent=mark&&mark.equity>0?estimatedRisk/mark.equity*100:0;
@@ -88,7 +93,7 @@ export function MarketReplay({client,theme,onClose}:Props){
     }
    }catch{/* Invalid browser-only practice saves are ignored. */}
    setBars(candles);setFirstIndex(initial);setCurrent(next);
-   setAdjustStop(next.position?String(next.position.stop):'');setAdjustTarget(next.position?String(next.position.target):'');
+   const restored=replayPositions(next)[0];setSelectedPositionId(restored?.id||'');setAdjustStop(restored?String(restored.stop):'');setAdjustTarget(restored?String(restored.target):'');
    setPlaying(false);setProgressTime(Date.now());
    setNotice(resume?'Your last practice session is restored.':'Market replay ready. Future candles are hidden. Good trading.');
   }catch(e){setError(e instanceof Error?e.message:'Historical candles unavailable. Try another date.')}
@@ -104,7 +109,7 @@ export function MarketReplay({client,theme,onClose}:Props){
   const current=sessionRef.current;
   if(!current||!bars.length)return;
   try{const next=replayAdvance(current,bars,costs,steps);if(next===current||next.index===current.index){setPlaying(false);return}
-    setCurrent(next);if(!current.position&&next.position){setAdjustStop(String(next.position.stop));setAdjustTarget(String(next.position.target));setNotice('Pending paper order filled.')}setProgressTime(Date.now());
+    setCurrent(next);const added=replayPositions(next).find(p=>!replayPositions(current).some(old=>old.id===p.id));if(added){setSelectedPositionId(added.id);setAdjustStop(String(added.stop));setAdjustTarget(String(added.target));setShowNewOrder(false);setNotice('Pending paper order filled.')}setProgressTime(Date.now());
     if(next.index>=bars.length-1){setPlaying(false);setNotice('Session complete. Review your trade journal and stats.');}
     else if(next.trades.length>current.trades.length){const trade=next.trades.at(-1)!;
      setNotice((trade.net>=0?'Target reached · ':'Trade closed · ')+(trade.net>=0?'+':'')+money(trade.net)+' net');
@@ -115,20 +120,20 @@ export function MarketReplay({client,theme,onClose}:Props){
  const enter=(side:ReplaySide)=>{
   if(!sessionRef.current)return;
   setPlaying(false);setError('');
-  try{const next=orderType==='market'?replayEnter(sessionRef.current,bars,side,number(quantity),number(stopDistance),number(targetDistance),costs):replayPlacePending(sessionRef.current,bars,side,orderType,number(orderPrice),number(quantity),number(stopDistance),number(targetDistance),costs);
-   setCurrent(next);if(next.position){setAdjustStop(String(next.position.stop));setAdjustTarget(String(next.position.target))}setNotice(next.pending?'Paper order queued for future candles.':side==='BUY'?'Long opened. Manage the risk; the next candle is still hidden.':'Short opened. Let the market reveal the next candle.');
+  try{const previous=sessionRef.current;const next=orderType==='market'?replayEnter(sessionRef.current,bars,side,number(quantity),number(stopDistance),number(targetDistance),costs):replayPlacePending(sessionRef.current,bars,side,orderType,number(orderPrice),number(quantity),number(stopDistance),number(targetDistance),costs);
+   setCurrent(next);const opened=replayPositions(next).find(p=>!replayPositions(previous).some(old=>old.id===p.id));if(opened){setSelectedPositionId(opened.id);setAdjustStop(String(opened.stop));setAdjustTarget(String(opened.target))}setShowNewOrder(false);if(next.pending)setManagePending(true);setNotice(orderType!=='market'?'Paper order queued for future candles.':side==='BUY'?'Long opened. Manage the risk; the next candle is still hidden.':'Short opened. Let the market reveal the next candle.');
   }catch(e){setError(e instanceof Error?e.message:'Order rejected')}
  };
  const close=()=>{
   if(!sessionRef.current)return;setPlaying(false);
-  const next=replayClose(sessionRef.current,bars,costs);if(next!==sessionRef.current){setCurrent(next);setNotice('Position closed at the current revealed price.')}
+  const next=replayClose(sessionRef.current,bars,costs,'MANUAL',selectedPosition?.id);if(next!==sessionRef.current){setCurrent(next);setNotice('Position closed at the current revealed price.')}
  };
  const modifyPosition=(breakEven=false)=>{
-  if(!sessionRef.current?.position)return;setPlaying(false);setError('');
+  if(!sessionRef.current||!selectedPosition)return;setPlaying(false);setError('');
   try{
-   const p=sessionRef.current.position;
-   const next=replayModifyPosition(sessionRef.current,bars,costs,breakEven?p.entry:Number(adjustStop),Number(adjustTarget));
-   setCurrent(next);setAdjustStop(String(next.position!.stop));setAdjustTarget(String(next.position!.target));
+   const p=selectedPosition;
+   const next=replayModifyPosition(sessionRef.current,bars,costs,breakEven?p.entry:Number(adjustStop),Number(adjustTarget),p.id);
+   const updated=replayPositions(next).find(item=>item.id===p.id)!;setCurrent(next);setAdjustStop(String(updated.stop));setAdjustTarget(String(updated.target));
    setNotice(breakEven?'Stop moved to break-even price.':'Protective orders updated for the next candle.');
   }catch(e){setError(e instanceof Error?e.message:'Could not modify this position.')}
  };
@@ -161,7 +166,7 @@ export function MarketReplay({client,theme,onClose}:Props){
    else if(e.key==='?')setShowHelp(v=>!v);
   };
   window.addEventListener('keydown',handle);return()=>window.removeEventListener('keydown',handle);
- },[sessionOpen,advance,bars,costs,quantity,stopDistance,targetDistance,orderType,orderPrice]);
+ },[sessionOpen,advance,bars,costs,quantity,stopDistance,targetDistance,orderType,orderPrice,selectedPositionId,session]);
  useEffect(()=>{
   if(!sessionOpen||!chartDiv.current)return;
   const dark=theme==='dark';
@@ -194,19 +199,19 @@ export function MarketReplay({client,theme,onClose}:Props){
    marks.push({time:Math.floor(t.entryTime/(timeframe*60))*(timeframe*60) as any,position:t.side==='BUY'?'belowBar':'aboveBar',shape:'arrowUp',color:t.side==='BUY'?'#19a578':'#db6a6b',text:t.side==='BUY'?'L':'S'});
    marks.push({time:Math.floor(t.exitTime/(timeframe*60))*(timeframe*60) as any,position:t.net>=0?'aboveBar':'belowBar',shape:'circle',color:t.net>=0?'#19a578':'#db6a6b',text:(t.net>=0?'+':'')+t.net.toFixed(1)});
   }
-  if(session.position)marks.push({time:Math.floor(session.position.entryTime/(timeframe*60))*(timeframe*60) as any,position:session.position.side==='BUY'?'belowBar':'aboveBar',shape:'arrowUp',color:'#e9b45d',text:'OPEN'});
+  for(const p of replayPositions(session))marks.push({time:Math.floor(p.entryTime/(timeframe*60))*(timeframe*60) as any,position:p.side==='BUY'?'belowBar':'aboveBar',shape:'arrowUp',color:'#e9b45d',text:'OPEN'});
   c.markers.setMarkers(marks.sort((a,b)=>Number(a.time)-Number(b.time)));
   for(const line of c.lines)c.series.removePriceLine(line);c.lines=[];
   if(session.pending)c.lines.push(c.series.createPriceLine({price:session.pending.price,color:'#e9b45d',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'PENDING'}));
-  if(session.position){
-   for(const [level,color,title] of [[session.position.entry,'#88a7ec','ENTRY'],[session.position.stop,'#db6a6b','STOP'],[session.position.target,'#19a578','TARGET']] as const)
+  for(const p of replayPositions(session)){
+   for(const [level,color,title] of [[p.entry,'#88a7ec','ENTRY'],[p.stop,'#db6a6b','STOP'],[p.target,'#19a578','TARGET']] as const)
     c.lines.push(c.series.createPriceLine({price:level,color,lineWidth:1,lineStyle:2,axisLabelVisible:true,title}));
   }
   if(follow)c.chart.timeScale().scrollToRealTime();
  },[aggregates,session,emaVisible,timeframe]);
  const percent=bars.length&&session?100*session.index/Math.max(1,bars.length-1):0;
  const selected=session?.trades.find(t=>t.id===selectedTrade);
- return <div className="tv-replay-backdrop" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}>
+ return <div className={'tv-replay-backdrop'+(expanded?' is-expanded':'')} role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}>
   <section ref={modalRef} className={'tv-replay-modal'+(expanded?' is-expanded':'')} role="dialog" aria-modal="true" aria-label="Market Replay practice terminal">
    <header className="tv-replay-top"><div className="tv-replay-brand"><span className="tv-replay-brand-icon"><BarChart3 size={21}/></span><div><span className="tv-replay-eyebrow">TRADING VIBES · PRACTICE LAB</span><h2>Market Replay <span>GOLD / XAUUSD</span></h2></div></div>
     <div className="tv-replay-top-actions">{session&&<button type="button" onClick={()=>void toggleFullscreen()} aria-label={expanded?'Exit full screen':'Full screen'}>{expanded?<Minimize2 size={16}/>:<Maximize2 size={16}/>}</button>}<button type="button" onClick={onClose} aria-label="Close replay"><X size={18}/></button></div>
@@ -228,7 +233,7 @@ export function MarketReplay({client,theme,onClose}:Props){
     </aside></div>:
    <div className="tv-replay-terminal">
     <div className="tv-replay-marketbar"><div className="tv-replay-quote"><span>GOLD · XAUUSD <i/></span><strong>{currentBar?price(currentBar.close):'—'}</strong><small>{currentBar?utc(currentBar.time+60)+' UTC':'—'} · Historical</small></div>
-     <div className="tv-replay-market-stats"><div><span>Account equity</span><strong>{mark?money(mark.equity):'—'}</strong></div><div><span>Session P/L</span><strong className={metrics&&metrics.returnPercent>=0?'is-profit':'is-loss'}>{metrics?(metrics.returnPercent>=0?'+':'')+money(mark!.equity-session.initialBalance):'—'}</strong></div><div><span>Trades</span><strong>{session.trades.length}</strong></div></div></div>
+     <div className="tv-replay-market-stats"><div><span>Account equity</span><strong>{mark?money(mark.equity):'—'}</strong></div><div><span>Session P/L</span><strong className={metrics&&metrics.returnPercent>=0?'is-profit':'is-loss'}>{metrics?(metrics.returnPercent>=0?'+':'')+money(mark!.equity-session.initialBalance):'—'}</strong></div><div><span>Open positions</span><strong>{positions.length}</strong></div><div><span>Margin used</span><strong>{mark?money(mark.marginUsed):'—'}</strong></div><div><span>Trades</span><strong>{session.trades.length}</strong></div></div></div>
     <div className="tv-replay-progress"><span style={{width:percent+'%'}}/></div>
     <div className="tv-replay-controls"><div className="tv-replay-playback"><button className="tv-replay-play" type="button" disabled={replayAtEnd} onClick={()=>setPlaying(v=>!v)} aria-label={playing?'Pause replay':'Play replay'}>{playing?<Pause size={17}/>:<Play size={17}/>} {playing?'Pause':'Play'}</button><button type="button" disabled={replayAtEnd} onClick={()=>advance(1)} title="Next M1 candle (→)"><SkipForward size={17}/> Step</button><button type="button" disabled={replayAtEnd} onClick={()=>advance(5)} title="Reveal next 5 completed M1 candles"><FastForward size={17}/> +5</button>
      <label className="tv-replay-speed"><span>Speed</span><select value={speed} onChange={e=>setSpeed(Number(e.target.value))}>{speeds.map(v=><option value={v} key={v}>{v}×</option>)}</select></label></div>
@@ -236,8 +241,8 @@ export function MarketReplay({client,theme,onClose}:Props){
     {showHelp&&<div className="tv-replay-shortcuts">Space: Play/pause · →: Next candle · B: Buy · S: Sell · X: Close trade · ?: Help</div>}
     <div className="tv-replay-grid"><div className="tv-replay-chart-panel"><div className="tv-replay-chart-heading"><span><Activity size={15}/> GOLD · {timeframe===60?'H1':'M'+timeframe} · COMPLETED CANDLES</span><strong>{Math.max(0,bars.length-1-session.index)} M1 candles remaining</strong></div><div className="tv-replay-chart" ref={chartDiv} aria-label="Historical candlestick chart with only revealed candles"/>
      <div className="tv-replay-chart-footer"><span><i className="tv-replay-up"/> Bull candle</span><span><i className="tv-replay-down"/> Bear candle</span><span>Scroll to zoom · Drag to inspect</span></div></div>
-     <aside className="tv-replay-ticket"><span className="tv-replay-eyebrow">PAPER EXECUTION</span><h3>{session.position?'Position running':session.pending?'Pending order':'Place a trade'}</h3>
-      {session.pending?<div className="tv-replay-position"><p>{session.pending.side} {session.pending.type.toUpperCase()} · {price(session.pending.price)} · {session.pending.quantity} oz</p><p>Fills are simulated from future completed candles. Same-candle target fills are deferred because candle ordering is unknown.</p><button type="button" className="tv-replay-close-position" onClick={()=>{if(sessionRef.current)setCurrent(replayCancelPending(sessionRef.current));setNotice('Pending paper order cancelled.')}}>Cancel pending order</button></div>:session.position?<div className="tv-replay-position"><div><span className={session.position.side==='BUY'?'is-profit':'is-loss'}>{session.position.side==='BUY'?'LONG':'SHORT'}</span><strong className={mark&&mark.unrealized>=0?'is-profit':'is-loss'}>{mark?(mark.unrealized>=0?'+':'')+money(mark.unrealized):'—'}</strong></div><dl><dt>Entry</dt><dd>{price(session.position.entry)}</dd><dt>Stop loss</dt><dd>{price(session.position.stop)}</dd><dt>Take profit</dt><dd>{price(session.position.target)}</dd><dt>Size</dt><dd>{session.position.quantity} oz</dd></dl>
+     <aside className="tv-replay-ticket"><span className="tv-replay-eyebrow">PAPER EXECUTION</span><h3>{showNewOrder?'Place a trade':session.pending&&(managePending||!selectedPosition)?'Pending order':selectedPosition?'Open positions':'Place a trade'}</h3>{(selectedPosition||session.pending)&&<button type="button" className="tv-replay-risk-sizing" onClick={()=>setShowNewOrder(v=>!v)}>{showNewOrder?'Manage positions':'Add a trade'}</button>}
+      {!showNewOrder&&session.pending&&(managePending||!selectedPosition)?<div className="tv-replay-position"><p>{session.pending.side} {session.pending.type.toUpperCase()} · {price(session.pending.price)} · {session.pending.quantity} oz</p><p>Fills are simulated from future completed candles. Same-candle target fills are deferred because candle ordering is unknown.</p><button type="button" className="tv-replay-close-position" onClick={()=>{if(sessionRef.current)setCurrent(replayCancelPending(sessionRef.current));setNotice('Pending paper order cancelled.')}}>Cancel pending order</button>{selectedPosition&&<button type="button" className="tv-replay-risk-sizing" onClick={()=>setManagePending(false)}>Manage open positions</button>}</div>:!showNewOrder&&selectedPosition?<div className="tv-replay-position">{session.pending&&<button type="button" className="tv-replay-risk-sizing" onClick={()=>setManagePending(true)}>View pending order</button>}{positions.length>1&&<label>Manage position<select aria-label="Position to manage" value={selectedPosition.id} onChange={e=>{const p=positions.find(item=>item.id===e.target.value);if(p){setSelectedPositionId(p.id);setAdjustStop(String(p.stop));setAdjustTarget(String(p.target))}}}>{positions.map(p=><option key={p.id} value={p.id}>{p.side==='BUY'?'Long':'Short'} · {p.quantity} oz · {price(p.entry)}</option>)}</select></label>}<div><span className={selectedPosition.side==='BUY'?'is-profit':'is-loss'}>{selectedPosition.side==='BUY'?'LONG':'SHORT'}</span><strong className={selectedMark&&selectedMark.unrealized>=0?'is-profit':'is-loss'}>{selectedMark?(selectedMark.unrealized>=0?'+':'')+money(selectedMark.unrealized):'—'}</strong></div><dl><dt>Entry</dt><dd>{price(selectedPosition.entry)}</dd><dt>Stop loss</dt><dd>{price(selectedPosition.stop)}</dd><dt>Take profit</dt><dd>{price(selectedPosition.target)}</dd><dt>Size</dt><dd>{selectedPosition.quantity} oz</dd></dl>
        <div className="tv-replay-edit-position"><label>New stop price<input type="number" step="0.01" value={adjustStop} onChange={e=>setAdjustStop(e.target.value)}/></label><label>New target price<input type="number" step="0.01" value={adjustTarget} onChange={e=>setAdjustTarget(e.target.value)}/></label></div>
        <div className="tv-replay-position-actions"><button type="button" onClick={()=>modifyPosition(false)}>Update SL / TP</button><button type="button" onClick={()=>modifyPosition(true)}>Move stop to entry</button></div>
        <button type="button" className="tv-replay-close-position" onClick={close}>Close position (X)</button></div>:
@@ -247,7 +252,7 @@ export function MarketReplay({client,theme,onClose}:Props){
        <div><span>Risk / reward</span><strong>1 : {number(stopDistance)>0?(number(targetDistance)/number(stopDistance)).toFixed(2):'—'}</strong></div>
        <button type="button" className="tv-replay-risk-sizing" disabled={!recommendedSize||!Number.isFinite(recommendedSize)} onClick={()=>{setQuantity(String(recommendedSize));setNotice('Sized the next paper order to approximately 1% planned stop risk before gaps.')}}>Size to 1% risk · {recommendedSize.toFixed(2)} oz</button>
        {riskPercent>2&&<p className="tv-replay-risk-warning">High planned risk: more than 2% of equity is exposed to this stop.</p>}</div>
-      <div className="tv-replay-orders"><button type="button" className="tv-replay-buy" onClick={()=>enter('BUY')} disabled={replayAtEnd}><TrendingUp size={16}/> BUY / LONG</button><button type="button" className="tv-replay-sell" onClick={()=>enter('SELL')} disabled={replayAtEnd}><TrendingDown size={16}/> SELL / SHORT</button></div></>}
+      <div className="tv-replay-orders"><button type="button" className="tv-replay-buy" onClick={()=>enter('BUY')} disabled={replayAtEnd||Boolean(session.pending&&orderType!=='market')}><TrendingUp size={16}/> BUY / LONG</button><button type="button" className="tv-replay-sell" onClick={()=>enter('SELL')} disabled={replayAtEnd||Boolean(session.pending&&orderType!=='market')}><TrendingDown size={16}/> SELL / SHORT</button></div></>}
       <details className="tv-replay-settings" open={showCosts} onToggle={e=>setShowCosts((e.currentTarget as HTMLDetailsElement).open)}><summary><Settings2 size={14}/> Execution assumptions</summary><div><label>Spread · $/oz<input type="number" min="0" max="30" step="0.05" value={costs.spread} onChange={e=>setCosts(v=>({...v,spread:Number(e.target.value)}))}/></label><label>Slippage · $/oz<input type="number" min="0" max="10" step="0.01" value={costs.slippage} onChange={e=>setCosts(v=>({...v,slippage:Number(e.target.value)}))}/></label><label>Fee · $/oz / side<input type="number" min="0" max="5" step="0.01" value={costs.feePerOunce} onChange={e=>setCosts(v=>({...v,feePerOunce:Number(e.target.value)}))}/></label><label>Leverage<input type="number" min="1" max="100" step="1" value={costs.leverage} onChange={e=>setCosts(v=>({...v,leverage:Number(e.target.value)}))}/></label></div><p>Practice assumptions only. Historical M1 bars do not resolve the exact order of intrabar stop/target touches; replay assumes the stop first when both are hit.</p></details>
      </aside></div>
     <section className="tv-replay-review"><div className="tv-replay-stats">{[['Win rate',metrics?metrics.winRate.toFixed(1)+'%':'0%'],['Profit factor',metrics?(Number.isFinite(metrics.profitFactor)?metrics.profitFactor.toFixed(2):'∞'):'—'],['Max drawdown',metrics?metrics.maxDrawdown.toFixed(2)+'%':'0%'],['Best win streak',metrics?String(metrics.bestStreak):'0']].map(([label,val])=><div key={label}><span>{label}</span><strong>{val}</strong></div>)}</div>

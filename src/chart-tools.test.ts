@@ -49,3 +49,17 @@ describe('chart drawing controls',()=>{
  });
 
 });
+
+describe('extra chart annotations',()=>{
+ it('saves a Fibonacci retracement and a text label with their chart coordinates',()=>{
+  const data=new Map<string,string>();const win=new EventTarget() as EventTarget & {confirm:()=>boolean;prompt:()=>string|null};win.confirm=()=>true;win.prompt=()=> 'Break of structure';
+  vi.stubGlobal('HTMLElement',FakeElement);vi.stubGlobal('SVGElement',FakeSvg);vi.stubGlobal('localStorage',{getItem:(k:string)=>data.get(k)||null,setItem:(k:string,v:string)=>data.set(k,v)});vi.stubGlobal('window',win);
+  vi.stubGlobal('document',{createElement:()=>new FakeElement(),createElementNS:()=>new FakeSvg()});vi.stubGlobal('ResizeObserver',class{observe(){}disconnect(){}});
+  const range={logicalToCoordinate:(v:number)=>v*10,coordinateToLogical:(v:number)=>v/10,subscribeVisibleLogicalRangeChange:vi.fn(),unsubscribeVisibleLogicalRangeChange:vi.fn()};
+  const chart={timeScale:()=>range,subscribeCrosshairMove:vi.fn(),unsubscribeCrosshairMove:vi.fn()},series={priceToCoordinate:(v:number)=>200-v,coordinateToPrice:(v:number)=>200-v};const el=new FakeElement();const cleanup=installChartTools(el as unknown as HTMLElement,chart,series,candles,'annotation-test');
+  find(el,n=>n.textContent==='Fibonacci retracement')!.dispatchEvent(new Event('click'));
+  el.dispatchEvent(pointer('pointerdown',20,80));el.dispatchEvent(pointer('pointerdown',50,100));
+  find(el,n=>n.textContent==='Text label')!.dispatchEvent(new Event('click'));el.dispatchEvent(pointer('pointerdown',40,90));
+  const saved=JSON.parse(data.get('annotation-test')!).drawings;expect(saved.map((d:any)=>d.kind)).toEqual(['fibonacci','text']);expect(saved[1].text).toBe('Break of structure');expect(find(el,n=>n.textContent==='0.618')).toBeDefined();cleanup();
+ });
+});
