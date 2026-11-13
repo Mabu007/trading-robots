@@ -1485,10 +1485,10 @@ function AuthPage({client,initError,onBack,onSuccess}:{client:CloudClient|null;i
    setNotice('If an account uses that email, you’ll receive a password reset link.');
   });
  };
- return <main className="tv-auth">
+ return <main className={'tv-auth'+(import.meta.env.VITE_TRAINING_PREVIEW==='true'?' practice-auth':'')}>
   <header className="auth-nav"><button className="landing-brand" onClick={onBack}><img src="/logo.png" alt=""/><span>TRADING VIBES</span></button><button className="auth-back" onClick={onBack}><ArrowLeft size={14}/> BACK TO HOME</button></header>
   <div className="auth-layout">
-   <section className="auth-aside"><span className="landing-kicker"><i/> INVITE-ONLY ACCESS</span><h1>Welcome to<br/><em>your workspace.</em></h1><p>Talk markets with VIBES, test your ideas and manage your strategies in one place.</p><span className="auth-aside-foot">PRIVATE WORKSPACE · ACCOUNT SYNC</span></section>
+   <section className="auth-aside"><span className="landing-kicker"><i/> INVITE-ONLY ACCESS</span><h1>Welcome to<br/><em>{import.meta.env.VITE_TRAINING_PREVIEW==='true'?'your practice.':'your workspace.'}</em></h1><p>{import.meta.env.VITE_TRAINING_PREVIEW==='true'?'Make space to practise. Explore market moments, make your own decisions and learn one session at a time.':'Talk markets with VIBES, test your ideas and manage your strategies in one place.'}</p><span className="auth-aside-foot">PRIVATE WORKSPACE · ACCOUNT SYNC</span></section>
    <section className="auth-card"><div className="auth-card-heading"><span>TRADING VIBES ACCOUNT</span><h2>Sign in</h2><p>Use the email and password provided with your invitation.</p></div>
     {(error||initError)&&<div className="auth-error" role="alert">{error||initError}</div>}{notice&&<div className="auth-success" role="status">{notice}</div>}
     <form onSubmit={submit} className="auth-form"><label>Email<input type="email" autoComplete="username" required value={email} onChange={event=>setEmail(event.target.value)} placeholder="you@example.com"/></label>

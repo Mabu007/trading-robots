@@ -1,6 +1,7 @@
 import {venueOf,type Venue} from '../shared/venues';
 import {cloudBotFromRecord} from './cloud-bot';
 import type {CodeAnalysis} from './code-analysis';
+import type {PracticeRecord} from './practice-history';
 import {validateSkill,type UserSkill} from './skills';
 export type CloudBot = {
   id: string;
@@ -32,6 +33,8 @@ export type CloudClient = {
   saveTradingPreferences: (prefs:TradingPreferences) => Promise<void>;
   loadPersonality: () => Promise<string>;
   savePersonality: (instructions:string) => Promise<void>;
+  listPracticeRecords: () => Promise<PracticeRecord[]>;
+  savePracticeRecord: (record:PracticeRecord) => Promise<void>;
   listBots: () => Promise<CloudBot[]>;
   listCodeAnalyses: () => Promise<CodeAnalysis[]>;
   saveCodeAnalysis: (analysis:CodeAnalysis) => Promise<void>;
@@ -96,6 +99,16 @@ export function connectFirebase(): Promise<CloudClient | null> {
     const pendingConversationWrites = new Map<string,Promise<void>>();
 
     return {
+      async listPracticeRecords(){
+        const uid=await currentUserId();
+        const snapshot=await storeSdk.getDocs(storeSdk.query(storeSdk.collection(db,'users',uid,'practiceRecords'),storeSdk.orderBy('completedAt','desc'),storeSdk.limit(100)));
+        return snapshot.docs.map((doc:any)=>({...doc.data(),id:doc.id}) as PracticeRecord);
+      },
+      async savePracticeRecord(record:PracticeRecord){
+        if(!/^[a-zA-Z0-9-]{1,80}$/.test(record.id))throw Error('Invalid practice record identifier.');
+        const uid=await currentUserId();
+        await storeSdk.setDoc(storeSdk.doc(db,'users',uid,'practiceRecords',record.id),record);
+      },
       async listBots() {
         const botCollection = storeSdk.collection(db, 'users', await currentUserId(), 'bots');
         const snapshot = await storeSdk.getDocs(storeSdk.query(botCollection, storeSdk.limit(100)));
