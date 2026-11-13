@@ -122,3 +122,4 @@
  .tv-workbench-feedback,.tv-workbench-alert{margin:12px 14px 0}
  .tv-workbench-code-head{padding:10px 12px}.tv-strategy-workbench textarea.tv-workbench-editor{padding:14px;min-height:230px;font-size:11px}
 }
+.tv-workbench-input select{width:100%;min-width:0;min-height:40px;padding:9px 11px;border:1px solid var(--tv-shell-line);border-radius:9px;background:var(--tv-shell-panel);color:var(--tv-shell-ink);font:inherit}

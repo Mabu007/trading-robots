@@ -13,7 +13,7 @@ export function installChartTools(el:HTMLElement, chart:any, series:any, candles
  try { const saved=JSON.parse(localStorage.getItem(storageKey)||'{}'); if(Array.isArray(saved.drawings))drawings=saved.drawings.filter((s:Shape)=>s?.a&&s?.b&&Number.isFinite(s.a.time)&&Number.isFinite(s.a.price)&&Number.isFinite(s.b.time)&&Number.isFinite(s.b.price)); if(Number.isFinite(saved.pipSize)&&saved.pipSize>0)pipSize=saved.pipSize; } catch { /* ignore malformed local data */ }
  let tool:Tool='pan', selected:string|null=null, first:Point|null=null, preview:Shape|null=null, measure:{a:Point;b:Point}|null=null, undo:Shape[][]=[];
  let drag:{mode:'create'|'measure'|'move'|'a'|'b'; start:Point; shape?:Shape; original?:Shape[]; moved:boolean}|null=null;
- const times=candles.map(c=>c.time);
+ let times=candles.map(c=>c.time);
  const precision=Math.min(8,Math.max(2,...candles.slice(0,100).flatMap(c=>[c.open,c.high,c.low,c.close].map(price=>{const s=String(price);return s.includes('.')?s.split('.')[1].length:0}))));
  const svg=document.createElementNS(NS,'svg'); svg.classList.add('drawing-overlay'); el.appendChild(svg);
  const toolbar=document.createElement('div');toolbar.className='drawing-toolbar';el.appendChild(toolbar);
@@ -37,7 +37,7 @@ export function installChartTools(el:HTMLElement, chart:any, series:any, candles
  function point(e:PointerEvent):Point|null{const rect=el.getBoundingClientRect(),logical=chart.timeScale().coordinateToLogical(e.clientX-rect.left),price=series.coordinateToPrice(e.clientY-rect.top);return logical===null||price===null?null:{time:indexToTime(logical),price}}
  function node(tag:string,attrs:Record<string,string|number>){const n=document.createElementNS(NS,tag);for(const [k,v] of Object.entries(attrs))n.setAttribute(k,String(v));svg.appendChild(n);return n}
  function selectShape(n:SVGElement,s:Shape,mode:'move'|'a'|'b'='move'){n.style.pointerEvents=mode==='move'?'stroke':'auto';n.addEventListener('pointerdown',e=>{if(tool!=='pan')return;const p=point(e);if(!p)return;e.preventDefault();e.stopPropagation();selected=s.id;drag={mode,start:p,shape:structuredClone(s),original:structuredClone(drawings),moved:false};el.setPointerCapture(e.pointerId);render()});n.addEventListener('contextmenu',e=>{e.preventDefault();e.stopPropagation();selected=s.id;render();if(window.confirm('Delete this drawing?'))deleteSelected()})}
- function renderShape(s:Shape,temporary=false){const a=screen(s.a),b=screen(s.b);if(a.x===null||a.y===null||b.x===null||b.y===null)return;let n:SVGElement;const common={stroke:'#d5e6dc','stroke-width':1.5,fill:'none'};
+ function renderShape(s:Shape,temporary=false){const a=screen(s.a),b=screen(s.b);if(a.x===null||a.y===null||b.x===null||b.y===null)return;let n:SVGElement;const common={stroke:'var(--tv-shell-ink, #d5e6dc)','stroke-width':1.5,fill:'none'};
   if(s.kind==='trend')n=node('line',{...common,x1:a.x,y1:a.y,x2:b.x,y2:b.y});
   else if(s.kind==='horizontal')n=node('line',{...common,x1:0,y1:a.y,x2:el.clientWidth-65,y2:a.y});
   else if(s.kind==='vertical')n=node('line',{...common,x1:a.x,y1:0,x2:a.x,y2:el.clientHeight-24});
@@ -67,5 +67,6 @@ export function installChartTools(el:HTMLElement, chart:any, series:any, candles
  function key(e:KeyboardEvent){if(e.target instanceof HTMLElement&&(e.target.isContentEditable||['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)))return;if(e.key==='Escape'){if(drag?.original)drawings=drag.original;drag=null;setTool('pan')}else if((e.key==='Delete'||e.key==='Backspace')&&selected){e.preventDefault();deleteSelected()}}
  let frame=0;function redraw(){if(!frame)frame=requestAnimationFrame(()=>{frame=0;render()})}
  el.addEventListener('pointerdown',down,true);el.addEventListener('pointermove',move,true);el.addEventListener('pointerup',up,true);el.addEventListener('pointercancel',cancel,true);window.addEventListener('keydown',key);chart.timeScale().subscribeVisibleLogicalRangeChange(redraw);chart.subscribeCrosshairMove(redraw);const resize=new ResizeObserver(redraw);resize.observe(el);setTool('pan');
- return ()=>{if(frame)cancelAnimationFrame(frame);resize.disconnect();chart.timeScale().unsubscribeVisibleLogicalRangeChange(redraw);chart.unsubscribeCrosshairMove(redraw);window.removeEventListener('keydown',key);el.removeEventListener('pointerdown',down,true);el.removeEventListener('pointermove',move,true);el.removeEventListener('pointerup',up,true);el.removeEventListener('pointercancel',cancel,true);el.classList.remove('drawing-mode');svg.remove();toolbar.remove();label.remove()};
+ const cleanup=()=>{if(frame)cancelAnimationFrame(frame);resize.disconnect();chart.timeScale().unsubscribeVisibleLogicalRangeChange(redraw);chart.unsubscribeCrosshairMove(redraw);window.removeEventListener('keydown',key);el.removeEventListener('pointerdown',down,true);el.removeEventListener('pointermove',move,true);el.removeEventListener('pointerup',up,true);el.removeEventListener('pointercancel',cancel,true);el.classList.remove('drawing-mode');svg.remove();toolbar.remove();label.remove()};
+ return Object.assign(cleanup,{updateCandles:(next:Candle[])=>{times=next.map(c=>c.time);render()}});
 }

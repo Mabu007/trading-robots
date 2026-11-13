@@ -98,3 +98,8 @@
 .tv-replay-milestones>div:last-child>span svg{color:var(--tv-shell-muted)}
 .tv-replay-milestones>div:last-child>span.is-done{color:var(--tv-shell-accent);border-color:color-mix(in srgb,var(--tv-shell-accent) 22%,var(--tv-shell-line))}
 .tv-replay-milestones>div:last-child>span.is-done svg{color:var(--tv-shell-accent)}
+
+.tv-replay-modal.is-expanded,.tv-replay-modal:fullscreen{width:100vw;height:100dvh;max-height:100dvh;border:0;border-radius:0}
+.tv-replay-modal.is-expanded .tv-replay-chart,.tv-replay-modal:fullscreen .tv-replay-chart{height:max(420px,calc(100dvh - 260px))}
+.tv-replay-chart{position:relative}.tv-replay-chart .drawing-toolbar{top:10px;left:10px}
+.tv-replay-ticket-inputs select{min-width:0;width:100%;box-sizing:border-box;border:1px solid var(--tv-shell-line);border-radius:10px;min-height:38px;padding:9px 11px;background:var(--tv-shell-panel);color:var(--tv-shell-ink);font:inherit}

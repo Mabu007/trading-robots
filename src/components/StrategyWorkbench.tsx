@@ -38,6 +38,8 @@ export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, 
   const [venue] = useState<Venue>(bot ? venueOf(bot.venue) : 'research');
   const [asset, setAsset] = useState(bot?.asset || 'XAUUSD');
   const [rules, setRules] = useState(bot?.prompt || '');
+  const [generationModel,setGenerationModel]=useState(''),[models,setModels]=useState<{id:string;name:string}[]>([]),[modelsError,setModelsError]=useState('');
+  const loadModels=async()=>{if(models.length)return;try{const data=await sharingRequest<{models:{id:string;name:string}[]}>(client,'/api/openrouter/models');setModels(data.models||[]);setModelsError('')}catch(e){setModelsError(errorText(e))}};
   const [code, setCode] = useState(bot?.code || '');
   const [savedCode, setSavedCode] = useState<string | null>(null);
   const [from, setFrom] = useState(bot?.lastBacktest?.from || yesterdayUtc);
@@ -179,7 +181,7 @@ export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, 
       request:async(messages,requestSignal)=>{
         const token=await client.getIdToken();
         return postApiStream(chatStreamPath(import.meta.env.VITE_AI_SDK_CHAT_ENABLED),{
-          asset:market.asset,maxTokens:6000,includeMarketContext:false,researchMode:false,messages
+          asset:market.asset,maxTokens:6000,includeMarketContext:false,researchMode:false,...(generationModel?{model:generationModel}:{}),messages
         },'OpenRouter',()=>{},AbortSignal.any([requestSignal,AbortSignal.timeout(55_000)]),token);
       }
     });
@@ -243,9 +245,9 @@ export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, 
       <label className="tv-workbench-input"><span>Instrument</span><input value={asset} list={marketsId} maxLength={64} disabled={Boolean(busy)} onChange={event=>setAsset(event.target.value)} placeholder={markets.length?'Search symbols…':'Loading symbols…'}/><datalist id={marketsId}>{markets.map(symbol=><option key={symbol} value={symbol}/>)}</datalist></label>
      </div>}
      {lockedIdentity&&<div className="tv-workbench-locked"><ShieldCheck size={17}/><span>Strategy identity is locked to <strong>{asset}</strong> on <strong>{asset==='XAUUSD'?'historical Gold':'its saved instrument'}</strong>. Edits won't silently switch the instrument.</span></div>}
-     <details className="tv-workbench-ai">
+     <details className="tv-workbench-ai" onToggle={event=>{if(event.currentTarget.open)void loadModels()}}>
       <summary><span className="tv-workbench-ai-icon"><Sparkles size={19}/></span><span><strong>Generate with VIBES</strong><small>Describe your strategy in plain English. Review all generated code.</small></span><span className="tv-workbench-ai-caret">Expand</span></summary>
-      <div className="tv-workbench-ai-body"><label className="tv-workbench-input"><span>Trading rules</span><textarea rows={5} value={rules} maxLength={12_000} disabled={Boolean(busy)} onChange={event=>setRules(event.target.value)} placeholder="Example: Trade Gold on M1, follow the H1 trend, enter after a pullback and use a fixed 1:2 risk/reward ratio…"/></label>
+      <div className="tv-workbench-ai-body"><label className="tv-workbench-input"><span>AI model for this strategy</span><select aria-label="Strategy generation model" value={generationModel} disabled={Boolean(busy)} onChange={event=>setGenerationModel(event.target.value)}><option value="">Account default</option>{models.map(model=><option key={model.id} value={model.id}>{model.name} · {model.id}</option>)}</select></label>{modelsError&&<p role="alert">Could not load models: {modelsError} <button type="button" onClick={()=>void loadModels()}>Retry</button></p>}<label className="tv-workbench-input"><span>Trading rules</span><textarea rows={5} value={rules} maxLength={12_000} disabled={Boolean(busy)} onChange={event=>setRules(event.target.value)} placeholder="Example: Trade Gold on M1, follow the H1 trend, enter after a pullback and use a fixed 1:2 risk/reward ratio…"/></label>
        <div className="tv-workbench-ai-controls"><small>Uses your connected OpenRouter model. Rate limits belong to your selected provider.</small><button type="button" className="tv-workbench-primary" disabled={Boolean(busy)||!sourceReady||!rules.trim()} onClick={generate}><Sparkles size={15}/>{busy==='generate'?'Generating…':'Generate strategy.js'}</button></div>
       </div>
      </details>

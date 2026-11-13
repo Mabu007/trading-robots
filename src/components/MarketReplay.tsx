@@ -2,9 +2,10 @@ import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {Activity,ArrowRight,BarChart3,CalendarDays,CheckCircle2,ChevronRight,Clock3,Download,FastForward,Flag,Maximize2,Minimize2,Pause,Play,RotateCcw,Settings2,SkipForward,Target,TrendingDown,TrendingUp,Trophy,X} from 'lucide-react';
 import {createChart,CandlestickSeries,LineSeries,createSeriesMarkers,ColorType} from 'lightweight-charts';
 import {historicalData} from '../history-cache';
+import {installChartTools} from '../chart-tools';
 import type {CloudClient} from '../firebase';
 import type {AppTheme} from '../theme';
-import {aggregateReplayBars,beginReplay,DEFAULT_REPLAY_COSTS,replayAdvance,replayClose,replayEMA,replayEnter,replayMark,replayMetrics,replayModifyPosition,replayVisibleBars,validateReplayBars,validateReplayCosts,type ReplayBar,type ReplayCosts,type ReplaySession,type ReplaySide} from '../market-replay-engine';
+import {aggregateReplayBars,beginReplay,DEFAULT_REPLAY_COSTS,replayAdvance,replayClose,replayEMA,replayEnter,replayPlacePending,replayCancelPending,replayMark,replayMetrics,replayModifyPosition,replayVisibleBars,validateReplayBars,validateReplayCosts,type ReplayBar,type ReplayCosts,type ReplaySession,type ReplaySide} from '../market-replay-engine';
 import './market-replay.css';
 
 type Props={client:CloudClient;theme:AppTheme;onClose:()=>void};
@@ -30,12 +31,15 @@ export function MarketReplay({client,theme,onClose}:Props){
  const [loading,setLoading]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const [playing,setPlaying]=useState(false),[speed,setSpeed]=useState<number>(2),[timeframe,setTimeframe]=useState<1|5|15|60>(1);
  const [expanded,setExpanded]=useState(false),[emaVisible,setEmaVisible]=useState(true),[showCosts,setShowCosts]=useState(false);
+ const [orderType,setOrderType]=useState<'market'|'limit'|'stop'>('market'),[orderPrice,setOrderPrice]=useState(''),[pickingPrice,setPickingPrice]=useState(false);
+ const pickingRef=useRef(false);
  const [quantity,setQuantity]=useState('1'),[stopDistance,setStopDistance]=useState('6'),[targetDistance,setTargetDistance]=useState('12');
  const [adjustStop,setAdjustStop]=useState(''),[adjustTarget,setAdjustTarget]=useState('');
  const [costs,setCosts]=useState<ReplayCosts>(DEFAULT_REPLAY_COSTS),[notes,setNotes]=useState(''),[annotations,setAnnotations]=useState<Record<string,string>>({});
  const [selectedTrade,setSelectedTrade]=useState<string|null>(null),[showHelp,setShowHelp]=useState(false);
  const [progressTime,setProgressTime]=useState(0);
- const sessionRef=useRef<ReplaySession|null>(null),chartDiv=useRef<HTMLDivElement|null>(null);
+ const sessionRef=useRef<ReplaySession|null>(null),chartDiv=useRef<HTMLDivElement|null>(null),modalRef=useRef<HTMLElement|null>(null);
+ const drawingRef=useRef<ReturnType<typeof installChartTools>|null>(null);
  const chartRef=useRef<{chart:any;series:any;ema20:any;ema50:any;markers:any;lines:any[]} |null>(null);
  const uid=client.getProfile()?.uid||'local';
  const sessionKey='trading-vibes:replay:v2:'+uid+':'+day;
@@ -100,7 +104,7 @@ export function MarketReplay({client,theme,onClose}:Props){
   const current=sessionRef.current;
   if(!current||!bars.length)return;
   try{const next=replayAdvance(current,bars,costs,steps);if(next===current||next.index===current.index){setPlaying(false);return}
-    setCurrent(next);setProgressTime(Date.now());
+    setCurrent(next);if(!current.position&&next.position){setAdjustStop(String(next.position.stop));setAdjustTarget(String(next.position.target));setNotice('Pending paper order filled.')}setProgressTime(Date.now());
     if(next.index>=bars.length-1){setPlaying(false);setNotice('Session complete. Review your trade journal and stats.');}
     else if(next.trades.length>current.trades.length){const trade=next.trades.at(-1)!;
      setNotice((trade.net>=0?'Target reached · ':'Trade closed · ')+(trade.net>=0?'+':'')+money(trade.net)+' net');
@@ -111,8 +115,8 @@ export function MarketReplay({client,theme,onClose}:Props){
  const enter=(side:ReplaySide)=>{
   if(!sessionRef.current)return;
   setPlaying(false);setError('');
-  try{const next=replayEnter(sessionRef.current,bars,side,number(quantity),number(stopDistance),number(targetDistance),costs);
-   setCurrent(next);setAdjustStop(String(next.position!.stop));setAdjustTarget(String(next.position!.target));setNotice(side==='BUY'?'Long opened. Manage the risk; the next candle is still hidden.':'Short opened. Let the market reveal the next candle.');
+  try{const next=orderType==='market'?replayEnter(sessionRef.current,bars,side,number(quantity),number(stopDistance),number(targetDistance),costs):replayPlacePending(sessionRef.current,bars,side,orderType,number(orderPrice),number(quantity),number(stopDistance),number(targetDistance),costs);
+   setCurrent(next);if(next.position){setAdjustStop(String(next.position.stop));setAdjustTarget(String(next.position.target))}setNotice(next.pending?'Paper order queued for future candles.':side==='BUY'?'Long opened. Manage the risk; the next candle is still hidden.':'Short opened. Let the market reveal the next candle.');
   }catch(e){setError(e instanceof Error?e.message:'Order rejected')}
  };
  const close=()=>{
@@ -128,6 +132,8 @@ export function MarketReplay({client,theme,onClose}:Props){
    setNotice(breakEven?'Stop moved to break-even price.':'Protective orders updated for the next candle.');
   }catch(e){setError(e instanceof Error?e.message:'Could not modify this position.')}
  };
+ const toggleFullscreen=async()=>{try{if(document.fullscreenElement===modalRef.current){await document.exitFullscreen();setExpanded(false)}else if(modalRef.current?.requestFullscreen){await modalRef.current.requestFullscreen();setExpanded(true)}else setExpanded(v=>!v)}catch{setExpanded(v=>!v);setNotice('Expanded replay in the browser window.')}};
+ useEffect(()=>{const sync=()=>{if(!document.fullscreenElement)setExpanded(false)};document.addEventListener('fullscreenchange',sync);return()=>document.removeEventListener('fullscreenchange',sync)},[]);
  const captureChart=()=>{
   try{
    const chart=chartRef.current?.chart;if(!chart)throw Error('Chart not ready.');
@@ -155,7 +161,7 @@ export function MarketReplay({client,theme,onClose}:Props){
    else if(e.key==='?')setShowHelp(v=>!v);
   };
   window.addEventListener('keydown',handle);return()=>window.removeEventListener('keydown',handle);
- },[sessionOpen,advance,bars,costs,quantity,stopDistance,targetDistance]);
+ },[sessionOpen,advance,bars,costs,quantity,stopDistance,targetDistance,orderType,orderPrice]);
  useEffect(()=>{
   if(!sessionOpen||!chartDiv.current)return;
   const dark=theme==='dark';
@@ -171,12 +177,16 @@ export function MarketReplay({client,theme,onClose}:Props){
   const ema20=chart.addSeries(LineSeries,{color:'#e9b45d',lineWidth:2,title:'EMA 20',priceLineVisible:false,lastValueVisible:false});
   const ema50=chart.addSeries(LineSeries,{color:'#88a7ec',lineWidth:2,title:'EMA 50',priceLineVisible:false,lastValueVisible:false});
   const markers=createSeriesMarkers(series,[]);
+  const chooseChartPrice=(event:any)=>{if(!pickingRef.current||!event.point)return;const value=series.coordinateToPrice(event.point.y);if(value!==null&&Number.isFinite(value)&&value>0){setOrderPrice(value.toFixed(3));pickingRef.current=false;setPickingPrice(false);setNotice('Paper order price selected from the chart.')}};chart.subscribeClick(chooseChartPrice);
   chartRef.current={chart,series,ema20,ema50,markers,lines:[]};
-  return()=>{chartRef.current=null;chart.remove()};
+  const drawing=installChartTools(chartDiv.current,chart,series,[],`trading-vibes:replay-drawings:${uid}:${day}`);drawingRef.current=drawing;
+  return()=>{chart.unsubscribeClick(chooseChartPrice);drawingRef.current=null;drawing();chartRef.current=null;chart.remove()};
  },[sessionOpen,theme]);
  useEffect(()=>{
   const c=chartRef.current;if(!c||!session)return;
+  const follow=c.chart.timeScale().scrollPosition()<=10;
   c.series.setData(aggregates.map(b=>({time:b.time as any,open:b.open,high:b.high,low:b.low,close:b.close})));
+  drawingRef.current?.updateCandles(aggregates as any);
   c.ema20.setData(emaVisible?replayEMA(aggregates,20).map(x=>({time:x.time as any,value:x.value})):[]);
   c.ema50.setData(emaVisible?replayEMA(aggregates,50).map(x=>({time:x.time as any,value:x.value})):[]);
   const marks:any[]=[];
@@ -187,18 +197,19 @@ export function MarketReplay({client,theme,onClose}:Props){
   if(session.position)marks.push({time:Math.floor(session.position.entryTime/(timeframe*60))*(timeframe*60) as any,position:session.position.side==='BUY'?'belowBar':'aboveBar',shape:'arrowUp',color:'#e9b45d',text:'OPEN'});
   c.markers.setMarkers(marks.sort((a,b)=>Number(a.time)-Number(b.time)));
   for(const line of c.lines)c.series.removePriceLine(line);c.lines=[];
+  if(session.pending)c.lines.push(c.series.createPriceLine({price:session.pending.price,color:'#e9b45d',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'PENDING'}));
   if(session.position){
    for(const [level,color,title] of [[session.position.entry,'#88a7ec','ENTRY'],[session.position.stop,'#db6a6b','STOP'],[session.position.target,'#19a578','TARGET']] as const)
     c.lines.push(c.series.createPriceLine({price:level,color,lineWidth:1,lineStyle:2,axisLabelVisible:true,title}));
   }
-  c.chart.timeScale().scrollToRealTime();
+  if(follow)c.chart.timeScale().scrollToRealTime();
  },[aggregates,session,emaVisible,timeframe]);
  const percent=bars.length&&session?100*session.index/Math.max(1,bars.length-1):0;
  const selected=session?.trades.find(t=>t.id===selectedTrade);
  return <div className="tv-replay-backdrop" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}>
-  <section className={'tv-replay-modal'+(expanded?' is-expanded':'')} role="dialog" aria-modal="true" aria-label="Market Replay practice terminal">
+  <section ref={modalRef} className={'tv-replay-modal'+(expanded?' is-expanded':'')} role="dialog" aria-modal="true" aria-label="Market Replay practice terminal">
    <header className="tv-replay-top"><div className="tv-replay-brand"><span className="tv-replay-brand-icon"><BarChart3 size={21}/></span><div><span className="tv-replay-eyebrow">TRADING VIBES · PRACTICE LAB</span><h2>Market Replay <span>GOLD / XAUUSD</span></h2></div></div>
-    <div className="tv-replay-top-actions">{session&&<button type="button" onClick={()=>setExpanded(v=>!v)} aria-label={expanded?'Restore window':'Expand replay'}>{expanded?<Minimize2 size={16}/>:<Maximize2 size={16}/>}</button>}<button type="button" onClick={onClose} aria-label="Close replay"><X size={18}/></button></div>
+    <div className="tv-replay-top-actions">{session&&<button type="button" onClick={()=>void toggleFullscreen()} aria-label={expanded?'Exit full screen':'Full screen'}>{expanded?<Minimize2 size={16}/>:<Maximize2 size={16}/>}</button>}<button type="button" onClick={onClose} aria-label="Close replay"><X size={18}/></button></div>
    </header>
    {!session?<div className="tv-replay-setup"><div className="tv-replay-setup-main">
      <span className="tv-replay-eyebrow"><CalendarDays size={14}/> BUILD YOUR PRACTICE SESSION</span>
@@ -225,12 +236,12 @@ export function MarketReplay({client,theme,onClose}:Props){
     {showHelp&&<div className="tv-replay-shortcuts">Space: Play/pause · →: Next candle · B: Buy · S: Sell · X: Close trade · ?: Help</div>}
     <div className="tv-replay-grid"><div className="tv-replay-chart-panel"><div className="tv-replay-chart-heading"><span><Activity size={15}/> GOLD · {timeframe===60?'H1':'M'+timeframe} · COMPLETED CANDLES</span><strong>{Math.max(0,bars.length-1-session.index)} M1 candles remaining</strong></div><div className="tv-replay-chart" ref={chartDiv} aria-label="Historical candlestick chart with only revealed candles"/>
      <div className="tv-replay-chart-footer"><span><i className="tv-replay-up"/> Bull candle</span><span><i className="tv-replay-down"/> Bear candle</span><span>Scroll to zoom · Drag to inspect</span></div></div>
-     <aside className="tv-replay-ticket"><span className="tv-replay-eyebrow">PAPER EXECUTION</span><h3>{session.position?'Position running':'Place a trade'}</h3>
-      {session.position?<div className="tv-replay-position"><div><span className={session.position.side==='BUY'?'is-profit':'is-loss'}>{session.position.side==='BUY'?'LONG':'SHORT'}</span><strong className={mark&&mark.unrealized>=0?'is-profit':'is-loss'}>{mark?(mark.unrealized>=0?'+':'')+money(mark.unrealized):'—'}</strong></div><dl><dt>Entry</dt><dd>{price(session.position.entry)}</dd><dt>Stop loss</dt><dd>{price(session.position.stop)}</dd><dt>Take profit</dt><dd>{price(session.position.target)}</dd><dt>Size</dt><dd>{session.position.quantity} oz</dd></dl>
+     <aside className="tv-replay-ticket"><span className="tv-replay-eyebrow">PAPER EXECUTION</span><h3>{session.position?'Position running':session.pending?'Pending order':'Place a trade'}</h3>
+      {session.pending?<div className="tv-replay-position"><p>{session.pending.side} {session.pending.type.toUpperCase()} · {price(session.pending.price)} · {session.pending.quantity} oz</p><p>Fills are simulated from future completed candles. Same-candle target fills are deferred because candle ordering is unknown.</p><button type="button" className="tv-replay-close-position" onClick={()=>{if(sessionRef.current)setCurrent(replayCancelPending(sessionRef.current));setNotice('Pending paper order cancelled.')}}>Cancel pending order</button></div>:session.position?<div className="tv-replay-position"><div><span className={session.position.side==='BUY'?'is-profit':'is-loss'}>{session.position.side==='BUY'?'LONG':'SHORT'}</span><strong className={mark&&mark.unrealized>=0?'is-profit':'is-loss'}>{mark?(mark.unrealized>=0?'+':'')+money(mark.unrealized):'—'}</strong></div><dl><dt>Entry</dt><dd>{price(session.position.entry)}</dd><dt>Stop loss</dt><dd>{price(session.position.stop)}</dd><dt>Take profit</dt><dd>{price(session.position.target)}</dd><dt>Size</dt><dd>{session.position.quantity} oz</dd></dl>
        <div className="tv-replay-edit-position"><label>New stop price<input type="number" step="0.01" value={adjustStop} onChange={e=>setAdjustStop(e.target.value)}/></label><label>New target price<input type="number" step="0.01" value={adjustTarget} onChange={e=>setAdjustTarget(e.target.value)}/></label></div>
        <div className="tv-replay-position-actions"><button type="button" onClick={()=>modifyPosition(false)}>Update SL / TP</button><button type="button" onClick={()=>modifyPosition(true)}>Move stop to entry</button></div>
        <button type="button" className="tv-replay-close-position" onClick={close}>Close position (X)</button></div>:
-      <><div className="tv-replay-ticket-inputs"><label>Quantity · oz<input type="number" min="0.01" step="0.1" value={quantity} onChange={e=>setQuantity(e.target.value)}/></label><label>Stop distance · $/oz<input type="number" min="0.01" step="0.5" value={stopDistance} onChange={e=>setStopDistance(e.target.value)}/></label><label>Target distance · $/oz<input type="number" min="0.01" step="0.5" value={targetDistance} onChange={e=>setTargetDistance(e.target.value)}/></label></div>
+      <><div className="tv-replay-ticket-inputs"><label>Order type<select aria-label="Paper order type" value={orderType} onChange={e=>setOrderType(e.target.value as typeof orderType)}><option value="market">Market</option><option value="limit">Limit</option><option value="stop">Stop</option></select></label>{orderType!=='market'&&<label>Order price<input aria-label="Pending order price" type="number" min="0.01" step="0.01" value={orderPrice} onChange={e=>setOrderPrice(e.target.value)}/></label>} {orderType!=='market'&&<button type="button" className="tv-replay-risk-sizing" onClick={()=>{pickingRef.current=!pickingRef.current;setPickingPrice(pickingRef.current)}}>{pickingPrice?'Click chart to set price…':'Set order price on chart'}</button>}<label>Quantity · oz<input type="number" min="0.01" step="0.1" value={quantity} onChange={e=>setQuantity(e.target.value)}/></label><label>Stop distance · $/oz<input type="number" min="0.01" step="0.5" value={stopDistance} onChange={e=>setStopDistance(e.target.value)}/></label><label>Target distance · $/oz<input type="number" min="0.01" step="0.5" value={targetDistance} onChange={e=>setTargetDistance(e.target.value)}/></label></div>
       <div className="tv-replay-risk"><div><span>Planned stop risk</span><strong>{money(estimatedRisk)}</strong></div>
        <div><span>Account risk</span><strong className={riskPercent>2?'is-loss':''}>{Number.isFinite(riskPercent)?riskPercent.toFixed(2)+'%':'—'}</strong></div>
        <div><span>Risk / reward</span><strong>1 : {number(stopDistance)>0?(number(targetDistance)/number(stopDistance)).toFixed(2):'—'}</strong></div>

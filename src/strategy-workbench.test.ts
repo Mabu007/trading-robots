@@ -29,7 +29,7 @@ describe('Strategy Library backtest', () => {
     });
     const result = await simulateWorkbench(input, signal, () => {});
     expect(historicalData).toHaveBeenCalledWith({venue: 'research', asset: 'XAUUSD', timeframe: 'm1',
-      from: '2026-10-25T20:40:00.000Z', to: '2026-10-26T23:59:59.000Z'}, signal, expect.any(Function));
+      from: '2026-10-25T20:40:00.000Z', to: '2026-10-26T23:59:59.000Z'}, signal, expect.any(Function), expect.any(Function));
     expect(runBacktest).toHaveBeenCalledWith(starterCode, {m1: candles}, 0, signal, time);
     expect(await decompressBacktest<StrategyRun>(await compressBacktest(result))).toMatchObject({
       ...input, result: {timeframe: 'm1', source: 'Reference history', candles},
