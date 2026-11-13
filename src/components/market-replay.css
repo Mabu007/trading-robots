@@ -103,3 +103,5 @@
 .tv-replay-modal.is-expanded .tv-replay-chart,.tv-replay-modal:fullscreen .tv-replay-chart{height:max(420px,calc(100dvh - 260px))}
 .tv-replay-chart{position:relative}.tv-replay-chart .drawing-toolbar{top:10px;left:10px}
 .tv-replay-ticket-inputs select{min-width:0;width:100%;box-sizing:border-box;border:1px solid var(--tv-shell-line);border-radius:10px;min-height:38px;padding:9px 11px;background:var(--tv-shell-panel);color:var(--tv-shell-ink);font:inherit}
+
+.tv-replay-backdrop.is-expanded{padding:0}.tv-replay-position select{width:100%;min-height:38px;margin-top:6px;border:1px solid var(--tv-shell-line);border-radius:9px;background:var(--tv-shell-panel);color:var(--tv-shell-ink);padding:7px}

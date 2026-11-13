@@ -116,3 +116,41 @@ describe('pending replay orders',()=>{
   expect(next.position).not.toBeNull();expect(next.trades).toHaveLength(0);
  });
 });
+
+describe('multiple paper positions',()=>{
+ it('tracks separate positions, margin and closes only the chosen trade',async()=>{
+  const {replayPositions,replayMark}=await import('./market-replay-engine');
+  let state=beginReplay(bars,1,10000);
+  state=replayEnter(state,bars,'BUY',1,5,10,costs);const first=state.position!;
+  state=replayEnter(state,bars,'SELL',2,5,10,costs);const positions=replayPositions(state);
+  expect(positions).toHaveLength(2);expect(positions[0].id).not.toBe(positions[1].id);
+  expect(replayMark(state,bars[1],costs).marginUsed).toBe(600);
+  state=replayClose(state,bars,costs,'MANUAL',positions[1].id);
+  expect(replayPositions(state).map(p=>p.id)).toEqual([first.id]);expect(state.trades[0].id).toBe(positions[1].id);
+ });
+ it('accounts for used margin before accepting another order',()=>{
+  let state=beginReplay(bars,1,1000);state=replayEnter(state,bars,'BUY',4,5,10,costs);
+  expect(()=>replayEnter(state,bars,'BUY',2,5,10,costs)).toThrow(/Insufficient/);
+ });
+ it('manages and stops only the selected position, preserving older saved sessions',async()=>{
+  const {replayPositions}=await import('./market-replay-engine');
+  let state=replayEnter(beginReplay(bars,1),bars,'BUY',1,10,20,costs);
+  const legacy={...state,positions:undefined};state=replayEnter(legacy,bars,'BUY',1,5,15,costs);
+  const [first,second]=replayPositions(state);
+  state=replayModifyPosition(state,bars,costs,3998,4015,second.id);
+  const falling=[bars[0],bars[1],{time:base+120,open:4000,high:4001,low:3997,close:3999},...bars.slice(3)];
+  state=replayStep(state,falling,costs);
+  expect(state.trades.map(t=>t.id)).toEqual([second.id]);expect(replayPositions(state).map(p=>p.id)).toEqual([first.id]);
+ });
+});
+
+describe('multiple positions and pending order interaction',()=>{
+ it('fills a pending order alongside an open position and closes both at session end',async()=>{
+  const {replayPlacePending,replayPositions}=await import('./market-replay-engine');
+  const input=[bars[0],bars[1],{time:base+120,open:4000,high:4001,low:3997,close:3999},bars[3]];
+  let state=replayEnter(beginReplay(input,1),input,'SELL',1,20,30,costs);
+  state=replayPlacePending(state,input,'BUY','limit',3998,1,20,30,costs);
+  state=replayStep(state,input,costs);expect(replayPositions(state)).toHaveLength(2);
+  state=replayStep(state,input,costs);expect(replayPositions(state)).toHaveLength(0);expect(state.trades).toHaveLength(2);expect(state.trades.map(t=>t.reason)).toEqual(['SESSION_END','SESSION_END']);
+ });
+});
