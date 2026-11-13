@@ -33,12 +33,10 @@ onmessage=event=>{if(event.data.type!=='run')return;try{
  worker?.terminate();const url=URL.createObjectURL(new Blob([${JSON.stringify(workerProgram)}],{type:'text/javascript'}));worker=new Worker(url);URL.revokeObjectURL(url);
  worker.onmessage=e=>parent.postMessage(e.data,'*');worker.onerror=()=>parent.postMessage({type:'error',message:'Isolated strategy worker failed.'},'*');worker.postMessage(event.data);
 }catch(e){parent.postMessage({type:'error',message:String(e.message||e)},'*')}};
-onunload=()=>worker?.terminate();
 </script>`;
 
 function runInSandbox(
   code: string,
-  candles: Candle[],
   config: Record<string, any>,
   datasets: Record<string, Candle[]>,
   signal?: AbortSignal,
@@ -80,7 +78,7 @@ function runInSandbox(
 
     window.addEventListener('message', onMessage);
     signal?.addEventListener('abort', onAbort, { once: true });
-    iframe.onload = () => iframe.contentWindow?.postMessage({ type: 'run', code, candles, config, datasets }, '*');
+    iframe.onload = () => iframe.contentWindow?.postMessage({ type: 'run', code, config, datasets }, '*');
     document.body.appendChild(iframe);
   });
 }
@@ -120,7 +118,7 @@ export async function runBacktest(
     'Running deterministic isolated strategy worker…',
   ];
   const started = performance.now();
-  const decisions = await runInSandbox(code, candles, config, datasets, signal);
+  const decisions = await runInSandbox(code, config, datasets, signal);
   const window = tradingWindow(candles, decisions, tradingStart);
   const tradingCandles = window.candles, tradingDecisions = window.decisions;
   if (window.warmupCandles) logs.push(`Indicator warm-up · ${window.warmupCandles.toLocaleString()} execution candles before the selected period; no trades placed during warm-up`);

@@ -7,7 +7,8 @@ export type ReplaySide='BUY'|'SELL';
 export type ReplayCosts={spread:number;slippage:number;feePerOunce:number;leverage:number};
 export type ReplayPosition={id:string;side:ReplaySide;quantity:number;entry:number;stop:number;target:number;entryTime:number;entryIndex:number;entryFee:number};
 export type ReplayTrade=ReplayPosition&{exit:number;exitTime:number;exitIndex:number;exitFee:number;gross:number;net:number;reason:'STOP'|'TARGET'|'MANUAL'|'SESSION_END';balanceAfter:number};
-export type ReplaySession={index:number;initialBalance:number;balance:number;position:ReplayPosition|null;trades:ReplayTrade[]};
+export type ReplayPending={side:ReplaySide;type:'limit'|'stop';price:number;quantity:number;stopDistance:number;targetDistance:number};
+export type ReplaySession={index:number;initialBalance:number;balance:number;position:ReplayPosition|null;trades:ReplayTrade[];pending?:ReplayPending|null};
 const finite=(value:number)=>Number.isFinite(value);
 export const DEFAULT_REPLAY_COSTS:ReplayCosts={spread:0.25,slippage:0.05,feePerOunce:0.03,leverage:20};
 export function validateReplayBars(bars:ReplayBar[]){
@@ -45,7 +46,7 @@ export function replayMark(state:ReplaySession,bar:ReplayBar,costs:ReplayCosts){
 }
 export function replayEnter(state:ReplaySession,bars:ReplayBar[],side:ReplaySide,quantity:number,stopDistance:number,targetDistance:number,costs:ReplayCosts):ReplaySession{
  validateReplayCosts(costs);
- if(state.position)throw Error('Close your current position before opening another.');
+ if(state.position||state.pending)throw Error('Close your current position or cancel your pending order first.');
  if(!['BUY','SELL'].includes(side)||!finite(quantity)||quantity<=0||quantity>10000||
    !finite(stopDistance)||stopDistance<=0||!finite(targetDistance)||targetDistance<=0)throw Error('Enter a positive trade size, stop distance and target distance.');
  const bar=bars[state.index];if(!bar)throw Error('No revealed candle at this time.');
@@ -59,6 +60,19 @@ export function replayEnter(state:ReplaySession,bars:ReplayBar[],side:ReplaySide
  if(position.stop<=0)throw Error('Your stop must be above zero.');
  return {...state,balance:state.balance-fee,position};
 }
+/** Queue one paper limit or stop order for future candles only. */
+export function replayPlacePending(state:ReplaySession,bars:ReplayBar[],side:ReplaySide,type:'limit'|'stop',price:number,quantity:number,stopDistance:number,targetDistance:number,costs:ReplayCosts):ReplaySession{
+ validateReplayCosts(costs);
+ if(state.position||state.pending)throw Error('Close your current position or cancel your pending order first.');
+ const bar=bars[state.index];if(!bar||!Number.isFinite(price)||price<=0||!Number.isFinite(quantity)||quantity<=0||quantity>10000||!Number.isFinite(stopDistance)||stopDistance<=0||!Number.isFinite(targetDistance)||targetDistance<=0)throw Error('Enter a valid order price, size, stop and target.');
+ if(!['BUY','SELL'].includes(side)||!['limit','stop'].includes(type))throw Error('Choose a valid pending order.');
+ const current=side==='BUY'?bar.close+costs.spread:bar.close;
+ if(type==='limit'&&(side==='BUY'?price>=current:price<=current))throw Error('A buy limit must be below the current ask; a sell limit must be above the current bid.');
+ if(type==='stop'&&(side==='BUY'?price<=current:price>=current))throw Error('A buy stop must be above the current ask; a sell stop must be below the current bid.');
+ if(price*quantity/costs.leverage+quantity*costs.feePerOunce>state.balance)throw Error('Insufficient replay equity for this pending order.');
+ return {...state,pending:{side,type,price,quantity,stopDistance,targetDistance}};
+}
+export function replayCancelPending(state:ReplaySession):ReplaySession{return state.pending?{...state,pending:null}:state;}
 /** Revise protective orders at the current revealed price only; no retroactive fills. */
 export function replayModifyPosition(state:ReplaySession,bars:ReplayBar[],costs:ReplayCosts,stop:number,target:number):ReplaySession{
  validateReplayCosts(costs);
@@ -95,18 +109,29 @@ export function replayStep(state:ReplaySession,bars:ReplayBar[],costs:ReplayCost
  validateReplayCosts(costs);
  const nextIndex=state.index+1;
  if(nextIndex>=bars.length)return state;
- const bar=bars[nextIndex],position=state.position;
+ const bar=bars[nextIndex];let position=state.position,newlyFilled=false;
  let out:ReplaySession={...state,index:nextIndex};
- if(!position)return out;
+ const pending=state.pending;
+ if(!position&&pending){
+  const askOpen=bar.open+costs.spread,askHigh=bar.high+costs.spread,askLow=bar.low+costs.spread;
+  const touched=pending.side==='BUY'?(pending.type==='limit'?askLow<=pending.price:askHigh>=pending.price):(pending.type==='limit'?bar.high>=pending.price:bar.low<=pending.price);
+  if(touched){
+   const raw=pending.side==='BUY'?(pending.type==='limit'?Math.min(pending.price,askOpen):Math.max(pending.price,askOpen)):(pending.type==='limit'?Math.max(pending.price,bar.open):Math.min(pending.price,bar.open));
+   const entry=raw+(pending.side==='BUY'?costs.slippage:-costs.slippage),fee=pending.quantity*costs.feePerOunce,dir=pending.side==='BUY'?1:-1;
+   if(entry*pending.quantity/costs.leverage+fee>out.balance||entry-dir*pending.stopDistance<=0)out={...out,pending:null};
+   else {position={id:'replay-'+bar.time+'-'+state.trades.length,side:pending.side,quantity:pending.quantity,entry,stop:entry-dir*pending.stopDistance,target:entry+dir*pending.targetDistance,entryTime:bar.time,entryIndex:nextIndex,entryFee:fee};out={...out,pending:null,position,balance:out.balance-fee};newlyFilled=true;}
+  }
+ }
+ if(!position)return nextIndex===bars.length-1?{...out,pending:null}:out;
  const spread=costs.spread,slip=costs.slippage;
  if(position.side==='BUY'){
   const openingBid=bar.open,lowBid=bar.low,highBid=bar.high;
   if(lowBid<=position.stop)out=finish(out,bar,costs,Math.min(position.stop,openingBid)-slip,'STOP');
-  else if(highBid>=position.target)out=finish(out,bar,costs,position.target-slip,'TARGET');
+  else if(!newlyFilled&&highBid>=position.target)out=finish(out,bar,costs,position.target-slip,'TARGET');
  }else{
   const openingAsk=bar.open+spread,highAsk=bar.high+spread,lowAsk=bar.low+spread;
   if(highAsk>=position.stop)out=finish(out,bar,costs,Math.max(position.stop,openingAsk)+slip,'STOP');
-  else if(lowAsk<=position.target)out=finish(out,bar,costs,position.target+slip,'TARGET');
+  else if(!newlyFilled&&lowAsk<=position.target)out=finish(out,bar,costs,position.target+slip,'TARGET');
  }
  if(out.index===bars.length-1&&out.position)out=replayClose(out,bars,costs,'SESSION_END');
  return out;

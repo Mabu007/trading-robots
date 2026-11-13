@@ -375,7 +375,7 @@ function App(){
   return()=>{active=false};
  },[authReady,cloudClient]);
  useEffect(()=>{if(!authReady||!cloudClient){setPersonality('');return}let active=true;void cloudClient.loadPersonality().then(value=>{if(active)setPersonality(value)}).catch(error=>{if(active)setCloudMessage('Personality could not be loaded: '+err(error))});return()=>{active=false}},[authReady,cloudClient]);
- useEffect(()=>{if(!authReady||!cloudClient){setBrokerConnections({propdao:'unknown',ctrader:'unknown',valr:'unknown'});return}let active=true;void Promise.allSettled([sharingRequest<{connected:boolean}>(cloudClient,'/api/venues/propdao/accounts'),sharingRequest<{connected:boolean}>(cloudClient,'/api/venues/ctrader/accounts'),sharingRequest<{connected:boolean}>(cloudClient,'/api/valr/account')]).then(results=>{if(!active)return;const state=(i:number)=>{const result=results[i];return result.status==='fulfilled'?(result.value.connected?'connected':'disconnected'):'unknown'};setBrokerConnections({propdao:state(0),ctrader:state(1),valr:state(2)})});return()=>{active=false}},[authReady,cloudClient,brokerRevision]);
+
  const updateSkill=async(skill:UserSkill)=>{if(!cloudClient)throw Error('Sign in to save your skills.');const previous=skills.find(item=>item.id===skill.id);
   if(previous?.name.toLocaleLowerCase()!==skill.name.toLocaleLowerCase()&&skills.some(item=>item.id!==skill.id&&item.name.toLocaleLowerCase()===skill.name.toLocaleLowerCase()))throw Error('A skill with that name already exists.');
   await cloudClient.saveSkill(skill);setSkills(current=>[skill,...current.filter(item=>item.id!==skill.id)])};

@@ -89,3 +89,30 @@ describe('market replay has no lookahead or broker execution',()=>{
   expect(()=>beginReplay(bars,99)).toThrow();
  });
 });
+
+describe('pending replay orders',()=>{
+ it('fills on a future candle, never fills from past bars and allows cancellation',async()=>{
+  const {replayPlacePending,replayCancelPending}=await import('./market-replay-engine');
+  const input=[bars[0],bars[1],{time:base+120,open:4000,high:4001,low:3997,close:3999},bars[3]];
+  const pending=replayPlacePending(beginReplay(input,1),input,'BUY','limit',3998,1,5,10,costs);
+  expect(pending.position).toBeNull();expect(pending.index).toBe(1);
+  expect(replayCancelPending(pending).pending).toBeNull();
+  const filled=replayStep(pending,input,costs);
+  expect(filled.position?.entry).toBe(3998);expect(filled.position?.entryIndex).toBe(2);
+  expect(filled.pending).toBeNull();
+ });
+ it('validates side and respects worst gap fills for stop orders',async()=>{
+  const {replayPlacePending}=await import('./market-replay-engine');
+  const input=[bars[0],bars[1],{time:base+120,open:4010,high:4012,low:4009,close:4011},bars[3]];
+  const state=beginReplay(input,1);
+  expect(()=>replayPlacePending(state,input,'BUY','stop',3999,1,20,30,costs)).toThrow(/above/);
+  const next=replayStep(replayPlacePending(state,input,'BUY','stop',4005,1,20,30,costs),input,costs);
+  expect(next.position?.entry).toBe(4010);
+ });
+ it('does not award a target on the candle where an order is filled',async()=>{
+  const {replayPlacePending}=await import('./market-replay-engine');
+  const input=[bars[0],bars[1],{time:base+120,open:4000,high:4010,low:3998,close:4001},bars[3]];
+  const next=replayStep(replayPlacePending(beginReplay(input,1),input,'BUY','limit',3999,1,10,2,costs),input,costs);
+  expect(next.position).not.toBeNull();expect(next.trades).toHaveLength(0);
+ });
+});

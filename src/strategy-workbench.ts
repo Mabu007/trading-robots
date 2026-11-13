@@ -62,7 +62,7 @@ export async function simulateWorkbench(input: {venue: Venue; asset: string; str
       venue: 'research', asset: 'XAUUSD', timeframe,
       from: new Date(start - 200 * TF_SECONDS[timeframe] * 1000).toISOString(),
       to: new Date(end - 1000).toISOString(),
-    }, signal, () => onProgress('Market data rate limit reached. Waiting to retry…'));
+    }, signal, () => onProgress('Market data rate limit reached. Waiting to retry…'), (done,total)=>onProgress(`Loading ${timeframe.toUpperCase()} history · ${done} of ${total} days…`));
     candles[timeframe] = data.candles;
     if (data.source) sources.add(data.source);
     const warmup = data.candles.filter(candle => candle.time * 1000 < start).length;
