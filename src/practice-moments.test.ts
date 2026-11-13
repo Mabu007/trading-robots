@@ -18,4 +18,9 @@ describe('sweep workout discovery', () => {
   bars.splice(5, 1);
   expect(findSweepMoments(bars)).toEqual([]);
  });
+ it('requires a close inside both boundaries of the previous range', () => {
+  const bars = Array.from({length: 24}, (_, i) => bar(i));
+  bars[20] = {...bars[20], high: 12, low: 8, close: 8.5};
+  expect(findSweepMoments(bars)).toEqual([]);
+ });
 });

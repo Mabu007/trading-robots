@@ -12,7 +12,7 @@ export function findSweepMoments(bars: ReplayBar[]): number[] {
   const high = Math.max(...preceding.map(bar => bar.high));
   const low = Math.min(...preceding.map(bar => bar.low));
   const current = bars[i];
-  if ((current.high > high && current.close < high) || (current.low < low && current.close > low)) result.push(i);
+  if (current.close > low && current.close < high && (current.high > high || current.low < low)) result.push(i);
  }
  return result;
 }
