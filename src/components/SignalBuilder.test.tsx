@@ -20,10 +20,10 @@ describe('separate Signal creation, delivery and backtesting UI',()=>{
   expect(html).toContain('Gold · XAUUSD');
   expect(html).not.toContain('PropDAO trading desk');
  });
- it('contains separate creation and sent-delivery navigation, not Trackers',()=>{
-  const html=renderToStaticMarkup(<SignalActivity client={null} active onOpenApps={()=>{}}/>);
-  expect(html).toContain('Create &amp; manage');
-  expect(html).toContain('Sent history');
+ it('shows alert history without an independent condition builder',()=>{
+  const html=renderToStaticMarkup(<SignalActivity client={null} active onOpenStrategy={()=>{}}/>);
+  expect(html).toContain('Alert history');
+  expect(html).not.toContain('Create &amp; manage');
   expect(html).not.toContain('Trackers');
  });
  it('uses the actual shell theme tokens in both pages',()=>{

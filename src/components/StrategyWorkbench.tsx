@@ -62,7 +62,7 @@ export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, 
   const lockedIdentity = Boolean(savedBot);
   const currentRun = Boolean(run && run.strategyCode === code && run.venue === venue && run.asset === asset);
   const canReview = Boolean(savedBot && sourceReady && savedCode === code &&
-    (venue === 'research' || workbenchDeployable(venue)) && runSaved && currentRun);
+    (venue === 'research' || workbenchDeployable(venue)) && ['XAUUSD','GOLDUSDC'].includes(asset) && runSaved && currentRun);
 
   useEffect(() => {
     if (bot?.storageKey || venue === 'ctrader') return;
@@ -204,8 +204,8 @@ export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, 
   const reviewDeployment = () => void perform('review', async () => {
     if (!canReview || !savedBot) return;
     const {riskPercent} = validateWorkbenchSource(code);
-    const digest = venue === 'propdao' ? await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code)) : null;
-    const codeHash = digest ? Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('') : undefined;
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code));
+    const codeHash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
     onDeploy(savedBot, riskPercent, codeHash);
   });
   const card = run ? savedBacktestCard({id, name, venue, asset, prompt: rules}, run) : null;
@@ -225,7 +225,7 @@ export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, 
   return <Dialog title={bot ? bot.name : 'Build a strategy'} className="tv-strategy-workbench" busy={Boolean(busy)} onClose={onClose}>
    <div className="tv-workbench-studio">
     <div className="tv-workbench-hero">
-     <div className="tv-workbench-hero-brand"><span className="tv-workbench-orb"><Bot size={21}/></span><div><span className="tv-workbench-eyebrow">TRADING VIBES / BACKTEST STUDIO</span><h3>{name.trim()||'Your next backtest strategy'}</h3><p>{savedBot?'Saved strategy · '+asset:'Create the idea, backtest it, then track your signals.'}</p></div></div>
+     <div className="tv-workbench-hero-brand"><span className="tv-workbench-orb"><Bot size={21}/></span><div><span className="tv-workbench-eyebrow">TRADING VIBES / BACKTEST STUDIO</span><h3>{name.trim()||'Your next backtest strategy'}</h3><p>{savedBot?'Saved strategy · '+asset:'Create the idea, backtest it, then monitor its conditions.'}</p></div></div>
      <span className={'tv-workbench-pill'+(savedBot?' is-saved':'')}><span className="tv-workbench-dot"/>{savedBot?'Saved':'Draft'}</span>
     </div>
     <div className="tv-workbench-stepper" role="tablist" aria-label="Strategy backtesting workflow">
@@ -255,7 +255,7 @@ export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, 
       <div className="tv-workbench-code-footer"><small><ShieldCheck size={13}/> Saving code never authorizes orders.</small><span>{code.length.toLocaleString()} characters</span></div>
      </div>
      <div className="tv-workbench-toolbar">
-      <div>{!code&&sourceReady&&<button type="button" className="tv-workbench-secondary" disabled={Boolean(busy)} onClick={()=>setCode(starterCode)}>Insert example</button>}<button type="button" className="tv-workbench-secondary" disabled={Boolean(busy)||!sourceReady||!code.trim()||savedCode===code||venue==='ctrader'} onClick={()=>void perform('save',async signal=>{await save(signal);setNotice('Signal strategy saved.')})}>Save strategy</button></div>
+      <div>{!code&&sourceReady&&<button type="button" className="tv-workbench-secondary" disabled={Boolean(busy)} onClick={()=>setCode(starterCode)}>Insert example</button>}<button type="button" className="tv-workbench-secondary" disabled={Boolean(busy)||!sourceReady||!code.trim()||savedCode===code||venue==='ctrader'} onClick={()=>void perform('save',async signal=>{await save(signal);setNotice('Strategy saved.')})}>Save strategy</button></div>
       <button type="button" className="tv-workbench-primary" disabled={Boolean(busy)||!sourceReady||!code.trim()||venue==='ctrader'} onClick={()=>setView('backtest')}>Set up backtest <ArrowRight size={16}/></button>
      </div>
     </div>}
@@ -275,7 +275,7 @@ export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, 
      {(busy==='generate'||busy==='backtest')&&progress&&!progress.startsWith('Saving')&&<button type="button" className="tv-workbench-cancel" onClick={()=>operation.current?.abort()}>Cancel operation</button>}
     </div>}
     {view==='result'&&<section ref={resultsSection} className="tv-workbench-content tv-workbench-results" aria-label="Signal strategy backtest result">
-      <div className="tv-workbench-section-intro"><div><span className="tv-workbench-section-kicker">03 / BACKTEST RESULTS</span><h4>Understand the backtest.</h4><p>Inspect simulated BUY/SELL entries, exits and performance. You can separately create a live condition in Signals.</p></div><Activity className="tv-workbench-heading-icon" size={26}/></div>
+      <div className="tv-workbench-section-intro"><div><span className="tv-workbench-section-kicker">03 / BACKTEST RESULTS</span><h4>Understand the backtest.</h4><p>Inspect simulated entries, exits and performance, then review this strategy for monitoring.</p></div><Activity className="tv-workbench-heading-icon" size={26}/></div>
       {card?<><BacktestChatCard data={card} onInspect={tradeId=>setInspectedTradeId(tradeId)}/>
         {run&&inspectedTradeId!==null&&run.result.trades.some(trade=>trade.id===inspectedTradeId)&&
          <BacktestTradeInspector run={run} tradeId={inspectedTradeId} theme={theme} onClose={()=>setInspectedTradeId(null)} onAskAI={onAuditTrade?trade=>onAuditTrade(run,trade,savedBot):undefined}/>}
@@ -285,7 +285,7 @@ export function StrategyWorkbench({bot, client, initialView, onSaved, onDeploy, 
       <div className="tv-workbench-toolbar">
        {run&&!runSaved&&savedBot&&<button type="button" className="tv-workbench-secondary" disabled={Boolean(busy)||!currentRun||savedCode!==code} onClick={()=>void perform('save result',()=>persistRun(savedBot,run))}>Retry saving result</button>}
        <button type="button" className="tv-workbench-secondary" disabled={Boolean(busy)} onClick={()=>setView('backtest')}>Change dates</button>
-       {canReview&&savedBot&&<button type="button" className="tv-workbench-primary" disabled={Boolean(busy)} onClick={reviewDeployment}><ShieldCheck size={16}/> Track signals <ArrowRight size={15}/></button>}
+       {canReview&&savedBot&&<button type="button" className="tv-workbench-primary" disabled={Boolean(busy)} onClick={reviewDeployment}><ShieldCheck size={16}/> Start monitoring <ArrowRight size={15}/></button>}
       </div>
       {venue==='hyperliquid'&&<p className="tv-workbench-quiet">Hyperliquid research is available, but live signal monitoring for this venue is not yet supported.</p>}
       {venue==='propdao'&&!canReview&&<p className="tv-workbench-quiet">To track this strategy: save the current code and complete a backtest, then review its Gold signal monitor. No broker trade will be placed.</p>}

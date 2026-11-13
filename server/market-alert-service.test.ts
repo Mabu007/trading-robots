@@ -26,3 +26,24 @@ it('shows only confirmed Telegram signals to their owner without conflating draf
  expect((await svc.signalHistory('alice')).signals).toHaveLength(1);
  await expect(svc.signalHistory('alice','malformed')).rejects.toThrow(/cursor/);
 });
+
+it('rejects monitoring review if the saved source differs from the tested revision',async()=>{
+ const {svc,data}=make();
+ const code='export const config = {timeframes:["m1"],executionTimeframe:"m1",riskPercent:1,riskReward:2}; export function onCandle(ctx){return {action:"WAIT"};}';
+ data.set('users/alice/bots/gold',{name:'Gold strategy',asset:'XAUUSD'});
+ (svc as any).deps.read=async()=>JSON.stringify({userId:'alice',botId:'gold',code});
+ await expect(svc.strategyDraft('alice','gold','0'.repeat(64))).rejects.toThrow(/changed since the backtest/);
+ const row=await svc.strategyDraft('alice','gold',ownerHash(code));
+ expect(row.rule.strategy).toEqual({id:'gold',sourceHash:ownerHash(code)});
+ expect(row.rule.name).toBe('Gold strategy');
+});
+
+it('exposes failed and unconfirmed deliveries only when all alert events are requested',async()=>{
+ const {svc,data}=make();const root='serverMarketAlertOwners/'+ownerHash('alice')+'/deliveries/';
+ const event={id:'event-1',time:Math.floor(Date.now()/1000),price:100};
+ data.set(root+'a',{alertId:'a',delivery:'failed',event});
+ data.set(root+'b',{alertId:'b',delivery:'unknown',event:{...event,id:'event-2'}});
+ expect((await svc.signalHistory('alice')).signals).toHaveLength(0);
+ expect((await svc.signalHistory('alice',undefined,true)).signals.map(row=>row.delivery).sort()).toEqual(['failed','unknown']);
+ expect((await svc.signalHistory('bob',undefined,true)).signals).toHaveLength(0);
+});

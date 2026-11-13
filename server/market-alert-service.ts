@@ -27,12 +27,12 @@ export class MarketAlertService{
  async transaction(paths:string[],fn:Parameters<NonNullable<RecordStore['transaction']>>[1]){if(!this.store.transaction)throw Error('Transactional storage unavailable');await this.store.transaction(paths,fn);}
  configured(){return Boolean(this.env.TELEGRAM_BOT_TOKEN&&/^[\w]{5,32}$/.test(this.env.TELEGRAM_BOT_USERNAME||'')&&(this.env.TELEGRAM_WEBHOOK_SECRET||'').length>=32);}
  async telegram(method:string,body:any,uid?:string){const bot=uid?await this.userTelegram.load(uid):null;const token=bot?.token||this.env.TELEGRAM_BOT_TOKEN;if(!token)throw Error('Telegram is not configured');let r:globalThis.Response;try{r=await this.request(`https://api.telegram.org/bot${token}/${method}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(12000),redirect:'error'});}catch{throw Error('Telegram outcome unknown; automatic resend disabled.');}const data=await r.json().catch(()=>null) as any;if(!r.ok||data?.ok!==true){const e=Error('Telegram rejected the message.') as Error&{confirmedRejected?:boolean;retryAfter?:number};e.confirmedRejected=data?.ok===false;if(r.status===429&&data?.ok===false)e.retryAfter=Math.min(3600,Math.max(1,Number(data.parameters?.retry_after)||60));throw e;}return data.result;}
- async signalHistory(uid:string,cursor?:string){
+ async signalHistory(uid:string,cursor?:string,all=false){
   if(cursor!==undefined&&!/^[a-f0-9]{64}$/.test(cursor))throw Error('Invalid signal history cursor');
   const root='serverMarketAlertOwners/'+hash(uid)+'/deliveries';
-  const page=this.store.page?await this.store.page(root,'delivery','sent',cursor,100):
-   {items:(await this.store.query(root)).filter(r=>r.delivery==='sent').slice(0,100),next:null};
-  const signals=page.items.filter(row=>row.delivery==='sent'&&row.event&&typeof row.event.id==='string').map(row=>({
+  const page=this.store.page?await this.store.page(root,all?undefined:'delivery',all?undefined:'sent',cursor,100):
+   {items:(await this.store.query(root)).filter(r=>all||r.delivery==='sent').slice(0,100),next:null};
+  const signals=page.items.filter(row=>(all||row.delivery==='sent')&&row.event&&typeof row.event.id==='string').map(row=>({
    id:String(row.id||hash(String(row.alertId)+':'+String(row.event.id))),
    alertId:String(row.alertId||''),
    name:typeof row.name==='string'?row.name:'Signal tracker',
@@ -42,7 +42,7 @@ export class MarketAlertService{
    matched:Array.isArray(row.event.matched)?row.event.matched.filter((x:unknown)=>typeof x==='string').slice(0,6):[],
    price:Number.isFinite(row.event.price)?row.event.price:null,
    time:Number.isSafeInteger(row.event.time)?row.event.time:null,
-   delivery:'sent' as const
+   delivery:String(row.delivery||'unknown')
   })).sort((a,b)=>(b.time||0)-(a.time||0));
   return {signals,nextCursor:page.next};
  }
@@ -53,7 +53,7 @@ export class MarketAlertService{
  if(rule.strategy&&rule.basis==='live-price')throw Error('JavaScript strategy signals use completed candles; use explicit price rules for tick touches.');
  const id=randomBytes(16).toString('hex'),revision=hash(JSON.stringify(rule));const row={id,uid,revision,rule,state:'draft',createdAt:Date.now(),summary:rule.strategy?['Exact saved JavaScript BUY/SELL signals. Source SHA '+rule.strategy.sourceHash]:rule.conditions.map(describeCondition),notice:'Review these alert rules. They run independently of broker execution. Backtests are estimates.'};await this.store.put(this.path(uid,id),row);return row;}
  async market(timeframe:'m1'|'m5'|'m15'='m1'){try{const s=await biquoteSnapshot('XAUUSD',timeframe,this.request);return completedMarketEvidence({symbol:'XAUUSD',source:'BiQuote',timeframe,bars:s.bars,nowSeconds:Date.now()/1000});}catch(error){return {available:false,source:'BiQuote',reason:error instanceof Error?error.message:'Live market unavailable'};}}
- async strategyDraft(uid:string,botId:string){if(!/^[-\w]{1,128}$/.test(botId))throw Error('Invalid strategy');const raw=await this.deps.read(`user-bots/${Buffer.from(uid).toString('base64url')}/${botId}/current.json`);if(!raw)throw Error('Owned strategy source unavailable');const source=JSON.parse(raw);if(source.userId!==uid||source.botId!==botId||typeof source.code!=='string')throw Error('Strategy ownership mismatch');const meta=await this.store.get(`users/${uid}/bots/${botId}`);if(!meta||!['XAUUSD','GOLDUSDC'].includes(meta.asset))throw Error('Choose a saved Gold strategy for XAUUSD monitoring');const cfg=parseStrategyConfig(source.code);return this.draft(uid,{name:'Strategy signals '+botId.slice(0,8),symbol:'XAUUSD',timeframe:cfg.executionTimeframe,mode:'all',conditions:[{id:'c1',kind:'above',value:1}],notifyStages:false,cooldownSeconds:60,sequenceSeconds:3600,expiresAt:Math.floor(Date.now()/1000)+7*86400,repeat:true,session:null,basis:'completed-candle',strategy:{id:botId,sourceHash:hash(source.code)}});}
+ async strategyDraft(uid:string,botId:string,expectedHash?:string){if(!/^[-\w]{1,128}$/.test(botId))throw Error('Invalid strategy');const raw=await this.deps.read(`user-bots/${Buffer.from(uid).toString('base64url')}/${botId}/current.json`);if(!raw)throw Error('Owned strategy source unavailable');const source=JSON.parse(raw);if(source.userId!==uid||source.botId!==botId||typeof source.code!=='string')throw Error('Strategy ownership mismatch');const meta=await this.store.get(`users/${uid}/bots/${botId}`);if(!meta||!['XAUUSD','GOLDUSDC'].includes(meta.asset))throw Error('Choose a saved Gold strategy for XAUUSD monitoring');if(expectedHash&&hash(source.code)!==expectedHash)throw Error('The saved strategy changed since the backtest. Run a fresh backtest and review.');const cfg=parseStrategyConfig(source.code);return this.draft(uid,{name:typeof meta.name==='string'?meta.name:'Strategy '+botId.slice(0,8),symbol:'XAUUSD',timeframe:cfg.executionTimeframe,mode:'all',conditions:[{id:'c1',kind:'above',value:1}],notifyStages:false,cooldownSeconds:60,sequenceSeconds:3600,expiresAt:Math.floor(Date.now()/1000)+7*86400,repeat:true,session:null,basis:'completed-candle',strategy:{id:botId,sourceHash:hash(source.code)}});}
  async source(uid:string,id:string){const alert=await this.store.get(this.path(uid,id));if(!alert?.rule?.strategy)throw Error('No saved JavaScript strategy for this alert');const ref=alert.rule.strategy;const raw=await this.deps.read(`user-bots/${Buffer.from(uid).toString('base64url')}/${ref.id}/current.json`);if(!raw)throw Error('Source unavailable');const source=JSON.parse(raw);if(source.userId!==uid||source.botId!==ref.id||hash(source.code)!==ref.sourceHash)throw Error('Saved source changed; create a fresh alert draft');return {code:source.code,sourceHash:ref.sourceHash};}
  async runtime(uid:string,id:string,action:string,payload?:unknown){const base=this.env.MARKET_ALERT_RUNTIME_URL,secret=this.env.ALERT_SECRET;if(!base||!/^https:\/\//.test(base)||(secret||'').length<32)throw Error('Alert Worker is not configured');const r=await this.request(new URL('/'+id+'/'+action,base),{method:action==='status'?'GET':'POST',headers:{Authorization:'Bearer '+secret,'X-TV-UID':uid,'Content-Type':'application/json'},...(payload?{body:JSON.stringify(payload)}:{}),signal:AbortSignal.timeout(15000)});const data=await r.json().catch(()=>null) as any;if(!r.ok||typeof data?.running!=='boolean')throw Error('Alert Worker did not confirm '+action);return data;}
  async control(uid:string,id:string,action:'start'|'pause'|'delete',revision?:string){return new ValrAccountLock(this.store,'marketAlertChangeLocks','market alert change').run(hash(uid+':'+id),()=>this.controlUnlocked(uid,id,action,revision));}
@@ -88,7 +88,7 @@ export class MarketAlertService{
 }
 export function marketAlertRoutes(app:Express,deps:Deps){const svc=new MarketAlertService(deps);const auth=(work:(uid:string,req:Request)=>Promise<any>)=>async(req:Request,res:Response)=>{res.setHeader('Cache-Control','private,no-store');const uid=await deps.uid(req,res);if(!uid)return;try{res.json(await work(uid,req))}catch(e){res.status(400).json({error:e instanceof Error?e.message:'Alert request failed'});}};
  app.get('/api/market-alerts',auth(uid=>svc.list(uid)));
- app.get('/api/signals/history',auth((uid,req)=>svc.signalHistory(uid,typeof req.query.cursor==='string'?req.query.cursor:undefined)));
+ app.get('/api/signals/history',auth((uid,req)=>svc.signalHistory(uid,typeof req.query.cursor==='string'?req.query.cursor:undefined,req.query.all==='1')));
  app.post('/api/signals/from-text',auth(async(uid,req)=>{
   const rule=signalRuleFromText(req.body?.text);
   const row=await svc.draft(uid,rule);
@@ -99,7 +99,7 @@ export function marketAlertRoutes(app:Express,deps:Deps){const svc=new MarketAle
   }catch(error){return {alert:row,active:false,text:'Signal saved as a draft: '+(error instanceof Error?error.message:'Connect Telegram and activate it in Signals.')};}
  }));
  app.post('/api/market-alerts/describe',auth(async(uid,req)=>{if(typeof req.body?.text!=='string'||req.body.text.length>4000)throw Error('Describe your conditions in under 4000 characters');return {text:await svc.reply(uid,req.body.text,{purpose:'Prepare alert rules for review. Ask for missing level, timeframe, period or session details. Never activate.',previous:req.body?.previous||null})};}));
- app.post('/api/market-alerts/from-strategy',auth((uid,req)=>svc.strategyDraft(uid,String(req.body?.botId||''))));
+ app.post('/api/market-alerts/from-strategy',auth((uid,req)=>svc.strategyDraft(uid,String(req.body?.botId||''),typeof req.body?.expectedHash==='string'?req.body.expectedHash:undefined)));
  app.get('/api/market-alerts/:id/source',auth((uid,req)=>svc.source(uid,String(req.params.id))));
  app.post('/api/market-alerts',auth((uid,req)=>svc.draft(uid,req.body)));
  app.post('/api/market-alerts/:id/backtest',auth(async(uid,req)=>{const path=svc.path(uid,String(req.params.id)),row=await deps.store.get(path),run=req.body;if(!row||row.deleted||run?.revision!==row.revision||run?.source!=='Dukascopy bid candles · estimated rule replay'||!Array.isArray(run.events)||run.events.length>5000||JSON.stringify(run).length>500000)throw Error('Invalid backtest revision or result size');const backtest={...run,provenance:'browser-produced-estimate',savedAt:Date.now()};await svc.transaction([path],([current])=>{if(!current||current.revision!==run.revision||current.deleted)throw Error('Alert changed');return {[path]:{...current,backtest}};});return {saved:true};}));

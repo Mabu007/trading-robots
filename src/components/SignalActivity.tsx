@@ -1,51 +1,19 @@
 import {useCallback,useEffect,useState} from 'react';
-import {Activity,ArrowRight,Bell,Plus,RefreshCw} from 'lucide-react';
-import {SignalBuilder} from './SignalBuilder';
+import {Activity,RefreshCw} from 'lucide-react';
 import type {CloudClient} from '../firebase';
 import {sharingRequest} from './BotSharing';
 import {displayTime} from '../display-time';
 import './signal-activity.css';
 
-type Signal={id:string;alertId:string;name:string;symbol:string;timeframe:string|null;action:'BUY'|'SELL'|null;matched:string[];price:number|null;time:number|null;delivery:'sent'};
-type Page={signals:Signal[];nextCursor:string|null};
-export function SignalActivity({client,active,bots=[],initialStrategyId='',initialDraftText='',onOpenApps}:{client:CloudClient|null;active:boolean;bots?:{id:string;name:string;asset:string}[];initialStrategyId?:string;initialDraftText?:string;onOpenApps:()=>void}){
- const [tab,setTab]=useState<'create'|'sent'>('create');
- useEffect(()=>{if(initialStrategyId||initialDraftText)setTab('create')},[initialStrategyId,initialDraftText]);
- const [signals,setSignals]=useState<Signal[]>([]);
- const [cursor,setCursor]=useState<string|null>(null);
- const [loading,setLoading]=useState(false),[moreBusy,setMoreBusy]=useState(false),[error,setError]=useState('');
- const refresh=useCallback(async()=>{
-  if(!client)return;
-  setLoading(true);setError('');
-  try{const page=await sharingRequest<Page>(client,'/api/signals/history');
-   setSignals(page.signals||[]);setCursor(page.nextCursor||null);
-  }catch(e){setError(e instanceof Error?e.message:'Could not read signal history')}
-  finally{setLoading(false)}
- },[client]);
- useEffect(()=>{if(!client||!active||tab!=='sent')return;void refresh();const id=window.setInterval(()=>{if(!document.hidden)void refresh()},30000);return()=>window.clearInterval(id)},[client,active,tab,refresh]);
- const more=async()=>{if(!client||!cursor||moreBusy)return;setMoreBusy(true);setError('');
-  try{const page=await sharingRequest<Page>(client,'/api/signals/history?cursor='+encodeURIComponent(cursor));
-    setSignals(rows=>[...new Map([...rows,...page.signals].map(s=>[s.id,s])).values()].sort((a,b)=>(b.time||0)-(a.time||0)));
-    setCursor(page.nextCursor||null);
-  }catch(e){setError(e instanceof Error?e.message:'Could not load more signals')}
-  finally{setMoreBusy(false)}
- };
- return <section className="tv-signal-activity" aria-label="Signals workspace">
-  <header className="tv-signal-activity-head"><div><span className="tv-signal-kicker"><Bell size={15}/> SETUP SIGNALS</span><h1>Signals</h1><p>Describe a market condition, track it live and get notified when it appears.</p></div>
-    <button className="tv-signal-primary" onClick={()=>setTab('create')}><Plus size={16}/> Create signal</button>
-  </header>
-  <div className="tv-signal-tabs" role="tablist" aria-label="Signals sections">
-   <button type="button" role="tab" aria-selected={tab==='create'} className={tab==='create'?'is-active':''} onClick={()=>setTab('create')}><Bell size={15}/> Create & manage</button>
-   <button type="button" role="tab" aria-selected={tab==='sent'} className={tab==='sent'?'is-active':''} onClick={()=>setTab('sent')}><Activity size={15}/> Sent history</button>
-  </div>
-  {tab==='create'&&<SignalBuilder client={client} active={active&&tab==='create'} bots={bots} initialStrategyId={initialStrategyId} initialDraftText={initialDraftText} onOpenApps={onOpenApps} onViewHistory={()=>setTab('sent')}/>}
-  {tab==='sent'&&<section className="tv-signal-panel tv-signal-history" aria-label="Delivered notifications">
-   <div className="tv-signal-history-head"><div><h2>Delivered signals</h2><p>Notifications successfully sent to your connected Telegram chat.</p></div><button className="tv-secondary-action" onClick={()=>void refresh()} disabled={!client||loading}><RefreshCw size={15}/>{loading?'Refreshing…':'Refresh'}</button></div>
-   {error&&<p role="alert" className="tv-signal-error">{error}</p>}
-   {!client?<p>Sign in to see sent signals.</p>:signals.length===0&&!loading?
-    <div className="tv-signal-empty"><Activity size={24}/><strong>No notifications sent yet</strong><p>Once one of your conditions matches, confirmed Telegram deliveries appear here.</p><button onClick={()=>setTab('create')}>Create your first signal <ArrowRight size={15}/></button></div>:
-    <div className="tv-signal-list">{signals.map(s=><article className="tv-signal-item" key={s.id}><span className={'tv-signal-side '+(s.action||'DETECTED').toLowerCase()}>{s.action||'SETUP'}</span><div><strong>{s.name}</strong><p>{s.symbol}{s.timeframe?' · '+s.timeframe.toUpperCase():''}{s.matched.length?' · '+s.matched.join(', '):''}</p><small>{s.time?displayTime(s.time*1000):'Time unavailable'} · Delivered</small></div><strong className="tv-signal-price">{s.price===null?'—':s.price.toLocaleString('en-US',{maximumFractionDigits:4})}</strong></article>)}</div>}
-   {cursor&&<button className="tv-signal-load" disabled={moreBusy} onClick={()=>void more()}>{moreBusy?'Loading…':'Load more'}</button>}
-  </section>}
- </section>;
+type Event={id:string;alertId:string;name:string;symbol:string;timeframe:string|null;price:number|null;time:number|null;delivery:string};
+type Page={signals:Event[];nextCursor:string|null};
+type Monitor={id:string;state?:string;rule?:{name?:string;strategy?:{id:string}|null}};
+export function SignalActivity({client,active,onOpenStrategy}:{client:CloudClient|null;active:boolean;onOpenStrategy:(id:string)=>void}){
+ const [events,setEvents]=useState<Event[]>([]),[monitors,setMonitors]=useState<Monitor[]>([]),[cursor,setCursor]=useState<string|null>(null),[loading,setLoading]=useState(false),[error,setError]=useState('');
+ const refresh=useCallback(async()=>{if(!client)return;setLoading(true);setError('');try{const [page,list]=await Promise.all([sharingRequest<Page>(client,'/api/signals/history?all=1'),sharingRequest<{alerts:Monitor[]}>(client,'/api/market-alerts')]);setEvents(page.signals||[]);setCursor(page.nextCursor||null);setMonitors(list.alerts||[])}catch(e){setError(e instanceof Error?e.message:'Could not load alerts.')}finally{setLoading(false)}},[client]);
+ useEffect(()=>{if(!client||!active)return;void refresh();const id=window.setInterval(()=>{if(!document.hidden)void refresh()},30000);return()=>window.clearInterval(id)},[client,active,refresh]);
+ const pauseLegacy=async(id:string)=>{if(!client||loading)return;setLoading(true);setError('');try{await sharingRequest(client,'/api/market-alerts/'+encodeURIComponent(id)+'/control','POST',{action:'pause'});await refresh()}catch(e){setError(e instanceof Error?e.message:'Pause could not be confirmed.')}finally{setLoading(false)}};
+ const more=async()=>{if(!client||!cursor||loading)return;setLoading(true);try{const page=await sharingRequest<Page>(client,'/api/signals/history?all=1&cursor='+encodeURIComponent(cursor));setEvents(rows=>[...new Map([...rows,...page.signals].map(row=>[row.id,row])).values()].sort((a,b)=>(b.time||0)-(a.time||0)));setCursor(page.nextCursor||null)}catch(e){setError(e instanceof Error?e.message:'Could not load more alerts.')}finally{setLoading(false)}};
+ return <section className="tv-signal-activity" aria-label="Alerts"><header className="tv-signal-activity-head"><div><span className="tv-signal-kicker"><Activity size={15}/> MARKET MONITORING</span><h1>Alerts</h1><p>Market events detected by your strategies and their Telegram delivery status.</p></div><button type="button" className="tv-secondary-action" disabled={!client||loading} onClick={()=>void refresh()}><RefreshCw size={15}/>{loading?'Refreshing…':'Refresh'}</button></header>
+ <section className="tv-signal-panel tv-signal-history"><h2>Alert history</h2>{error&&<p role="alert" className="tv-signal-error">{error}</p>}{!client?<p>Sign in to see alerts.</p>:events.length===0&&!loading?<div className="tv-signal-empty"><Activity size={24}/><strong>No alerts yet</strong><p>Events appear here when a strategy detects a condition.</p></div>:<div className="tv-signal-list">{events.map(event=>{const monitor=monitors.find(row=>row.id===event.alertId);return <article className="tv-signal-item" key={event.id}><span className="tv-signal-side">EVENT</span><div><strong>{monitor?.rule?.name||event.name}</strong><p>{event.symbol}{event.timeframe?' · '+event.timeframe.toUpperCase():''}</p><small>{event.time?displayTime(event.time*1000):'Time unavailable'} · {event.delivery==='sent'?'Delivered':event.delivery==='retry'?'Retry scheduled':event.delivery==='sending'?'Sending':event.delivery==='unknown'?'Delivery unconfirmed':event.delivery}</small>{monitor?.rule?.strategy?.id&&<p><button type="button" onClick={()=>onOpenStrategy(monitor.rule!.strategy!.id)}>Open strategy</button></p>}</div><strong className="tv-signal-price">{event.price===null?'—':event.price.toLocaleString('en-US',{maximumFractionDigits:4})}</strong></article>})}</div>}{cursor&&<button type="button" className="tv-signal-load" disabled={loading} onClick={()=>void more()}>Load more</button>}</section>{monitors.some(row=>!row.rule?.strategy)&&<section className="tv-signal-panel"><h2>Earlier alerts</h2><p>Previously created standalone alerts remain available here so you can pause them.</p>{monitors.filter(row=>!row.rule?.strategy).map(row=><p key={row.id}>{row.rule?.name||'Earlier alert'} · {row.state||'status unknown'} <button type="button" disabled={loading} onClick={()=>void pauseLegacy(row.id)}>Pause</button></p>)}</section>}</section>;
 }
