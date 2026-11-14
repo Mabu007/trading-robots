@@ -204,7 +204,9 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  const advance=useCallback((steps=1)=>{
   const current=sessionRef.current;
   if(!current||!bars.length||finished||preview)return;
-  try{const next=timelineRef.current?replayTo(timelineRef.current,Math.min(bars.length-1,current.index+steps),bars,costs):replayAdvance(current,bars,costs,steps);if(next===current||next.index===current.index){setPlaying(false);return}
+  try{const target=Math.min(bars.length-1,current.index+steps),t=timelineRef.current;
+   const futureDecision=Boolean(t?.decisions.some(item=>item.index>current.index&&item.index<=target));
+   const next=t&&futureDecision?replayTo(t,target,bars,costs):replayAdvance(current,bars,costs,Math.max(1,steps));if(next===current||next.index===current.index){setPlaying(false);return}
     setCurrent(next);const added=replayPositions(next).find(p=>!replayPositions(current).some(old=>old.id===p.id));if(added){setSelectedPositionId(added.id);setAdjustStop(String(added.stop));setAdjustTarget(String(added.target));setShowNewOrder(false);setNotice('Pending paper order filled.')}setProgressTime(Date.now());
     if(next.index>=bars.length-1){setPlaying(false);setNotice('Session complete. Review your trade journal and stats.');}
     else if(next.trades.length>current.trades.length){const trade=next.trades.at(-1)!;
