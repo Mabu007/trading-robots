@@ -166,44 +166,55 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
   finally{setLoading(false)}
   }
  };
- useEffect(()=>{
-  if(!session||!bars.length)return;
-  const timer=window.setTimeout(()=>{
-   try{localStorage.setItem(sessionKey,JSON.stringify({version:4,day,asset,firstTimestamp:bars[0].time,lastTimestamp:bars[bars.length-1].time,session,firstIndex,notes,costs,annotations,attemptId,finished,timeline:timelineRef.current||undefined} satisfies SavedSession))}catch{}
-  },350);return()=>window.clearTimeout(timer);
- },[session,bars,sessionKey,day,firstIndex,notes,costs,annotations,attemptId,finished,timeline]);
- useEffect(()=>{
-  if(!session?.trades.length||finished)return;
-  const archived=visibleArchivedTrades(uid,attemptId,session.trades);
-  const record:PracticeRecord={id:attemptId,kind:'free',asset,day,completedAt:new Date().toISOString(),candlesViewed:session.index-firstIndex,tradeCount:archived.length,net:archived.reduce((sum,t)=>sum+t.net,0),currency:'ZAR',notes:notes.trim().slice(0,3000),trades:archived,annotations};
-  const timer=window.setTimeout(()=>{
-   try{saveLocalHistory(uid,record)}catch{return}
-   void client.savePracticeRecord(record).then(()=>{saveLocalHistory(uid,record,true);onHistoryChange?.()}).catch(()=>{/* Retry from locally saved history in My Progress. */});
-  },1150);
-  return()=>window.clearTimeout(timer);
- },[session?.trades,annotations,notes,attemptId,asset,day,firstIndex,uid,client,finished]);
- useEffect(()=>{if(!notice)return;const timer=window.setTimeout(()=>setNotice(''),2800);return()=>window.clearTimeout(timer)},[notice]);
- useEffect(()=>{if(!session?.trades.some(t=>t.id===initialReviewTradeId))return;setSelectedTrade(initialReviewTradeId||null);setShowReview(true)},[session?.trades,initialReviewTradeId]);
- useEffect(()=>{const reset=()=>setTicketXY(null);window.addEventListener('resize',reset);return()=>window.removeEventListener('resize',reset)},[]);
 
- const persistLatestTrades=()=>{
-  const current=sessionRef.current;if(!current?.trades.length)return;
-  const archived=visibleArchivedTrades(uid,attemptId,current.trades);
-  const record:PracticeRecord={id:attemptId,kind:'free',asset,day,completedAt:new Date().toISOString(),candlesViewed:current.index-firstIndex,tradeCount:archived.length,net:archived.reduce((sum,t)=>sum+t.net,0),currency:'ZAR',notes:notes.trim().slice(0,3000),trades:archived,annotations};
-  try{saveLocalHistory(uid,record)}catch{return}
-  void client.savePracticeRecord(record).then(()=>saveLocalHistory(uid,record,true)).catch(()=>{/* Retained in locally queued history. */});
+ // A replay is a named, continuous, autosaved workspace.
+ useEffect(()=>{
+  if(!sessionOpen||reviewing)return;
+  const timer=window.setInterval(()=>{if(!document.hidden)setElapsedSeconds(v=>v+1)},1000);
+  return()=>window.clearInterval(timer);
+ },[sessionOpen,reviewing]);
+ useEffect(()=>{
+  if(sessionOpen)return;let active=true;
+  void client.listPracticeRecords().then(records=>{if(active)setSavedSessions(records.filter(record=>record.snapshot?.version===5))}).catch(()=>{});
+  return()=>{active=false};
+ },[sessionOpen,client]);
+ useEffect(()=>{
+  if(!initialRecord||initialized.current)return;
+  initialized.current=true;void start(initialRecord.day,initialRecord.id,initialRecord,Boolean(initialReviewTradeId));
+ },[initialRecord]);
+ const makeSnapshot=():StoredReplayWorkspace|null=>{
+  const current=sessionRef.current,all=barsRef.current;
+  if(!current||!all.length||reviewing)return null;
+  return {version:5,id:attemptId,day,asset,name:sessionName||('Gold · '+day),firstTimestamp:all[0].time,
+   lastTimestamp:all.at(-1)!.time,session:current,firstIndex:firstIndexRef.current,notes,costs,annotations,
+   startedAt,elapsedSeconds,lastActiveAt:new Date().toISOString(),timeline:timelineRef.current||undefined};
  };
- const finishPractice=async()=>{
-  const current=sessionRef.current;if(!current||finished||savingHistory)return;
-  if(current.index<=firstIndex){setError('Reveal at least one candle before finishing your practice.');return}
-  if(replayPositions(current).length||current.pending){setError('Close simulated positions and cancel pending orders before finishing.');return}
-  setPlaying(false);setError('');setSavingHistory(true);
-  const archived=visibleArchivedTrades(uid,attemptId,current.trades);
-  const record:PracticeRecord={id:attemptId,kind:'free',asset,day,completedAt:new Date().toISOString(),candlesViewed:current.index-firstIndex,tradeCount:archived.length,net:archived.reduce((sum,t)=>sum+t.net,0),currency:'ZAR',notes:notes.trim().slice(0,3000),trades:archived,annotations};
-  try{saveLocalHistory(uid,record);await client.savePracticeRecord(record);saveLocalHistory(uid,record,true);setFinished(true);setNotice('Session and trade reviews saved to your account.');onHistoryChange?.();}
-  catch{setError('Could not save this practice on this device. Check browser storage and try again.')}
-  finally{setSavingHistory(false)}
+ const persistWorkspace=()=>{
+  const snapshot=makeSnapshot();if(!snapshot)return;
+  try{saveLocalWorkspace(uid,snapshot)}catch{setError('Cannot save replay on this device. Please free browser storage.');return}
+  const archived=visibleArchivedTrades(uid,attemptId,snapshot.session.trades);
+  const record:PracticeRecord={id:attemptId,kind:'free',asset,day,completedAt:snapshot.lastActiveAt,
+   candlesViewed:snapshot.session.index-firstIndex,tradeCount:archived.length,net:archived.reduce((n,t)=>n+t.net,0),
+   currency:'ZAR',notes,annotations,trades:archived,name:snapshot.name,spentSeconds:elapsedSeconds,
+   startedAt,lastActiveAt:snapshot.lastActiveAt,snapshot};
+  try{saveLocalHistory(uid,record)}catch{}
+  void client.savePracticeRecord(record).then(()=>{saveLocalHistory(uid,record,true);onHistoryChange?.()}).catch(()=>{/* Queued for sync on My Progress. */});
  };
+ snapshotRef.current=persistWorkspace;
+ useEffect(()=>{
+  if(!sessionOpen||reviewing)return;
+  const timer=window.setInterval(()=>snapshotRef.current(),15000);
+  const initial=window.setTimeout(()=>snapshotRef.current(),1100);
+  return()=>{window.clearInterval(timer);window.clearTimeout(initial)};
+ },[sessionOpen,attemptId,reviewing]);
+ useEffect(()=>{
+  if(!session||!bars.length||reviewing)return;
+  const timer=window.setTimeout(()=>{const snapshot=makeSnapshot();if(snapshot)try{saveLocalWorkspace(uid,snapshot)}catch{}},850);
+  return()=>window.clearTimeout(timer);
+ },[session,bars,day,attemptId,sessionName,notes,annotations,costs,elapsedSeconds,reviewing]);
+ useEffect(()=>{if(!notice)return;const timer=window.setTimeout(()=>setNotice(''),2800);return()=>window.clearTimeout(timer)},[notice]);
+ useEffect(()=>{const reset=()=>setTicketXY(null);window.addEventListener('resize',reset);return()=>window.removeEventListener('resize',reset)},[]);
+ const persistLatestTrades=()=>snapshotRef.current();
  const loadEarlier=async()=>{
   const currentBars=barsRef.current;if(earlierBusyRef.current||noEarlierRef.current||Date.now()<earlierRetryAtRef.current||!currentBars.length||!sessionRef.current)return;
   if(currentBars.length>=50000){noEarlierRef.current=true;setNotice('This device has reached the 50,000-candle chart limit.');return}
@@ -228,12 +239,12 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  loadEarlierRef.current=()=>void loadEarlier();
  const advance=useCallback((steps=1)=>{
   const current=sessionRef.current;
-  if(!current||!bars.length||finished||preview)return;
+  if(!current||!bars.length||preview)return;
   try{const target=Math.min(bars.length-1,current.index+steps),t=timelineRef.current;
    const futureDecision=Boolean(t?.decisions.some(item=>item.index>current.index&&item.index<=target));
    const next=t&&futureDecision?replayTo(t,target,bars,costs):replayAdvance(current,bars,costs,Math.max(1,steps));if(next===current||next.index===current.index){setPlaying(false);return}
     setCurrent(next);const added=replayPositions(next).find(p=>!replayPositions(current).some(old=>old.id===p.id));if(added){setSelectedPositionId(added.id);setAdjustStop(String(added.stop));setAdjustTarget(String(added.target));setShowNewOrder(false);setNotice('Pending paper order filled.')}setProgressTime(Date.now());
-    if(next.index>=bars.length-1){setPlaying(false);setNotice('Session complete. Review your trade journal and stats.');}
+    if(next.index>=bars.length-1)void loadNextDay();
     else if(next.trades.length>current.trades.length){const trade=next.trades.at(-1)!;
      setNotice((trade.net>=0?'Target reached · ':'Trade closed · ')+(trade.net>=0?'+':'')+money(trade.net)+' net');
     }
@@ -254,7 +265,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
   }catch(e){setPlaying(false);setError(e instanceof Error?e.message:'Unable to rewind this saved session.')}
  };
  const enter=(side:ReplaySide)=>{
-  if(!sessionRef.current||finished)return;
+  if(!sessionRef.current)return;
   setPlaying(false);setError('');
   if(!preview||preview.side!==side)return;
   try{const previous=sessionRef.current;const sl=Math.abs(preview.entry-preview.stop),tp=Math.abs(preview.target-preview.entry);const next=orderType==='market'?replayEnter(sessionRef.current,bars,side,number(quantity),sl,tp,costs):replayPlacePending(sessionRef.current,bars,side,orderType,preview.entry,number(quantity),sl,tp,costs);
