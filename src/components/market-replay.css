@@ -255,3 +255,113 @@
 .chart-text-actions{display:flex;justify-content:flex-end;gap:8px}
 .chart-text-actions button{border:1px solid var(--tv-shell-line);padding:10px 14px;border-radius:9px;background:var(--tv-shell-panel-muted);color:var(--tv-shell-ink);font-size:12px;font-weight:800}
 .chart-text-actions button[type=submit]{border-color:transparent;background:#245b47;color:#fff}
+
+
+/* Mobile-first replay terminal: thumb controls and maximal chart canvas.
+   Applies to portrait phones and phone-sized landscape screens (not desktop). */
+.tv-replay-page .replay-position-line{transform:translateY(-50%)}
+.tv-replay-page .drawing-toolbar .drawing-mobile-trigger{display:none}
+.tv-replay-page .replay-ticket-toggle{display:none}
+.tv-replay-page .replay-mobile-order-bar,.tv-replay-page .replay-mobile-zoom{display:none}
+@media (max-width:720px), (orientation:landscape) and (max-height:540px) and (max-width:980px){
+ .tv-replay-page,.tv-replay-page .tv-replay-modal{height:100dvh!important;min-height:0!important;max-height:100dvh!important;overflow:hidden}
+ .tv-replay-page .tv-replay-modal{display:flex;flex-direction:column}
+ .tv-replay-page .tv-replay-top{flex:none;min-height:53px;padding:6px 8px!important;gap:5px;align-items:center;border-bottom:1px solid var(--tv-shell-line)}
+ .tv-replay-page .tv-replay-header-market{min-width:0;flex:1;justify-content:flex-start;gap:8px}
+ .tv-replay-page .tv-replay-quote{min-width:0;display:grid;grid-template-columns:auto 1fr;grid-template-rows:18px 16px;align-items:center;gap:0 8px;white-space:nowrap}
+ .tv-replay-page .tv-replay-quote>span{font-size:9px;grid-column:1;grid-row:1;letter-spacing:.35px}
+ .tv-replay-page .tv-replay-quote>strong{grid-column:2;grid-row:1;font-size:16px!important;font-weight:800}
+ .tv-replay-page .tv-replay-quote>small{grid-column:1 / -1;grid-row:2;overflow:hidden;text-overflow:ellipsis;font-size:10px!important;color:var(--tv-shell-muted)}
+ .tv-replay-page .tv-replay-mobile-stats>summary{min-height:38px;padding:10px 9px;display:flex;align-items:center}
+ .tv-replay-page .tv-replay-top-actions{display:flex;gap:5px}
+ .tv-replay-page .tv-replay-top-actions button{min-width:42px!important;width:42px!important;height:42px!important;border-radius:11px}
+ .tv-replay-page .tv-replay-terminal{flex:1;min-height:0;overflow:hidden;padding:4px 5px max(5px,env(safe-area-inset-bottom))!important}
+ .tv-replay-page .tv-replay-progress{height:2px;flex:none;margin-bottom:4px}
+ .tv-replay-page .tv-replay-controls{flex:none;display:grid!important;grid-template-columns:minmax(0,1fr);gap:5px!important;margin:0 0 5px!important;padding:0!important;background:transparent!important;border:0!important;box-shadow:none!important;overflow:visible!important;backdrop-filter:none}
+ .tv-replay-page .tv-replay-playback{display:grid!important;grid-template-columns:1.14fr 1.1fr 1fr .78fr .88fr;gap:4px!important;width:100%;min-width:0;border:1px solid var(--tv-shell-line);border-radius:13px;padding:4px!important;background:var(--tv-shell-panel);box-shadow:0 3px 14px #00000009}
+ .tv-replay-page .tv-replay-chart-controls{display:flex!important;width:100%!important;min-width:0!important;max-width:100%;gap:4px!important;align-items:center;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;overscroll-behavior-x:contain;touch-action:pan-x;scroll-snap-type:x proximity;padding:1px 2px 5px}
+ .tv-replay-page .tv-replay-chart-controls::-webkit-scrollbar{display:none}
+ .tv-replay-page .tv-replay-controls button,.tv-replay-page .tv-replay-controls label{min-height:43px!important;border-radius:10px!important;font-size:11px!important;padding:8px 9px!important;white-space:nowrap;touch-action:manipulation;scroll-snap-align:start}
+ .tv-replay-page .tv-replay-playback button,.tv-replay-page .tv-replay-playback label{min-width:0;gap:4px;padding:8px 3px!important;overflow:hidden}
+ .tv-replay-page .tv-replay-playback button svg{width:16px;min-width:16px}
+ .tv-replay-page .tv-replay-playback .tv-replay-play{background:#245b47!important;color:#fff!important;box-shadow:0 3px 11px #245b4738}
+ .tv-replay-page .tv-replay-playback .replay-rewind-text,.tv-replay-page .tv-replay-playback .replay-control-text{display:inline!important;font-size:10px!important}
+ .tv-replay-page .tv-replay-speed>span{display:none!important}
+ .tv-replay-page .tv-replay-speed select{font-size:11px!important;padding:0!important;min-width:0;max-width:54px}
+ .tv-replay-page .tv-replay-chart-controls>label:first-child{order:-4;background:var(--tv-shell-panel-muted);min-width:57px}
+ .tv-replay-page .tv-replay-chart-controls>button:nth-last-child(2){order:-3;border-color:#4f96624d!important;background:color-mix(in srgb,var(--tv-shell-panel) 72%,#86daa5);font-weight:850}
+ .tv-replay-page .tv-replay-chart-controls>button:last-child{order:-2;border-color:var(--tv-shell-line)!important;background:var(--tv-shell-panel)}
+ .tv-replay-page .tv-replay-chart-controls button{flex:none;border:1px solid var(--tv-shell-line)!important;background:var(--tv-shell-panel)}
+ .tv-replay-page .tv-replay-chart-controls button.is-selected{border-color:#70c79b!important;background:color-mix(in srgb,var(--tv-shell-panel) 72%,#5bbf8d)}
+ .tv-replay-page .tv-replay-chart-controls svg{width:16px;height:16px}
+ .tv-replay-page .tv-replay-grid{position:relative;flex:1;min-height:0;overflow:hidden}
+ .tv-replay-page .tv-replay-chart-panel{display:flex;flex-direction:column;height:100%;overflow:hidden;border-radius:11px!important}
+ .tv-replay-page .tv-replay-chart-heading{display:flex;flex:none;justify-content:space-between;padding:6px 9px;font-size:9px;min-height:30px}
+ .tv-replay-page .tv-replay-chart-heading strong{display:block!important;font-size:9px;white-space:nowrap;overflow:hidden;max-width:38%;text-overflow:ellipsis}
+ .tv-replay-page .tv-replay-chart-wrapper{flex:1;min-height:0;overflow:hidden}
+ .tv-replay-page .tv-replay-chart-wrapper .tv-replay-chart{height:100%!important;min-height:0!important;touch-action:auto}
+ .tv-replay-page .tv-replay-chart.drawing-mode{touch-action:none!important}
+ .tv-replay-page .tv-replay-chart-footer{display:flex!important;flex:none;padding:5px 8px;font-size:9px;justify-content:center}
+ .tv-replay-page .tv-replay-chart-footer>span:not(:last-child){display:none!important}
+ .tv-replay-page .tv-replay-chart-footer>span:last-child{display:inline!important;color:var(--tv-shell-muted)}
+ /* A compact drawing palette that expands horizontally; it never covers price scales. */
+ .tv-replay-page .tv-replay-chart .drawing-toolbar{top:7px!important;left:6px!important;z-index:18!important;display:flex!important;flex-direction:row!important;align-items:center;gap:4px;width:max-content;max-width:calc(100% - 59px);max-height:54px;overflow-x:auto;overflow-y:hidden;padding:4px!important;border-radius:14px;background:color-mix(in srgb,var(--tv-shell-panel) 92%,transparent)!important;box-shadow:0 9px 30px #0005;backdrop-filter:blur(18px);scrollbar-width:none;overscroll-behavior-x:contain}
+ .tv-replay-page .tv-replay-chart .drawing-toolbar::-webkit-scrollbar{display:none}
+ .tv-replay-page .drawing-toolbar .drawing-mobile-trigger{display:grid!important;place-items:center;flex:none;min-width:44px!important;width:44px!important;height:44px!important;border:1px solid #74b69470;border-radius:11px;color:#d5ffe5;background:#295d43}
+ .tv-replay-page .drawing-toolbar[data-mobile-open="false"] > :not(.drawing-mobile-trigger){display:none!important}
+ .tv-replay-page .drawing-toolbar[data-mobile-open="true"] > button:not(.drawing-mobile-trigger){display:grid!important;place-items:center;min-width:44px!important;width:44px!important;height:44px!important;border-radius:10px;font-size:17px}
+ .tv-replay-page .drawing-toolbar[data-mobile-open="true"] .drawing-mobile-trigger{background:#3d8058}
+ .tv-replay-page .drawing-toolbar[data-mobile-open="true"] > details{display:none!important}
+ .tv-replay-page .drawing-toolbar button.active{box-shadow:0 0 0 2px #6bd29a59!important}
+ .tv-replay-page .drawing-overlay{touch-action:none;pointer-events:none}
+ /* Touch-friendly chart navigation does not intercept swipes outside its icons. */
+ .tv-replay-page .replay-mobile-zoom{position:absolute;z-index:17;top:8px;right:8px;display:grid;gap:4px;border-radius:13px;padding:4px;background:color-mix(in srgb,var(--tv-shell-panel) 90%,transparent);border:1px solid var(--tv-shell-line);box-shadow:0 5px 20px #0002;backdrop-filter:blur(14px)}
+ .tv-replay-page .replay-mobile-zoom button{display:grid;place-items:center;min-width:38px;width:38px;min-height:38px;height:38px;border:0;border-radius:10px;background:transparent;color:var(--tv-shell-ink)}
+ .tv-replay-page .replay-mobile-zoom button:active{background:var(--tv-shell-panel-muted);transform:scale(.94)}
+ /* Ticket is a bottom sheet, rather than a permanent chart-obscuring window. */
+ .tv-replay-page .tv-replay-ticket{position:absolute!important;inset:auto 5px max(5px,env(safe-area-inset-bottom)) 5px!important;width:auto!important;min-width:0;max-width:none!important;max-height:min(56%,430px)!important;overflow:auto;overscroll-behavior:contain;border-radius:17px!important;padding:14px!important;background:var(--tv-shell-panel);box-shadow:0 10px 45px #0006;z-index:25}
+ .tv-replay-page .replay-ticket-drag{position:sticky!important;top:-14px!important;display:flex;align-items:center;min-height:48px;gap:8px;margin:-14px -14px 12px!important;padding:7px 12px!important;border-radius:16px 16px 0 0;cursor:default;touch-action:manipulation}
+ .tv-replay-page .replay-ticket-drag-label{font-size:12px;font-weight:850;letter-spacing:.2px}
+ .tv-replay-page .replay-ticket-toggle{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:38px;min-width:106px;margin-left:auto;border:1px solid var(--tv-shell-line);border-radius:11px;background:var(--tv-shell-panel);color:var(--tv-shell-ink);font-size:11px;font-weight:800;touch-action:manipulation}
+ .tv-replay-page .tv-replay-ticket.is-minimized{height:55px;min-height:55px;max-height:55px!important;padding:0!important;overflow:hidden}
+ .tv-replay-page .tv-replay-ticket.is-minimized > :not(.replay-ticket-drag){display:none!important}
+ .tv-replay-page .tv-replay-ticket.is-minimized .replay-ticket-drag{position:relative!important;top:0!important;margin:0!important;border-radius:16px;min-height:55px;padding:6px 12px!important}
+ .tv-replay-page .tv-replay-ticket-inputs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
+ .tv-replay-page .tv-replay-ticket-inputs label{min-width:0}
+ .tv-replay-page .tv-replay-ticket input,.tv-replay-page .tv-replay-ticket select,.tv-replay-page .tv-replay-ticket textarea,.tv-replay-page .tv-replay-date-dialog input,.tv-replay-page .tv-replay-review textarea{font-size:16px!important;min-height:44px}
+ .tv-replay-page .tv-replay-ticket button:not(.replay-panel-close):not(.replay-ticket-toggle){min-height:42px;touch-action:manipulation}
+ .tv-replay-page .tv-replay-ticket .tv-replay-buy,.tv-replay-page .tv-replay-ticket .tv-replay-sell{min-height:48px}
+ .tv-replay-page .tv-replay-review{inset:auto 5px max(5px,env(safe-area-inset-bottom)) 5px!important;width:auto!important;max-width:none!important;max-height:75%!important;overflow:auto;padding:15px;border-radius:17px!important;box-shadow:0 10px 45px #0006}
+ /* When adjusting an order, retain a small sheet while confirming from the chart. */
+ .tv-replay-page .replay-mobile-order-bar{display:flex;position:absolute;z-index:22;left:7px;right:7px;bottom:calc(69px + env(safe-area-inset-bottom));align-items:center;gap:6px;padding:9px;border-radius:14px;border:1px solid var(--tv-shell-line);background:color-mix(in srgb,var(--tv-shell-panel) 95%,transparent);box-shadow:0 9px 30px #0005;backdrop-filter:blur(18px);pointer-events:auto}
+ .tv-replay-page .replay-mobile-order-summary{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;line-height:1.25}
+ .tv-replay-page .replay-mobile-order-summary strong{font-size:11px;white-space:nowrap}
+ .tv-replay-page .replay-mobile-order-summary small{font-size:9px;color:var(--tv-shell-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ .tv-replay-page .replay-mobile-order-bar button{flex:none;min-height:40px;padding:8px 10px;border:1px solid var(--tv-shell-line);border-radius:10px;background:var(--tv-shell-panel-muted);color:var(--tv-shell-ink);font-size:10px;font-weight:850;touch-action:manipulation}
+ .tv-replay-page .replay-mobile-order-bar .is-primary{background:#245b47;color:#fff;border-color:#245b47}
+ .tv-replay-page .replay-position-line{height:44px!important;min-height:44px;max-width:85%;transform:translateY(-50%)}
+ .tv-replay-page .replay-position-line span{min-height:29px;font-size:10px}
+ .tv-replay-page .replay-position-line span small{display:none}
+ .tv-replay-page .tv-replay-setup{overflow:auto;align-content:safe center;padding-bottom:max(18px,env(safe-area-inset-bottom))}
+ .tv-replay-page .tv-replay-setup-fields input,.tv-replay-page .tv-replay-setup-fields select{min-height:46px;font-size:16px!important}
+ .tv-replay-page .replay-indicator-modal,.tv-replay-page .tv-replay-date-dialog{max-height:calc(100dvh - 20px - env(safe-area-inset-bottom))}
+}
+@media (max-width:365px){
+ .tv-replay-page .tv-replay-controls button,.tv-replay-page .tv-replay-controls label{font-size:10px!important;padding:7px 4px!important;gap:2px}
+ .tv-replay-page .tv-replay-chart-controls button{padding:7px 9px!important}
+ .tv-replay-page .replay-mobile-order-summary small{display:none}
+ .tv-replay-page .replay-mobile-order-bar button{padding:7px 8px}
+}
+@media (orientation:landscape) and (max-height:540px) and (max-width:980px){
+ .tv-replay-page .tv-replay-top{min-height:42px!important;padding:3px 8px!important}
+ .tv-replay-page .tv-replay-controls{gap:3px!important}
+ .tv-replay-page .tv-replay-playback button,.tv-replay-page .tv-replay-playback label{min-height:35px!important;padding:5px 3px!important}
+ .tv-replay-page .tv-replay-chart-controls button,.tv-replay-page .tv-replay-chart-controls label{min-height:35px!important;padding:5px 9px!important}
+ .tv-replay-page .tv-replay-chart-heading{min-height:24px;padding:4px 8px}
+ .tv-replay-page .tv-replay-chart-footer{display:none!important}
+ .tv-replay-page .tv-replay-ticket{left:auto!important;right:5px!important;bottom:5px!important;max-width:min(330px,47vw)!important;width:min(330px,47vw)!important;max-height:88%!important}
+ .tv-replay-page .tv-replay-ticket.is-minimized{max-height:55px!important;width:min(330px,47vw)!important}
+ .tv-replay-page .replay-mobile-order-bar{bottom:8px;left:6px;right:auto;max-width:calc(100% - min(340px,48vw));flex-wrap:wrap}
+ .tv-replay-page .tv-replay-review{max-height:87%!important}
+}
+@media (prefers-reduced-motion:reduce){.tv-replay-page .tv-replay-controls button,.tv-replay-page .replay-mobile-zoom button{transition:none!important}}
