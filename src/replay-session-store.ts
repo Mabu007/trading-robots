@@ -19,6 +19,7 @@ export type ReplayArchive={
  notes:string;
  annotations:Record<string,string>;
  drawingState?:string;
+ hiddenTradeIds?:string[];
  activeSeconds:number;
  createdAt:string;
  updatedAt:string;
