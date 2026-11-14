@@ -4,12 +4,14 @@
  */
 export type ReplayBar={time:number;open:number;high:number;low:number;close:number;volume?:number};
 export type ReplaySide='BUY'|'SELL';
-export type ReplayCosts={spread:number;slippage:number;feePerOunce:number;leverage:number};
+export type ReplayCosts={spread:number;slippage:number;feePerOunce:number;leverage:number;currency?:'USD'|'ZAR';usdZar?:number};
 export type ReplayPosition={id:string;side:ReplaySide;quantity:number;entry:number;stop:number;target:number;entryTime:number;entryIndex:number;entryFee:number};
 export type ReplayTrade=ReplayPosition&{exit:number;exitTime:number;exitIndex:number;exitFee:number;gross:number;net:number;reason:'STOP'|'TARGET'|'MANUAL'|'SESSION_END';balanceAfter:number};
 export type ReplayPending={side:ReplaySide;type:'limit'|'stop';price:number;quantity:number;stopDistance:number;targetDistance:number};
 export type ReplaySession={index:number;initialBalance:number;balance:number;position:ReplayPosition|null;positions?:ReplayPosition[];sequence?:number;trades:ReplayTrade[];pending?:ReplayPending|null};
 const finite=(value:number)=>Number.isFinite(value);
+/** USD-priced gold values are converted to the account's persisted currency. */
+export const replayFx=(costs:ReplayCosts)=>costs.currency==='ZAR'?(costs.usdZar??NaN):1;
 export const DEFAULT_REPLAY_COSTS:ReplayCosts={spread:0.25,slippage:0.05,feePerOunce:0.03,leverage:20};
 export function validateReplayBars(bars:ReplayBar[]){
  let last=0;
@@ -27,12 +29,13 @@ export function validateReplayCosts(costs:ReplayCosts){
  if(!finite(costs.spread)||costs.spread<0||costs.spread>30||
   !finite(costs.slippage)||costs.slippage<0||costs.slippage>10||
   !finite(costs.feePerOunce)||costs.feePerOunce<0||costs.feePerOunce>5||
-  !finite(costs.leverage)||costs.leverage<1||costs.leverage>100)throw Error('Choose valid replay transaction costs.');
+  !finite(costs.leverage)||costs.leverage<1||costs.leverage>100||
+  (costs.currency!==undefined&&!['USD','ZAR'].includes(costs.currency))||!finite(replayFx(costs))||replayFx(costs)<=0||replayFx(costs)>1000)throw Error('Choose valid replay transaction costs.');
 }
 export function beginReplay(bars:ReplayBar[],cursor:number,startingBalance=10000):ReplaySession{
  validateReplayBars(bars);
  if(!Number.isInteger(cursor)||cursor<0||cursor>=bars.length)throw Error('Replay start must be within available history.');
- if(!finite(startingBalance)||startingBalance<100||startingBalance>1e8)throw Error('Choose a starting balance between $100 and $100 million.');
+ if(!finite(startingBalance)||startingBalance<100||startingBalance>1e8)throw Error('Choose a starting balance between 100 and 100 million in your account currency.');
  return {index:cursor,initialBalance:startingBalance,balance:startingBalance,position:null,positions:[],sequence:0,trades:[]};
 }
 export const replayPositions=(state:ReplaySession):ReplayPosition[]=>Array.isArray(state.positions)?state.positions:state.position?[state.position]:[];
@@ -42,8 +45,8 @@ export function replayMark(state:ReplaySession,bar:ReplayBar,costs:ReplayCosts){
  let unrealized=0,marginUsed=0;
  for(const p of replayPositions(state)){
   const exit=p.side==='BUY'?bar.close-costs.slippage:bar.close+costs.spread+costs.slippage;
-  unrealized+=(p.side==='BUY'?exit-p.entry:p.entry-exit)*p.quantity-p.quantity*costs.feePerOunce;
-  marginUsed+=p.quantity*p.entry/costs.leverage;
+  unrealized+=((p.side==='BUY'?exit-p.entry:p.entry-exit)*p.quantity-p.quantity*costs.feePerOunce)*replayFx(costs);
+  marginUsed+=p.quantity*p.entry/costs.leverage*replayFx(costs);
  }
  return {unrealized,equity:state.balance+unrealized,marginUsed,liquidation:bar.close};
 }
@@ -52,7 +55,7 @@ export function replayEnter(state:ReplaySession,bars:ReplayBar[],side:ReplaySide
  validateReplayCosts(costs);
  if(!['BUY','SELL'].includes(side)||!finite(quantity)||quantity<=0||quantity>10000||!finite(stopDistance)||stopDistance<=0||!finite(targetDistance)||targetDistance<=0)throw Error('Enter a positive trade size, stop distance and target distance.');
  const bar=bars[state.index];if(!bar)throw Error('No revealed candle at this time.');
- const entry=side==='BUY'?bar.close+costs.spread+costs.slippage:bar.close-costs.slippage,fee=quantity*costs.feePerOunce,margin=entry*quantity/costs.leverage,mark=replayMark(state,bar,costs);
+ const entry=side==='BUY'?bar.close+costs.spread+costs.slippage:bar.close-costs.slippage,fee=quantity*costs.feePerOunce*replayFx(costs),margin=entry*quantity/costs.leverage*replayFx(costs),mark=replayMark(state,bar,costs);
  if(margin>mark.equity-mark.marginUsed-fee)throw Error('Insufficient available replay equity for this position and leverage.');
  const direction=side==='BUY'?1:-1,identity=nextId(state,bar.time);
  const position:ReplayPosition={id:identity.id,side,quantity,entry,stop:entry-direction*stopDistance,target:entry+direction*targetDistance,entryTime:bar.time,entryIndex:state.index,entryFee:fee};
@@ -67,7 +70,7 @@ export function replayPlacePending(state:ReplaySession,bars:ReplayBar[],side:Rep
  const current=side==='BUY'?bar.close+costs.spread:bar.close;
  if(type==='limit'&&(side==='BUY'?price>=current:price<=current))throw Error('A buy limit must be below the current ask; a sell limit must be above the current bid.');
  if(type==='stop'&&(side==='BUY'?price<=current:price>=current))throw Error('A buy stop must be above the current ask; a sell stop must be below the current bid.');
- const mark=replayMark(state,bar,costs);if(price*quantity/costs.leverage+quantity*costs.feePerOunce>mark.equity-mark.marginUsed)throw Error('Insufficient replay equity for this pending order.');
+ const mark=replayMark(state,bar,costs);if((price*quantity/costs.leverage+quantity*costs.feePerOunce)*replayFx(costs)>mark.equity-mark.marginUsed)throw Error('Insufficient replay equity for this pending order.');
  return {...state,pending:{side,type,price,quantity,stopDistance,targetDistance}};
 }
 export function replayCancelPending(state:ReplaySession):ReplaySession{return state.pending?{...state,pending:null}:state;}
@@ -83,7 +86,7 @@ export function replayModifyPosition(state:ReplaySession,bars:ReplayBar[],costs:
 }
 function finish(state:ReplaySession,bar:ReplayBar,costs:ReplayCosts,exit:number,reason:ReplayTrade['reason'],id:string):ReplaySession{
  const positions=replayPositions(state),p=positions.find(item=>item.id===id);if(!p)return state;
- const exitFee=p.quantity*costs.feePerOunce,gross=(p.side==='BUY'?exit-p.entry:p.entry-exit)*p.quantity,newBalance=state.balance+gross-exitFee;
+ const exitFee=p.quantity*costs.feePerOunce*replayFx(costs),gross=(p.side==='BUY'?exit-p.entry:p.entry-exit)*p.quantity*replayFx(costs),newBalance=state.balance+gross-exitFee;
  const trade:ReplayTrade={...p,exit,exitTime:bar.time,exitIndex:state.index,exitFee,gross,net:gross-p.entryFee-exitFee,reason,balanceAfter:newBalance};
  return withPositions({...state,balance:newBalance,trades:[...state.trades,trade]},positions.filter(item=>item.id!==id));
 }
@@ -103,8 +106,8 @@ export function replayStep(state:ReplaySession,bars:ReplayBar[],costs:ReplayCost
   const touched=pending.side==='BUY'?(pending.type==='limit'?askLow<=pending.price:askHigh>=pending.price):(pending.type==='limit'?bar.high>=pending.price:bar.low<=pending.price);
   if(touched){
    const raw=pending.side==='BUY'?(pending.type==='limit'?Math.min(pending.price,askOpen):Math.max(pending.price,askOpen)):(pending.type==='limit'?Math.max(pending.price,bar.open):Math.min(pending.price,bar.open));
-   const entry=raw+(pending.side==='BUY'?costs.slippage:-costs.slippage),fee=pending.quantity*costs.feePerOunce,dir=pending.side==='BUY'?1:-1,mark=replayMark(out,{...bar,close:bar.open},costs),identity=nextId(out,bar.time);
-   if(entry*pending.quantity/costs.leverage+fee>mark.equity-mark.marginUsed||entry-dir*pending.stopDistance<=0)out={...out,pending:null};
+   const entry=raw+(pending.side==='BUY'?costs.slippage:-costs.slippage),fee=pending.quantity*costs.feePerOunce*replayFx(costs),dir=pending.side==='BUY'?1:-1,mark=replayMark(out,{...bar,close:bar.open},costs),identity=nextId(out,bar.time);
+   if(entry*pending.quantity/costs.leverage*replayFx(costs)+fee>mark.equity-mark.marginUsed||entry-dir*pending.stopDistance<=0)out={...out,pending:null};
    else {const position:ReplayPosition={id:identity.id,side:pending.side,quantity:pending.quantity,entry,stop:entry-dir*pending.stopDistance,target:entry+dir*pending.targetDistance,entryTime:bar.time,entryIndex:nextIndex,entryFee:fee};newId=position.id;out=withPositions({...out,pending:null,sequence:identity.sequence,balance:out.balance-fee},[...replayPositions(out),position]);}
   }
  }
