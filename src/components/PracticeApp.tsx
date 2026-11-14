@@ -1,4 +1,4 @@
-import {useEffect,useMemo,useState} from 'react';
+import {useEffect,useState} from 'react';
 import {Activity,ArrowRight,BarChart3,CalendarDays,CheckCircle2,ChevronRight,Home,LogOut,Moon,Play,RotateCcw,Sun,Trash2,Pencil,Save} from 'lucide-react';
 import {mergePracticeHistory,readLocalHistory,syncPracticeHistory,saveLocalHistory,removeLocalPracticeRecord,clearLocalPracticeHistory,type PracticeRecord} from '../practice-history';
 import type {CloudClient} from '../firebase';
@@ -10,11 +10,6 @@ type Page='home'|'replay'|'progress';
 type Props={client:CloudClient;theme:AppTheme;onSignOut:()=>void;onThemeToggle:()=>void};
 const menu=[{id:'home',label:'Home',icon:Home},{id:'replay',label:'Market Replay',icon:Activity},{id:'progress',label:'My Progress',icon:BarChart3}] as const;
 const heroImage='https://pub-60ec726f38cd437c94063e4c72071321.r2.dev/Confident%20Trader%20in%20a%20Modern%20Workspace.png';
-const formatPaperMoney=(record:PracticeRecord)=>{
- if(!record.tradeCount)return 'Observed';
- if(record.currency!=='ZAR')return 'Legacy session';
- return (record.net>=0?'+':'−')+'R'+Math.abs(record.net).toLocaleString('en-ZA',{minimumFractionDigits:2,maximumFractionDigits:2});
-};
 export function PracticeApp({client,theme,onSignOut,onThemeToggle}:Props){
  const [page,setPage]=useState<Page>('home');
  const [replayChoice,setReplayChoice]=useState<{day?:string;tradeId?:string}>({});
