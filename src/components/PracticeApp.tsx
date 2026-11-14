@@ -6,6 +6,8 @@ import type {AppTheme} from '../theme';
 import {MarketReplay} from './MarketReplay';
 import {installPlatform,isAppStandalone,requestAppInstall,subscribeInstallPrompt} from '../pwa-install';
 import {hideArchivedTrade,patchSavedReplayReview} from '../replay-journal';
+import {removeLocalReplayArchive} from '../replay-session-store';
+import type {ReplayTrade} from '../market-replay-engine';
 import './practice-app.css';
 
 type Page='home'|'replay'|'progress';
@@ -39,7 +41,7 @@ export function PracticeApp({client,theme,onSignOut,onThemeToggle}:Props){
   setInstallDialog(true);
  };
  const device=installPlatform(typeof navigator==='undefined'?'':navigator.userAgent);
- const [replayChoice,setReplayChoice]=useState<{day?:string;tradeId?:string}>({});
+ const [replayChoice,setReplayChoice]=useState<{day?:string;tradeId?:string;sessionId?:string;trade?:ReplayTrade}>({});
  const [edit,setEdit]=useState<{recordId:string;tradeId:string;note:string}|null>(null);
  const [saving,setSaving]=useState(false),[historyError,setHistoryError]=useState('');
  const [history,setHistory]=useState<PracticeRecord[]>([]);
@@ -51,7 +53,7 @@ export function PracticeApp({client,theme,onSignOut,onThemeToggle}:Props){
   void (async()=>{try{await syncPracticeHistory(uid,client);const remote=await client.listPracticeRecords();if(active){setHistory(mergePracticeHistory(readLocalHistory(uid),remote));setHistoryState('synced')}}catch{if(active){setHistory(mergePracticeHistory(readLocalHistory(uid),[]));setHistoryState('local')}}})();
   return()=>{active=false};
  },[client,profile?.uid,historyRevision]);
- const openReplay=(day?:string,tradeId?:string)=>{setReplayChoice({day,tradeId});setPage('replay')};
+ const openReplay=(day?:string,tradeId?:string,sessionId?:string,trade?:ReplayTrade)=>{setReplayChoice({day,tradeId,sessionId,trade});setPage('replay')};
  const tradeRows=history.flatMap(record=>(record.trades||[]).map(trade=>({record,trade}))).sort((a,b)=>b.trade.exitTime-a.trade.exitTime);
  const money=(value:number)=>(value<0?'−':value>0?'+':'')+'R'+Math.abs(value).toLocaleString('en-ZA',{minimumFractionDigits:2,maximumFractionDigits:2});
  const uid=profile?.uid||'';
@@ -82,11 +84,12 @@ export function PracticeApp({client,theme,onSignOut,onThemeToggle}:Props){
    for(const key of Object.keys(localStorage)){
     if(key.startsWith('trading-vibes:replay:zar:v4:'+uid+':')||key.startsWith('trading-vibes:replay:v3:'+uid+':')||key.startsWith('trading-vibes:replay:v2:'+uid+':')||key.startsWith('trading-vibes:replay-drawings:'+uid+':')||key.startsWith('trading-vibes:replay-deleted-trades:v1:'+uid+':')||key==='trading-vibes:practice-history:v1:'+uid)localStorage.removeItem(key);
    }
+   for(let i=localStorage.length-1;i>=0;i--){const key=localStorage.key(i);if(key?.startsWith('trading-vibes:replay-session:v5:'+uid+':'))localStorage.removeItem(key)}
    clearLocalPracticeHistory(uid);setHistory([]);setEdit(null);
   }catch{setHistoryError('The reset was not completed. Please retry while signed in.')}
   finally{setSaving(false)}
  };
- if(page==='replay')return <MarketReplay client={client} theme={theme} initialDay={replayChoice.day} initialReviewTradeId={replayChoice.tradeId} onHistoryChange={()=>setHistoryRevision(v=>v+1)} onClose={()=>setPage('home')}/>;
+ if(page==='replay')return <MarketReplay client={client} theme={theme} initialDay={replayChoice.day} initialReviewTradeId={replayChoice.tradeId} initialSessionId={replayChoice.sessionId} initialTrade={replayChoice.trade} onHistoryChange={()=>setHistoryRevision(v=>v+1)} onClose={()=>setPage('home')}/>;
  return <div className="practice-shell practice-replay-first" data-practice-theme={theme}>
   <aside className="practice-sidebar">
    <div className="practice-brand"><img src="/logo.png" alt="Trading Vibes"/><span>trading<span>vibes</span><small>THE MARKET REPLAY APP</small></span></div>
@@ -119,7 +122,7 @@ export function PracticeApp({client,theme,onSignOut,onThemeToggle}:Props){
      {tradeRows.length?<section className="practice-trades-list"><div className="practice-section-head"><div><span className="practice-overline">YOUR TRADING JOURNAL</span><h2>Trades you've practised.</h2><p>Select a trade to revisit that historical day or edit the saved review.</p></div></div>
       <div className="practice-trade-table-scroll"><table className="practice-trade-table"><thead><tr><th>Date</th><th>Asset</th><th>Side</th><th>Entry</th><th>Exit</th><th>Result</th><th>Review</th><th>Actions</th></tr></thead><tbody>
        {tradeRows.map(({record,trade})=><tr key={record.id+':'+trade.id}>
-        <td><button type="button" className="practice-trade-day" onClick={()=>openReplay(record.day,trade.id)} title="Open this historical day">{record.day}</button></td>
+        <td><button type="button" className="practice-trade-day" onClick={()=>openReplay(record.day,trade.id,record.id,trade)} title="Replay this exact historical trade">{record.day}</button></td>
         <td>Gold</td><td><span className={trade.side==='BUY'?'is-profit':'is-loss'}>{trade.side==='BUY'?'BUY':'SELL'}</span></td><td>{trade.entry.toFixed(3)}</td><td>{trade.exit.toFixed(3)}</td>
         <td className={trade.net>0?'is-profit':trade.net<0?'is-loss':''}>{money(trade.net)}</td>
         <td className="practice-trade-review">{record.annotations?.[trade.id]||<span className="practice-muted">Add a review</span>}</td>
