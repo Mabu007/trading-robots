@@ -13,9 +13,10 @@ import {ReplayIndicators} from './ReplayIndicators';
 import type {IndicatorSpec} from '../replay-indicators';
 import {ReplayPositionPreview,type PositionPreview} from './ReplayPositionPreview';
 import {visibleArchivedTrades} from '../replay-journal';
+import {getLocalWorkspace,saveLocalWorkspace,formatPracticeDuration,type StoredReplayWorkspace} from '../replay-sessions';
 import './market-replay.css';
 
-type Props={client:CloudClient;theme:AppTheme;onClose:()=>void;onHistoryChange?:()=>void;initialDay?:string;initialReviewTradeId?:string};
+type Props={client:CloudClient;theme:AppTheme;onClose:()=>void;onHistoryChange?:()=>void;initialDay?:string;initialReviewTradeId?:string;initialRecord?:PracticeRecord};
 const price=(value:number)=>new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:3}).format(value);
 const utc=(timestamp:number)=>new Date(timestamp*1000).toLocaleString('en-GB',{timeZone:'UTC',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});
 const yesterday=()=>new Date(Date.now()-86400000).toISOString().slice(0,10);
@@ -32,7 +33,7 @@ function exportJournal(session:ReplaySession,notes:Record<string,string>,day:str
  window.setTimeout(()=>URL.revokeObjectURL(url),1500);
 }
 const speeds=[0.5,1,2,4,8,16] as const;
-export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,initialReviewTradeId}:Props){
+export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,initialReviewTradeId,initialRecord}:Props){
  const [day,setDay]=useState(()=>initialDay||yesterday()),[startClock,setStartClock]=useState('08:00'),[startingBalance,setStartingBalance]=useState('10000');
  const [asset,setAsset]=useState<'XAUUSD'>('XAUUSD');
  const [showTicket,setShowTicket]=useState(false),[showReview,setShowReview]=useState(false);
@@ -47,6 +48,14 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  },[]);
  const ticketDrag=useRef<{x:number;y:number;left:number;top:number;width:number;height:number}|null>(null);
  const [attemptId,setAttemptId]=useState<string>(()=>crypto.randomUUID()),[finished,setFinished]=useState(false),[savingHistory,setSavingHistory]=useState(false);
+ const [sessionName,setSessionName]=useState(''),[nameEditing,setNameEditing]=useState(false);
+ const [elapsedSeconds,setElapsedSeconds]=useState(0),[startedAt,setStartedAt]=useState(()=>new Date().toISOString());
+ const [savedSessions,setSavedSessions]=useState<PracticeRecord[]>([]),[renameId,setRenameId]=useState<string|null>(null),[renameDraft,setRenameDraft]=useState('');
+ const [markerTrade,setMarkerTrade]=useState<{trade:NonNullable<PracticeRecord['trades']>[number];event:'entry'|'exit'}|null>(null);
+ const [reviewTrade,setReviewTrade]=useState<NonNullable<PracticeRecord['trades']>[number]|null>(()=>initialRecord?.trades?.find(t=>t.id===initialReviewTradeId)||null);
+ const reviewing=Boolean(reviewTrade);
+ const initialized=useRef(false),nextBusyRef=useRef(false),nextUnavailableRef=useRef(false),snapshotRef=useRef<()=>void>(()=>{});
+ const markTargetsRef=useRef<Array<{time:number;trade:NonNullable<PracticeRecord['trades']>[number];event:'entry'|'exit'}>>([]);
  const [bars,setBars]=useState<ReplayBar[]>([]),[session,setSession]=useState<ReplaySession|null>(null),[firstIndex,setFirstIndex]=useState(0);
  const [timeline,setTimeline]=useState<ReplayTimeline|null>(null);
  const timelineRef=useRef<ReplayTimeline|null>(null);
@@ -79,7 +88,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  const setCurrent=(next:ReplaySession)=>{sessionRef.current=next;setSession(next)};
  const recordDecision=(next:ReplaySession)=>{if(timelineRef.current)updateTimeline(recordReplayDecision(timelineRef.current,next));setCurrent(next)};
  const currentBar=session?bars[session.index]:null;
- const replayAtEnd=Boolean(session&&(finished||session.index>=bars.length-1));
+ const replayAtEnd=Boolean(session&&finished);
  const metrics=useMemo(()=>session&&currentBar?replayMetrics(session,bars,costs):null,[session,bars,costs,currentBar]);
  const visible=useMemo(()=>session?replayVisibleBars(bars,session):[],[bars,session]);
  const aggregates=useMemo(()=>aggregateReplayBars(visible,timeframe),[visible,timeframe]);
@@ -93,7 +102,10 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  const estimatedRisk=Math.max(0,riskPerOunce*Number(quantity)||0);
  const riskPercent=mark&&mark.equity>0?estimatedRisk/mark.equity*100:0;
  const recommendedSize=mark&&riskPerOunce>0?Math.max(0.01,Math.floor(mark.equity*.01/riskPerOunce*100)/100):0;
- const start=async(targetDay=day)=>{
+ const start=async(targetDay=day,resumeId?:string,cloudRecord?:PracticeRecord,reviewingTrade?:boolean)=>{
+  const selectedId=resumeId||crypto.randomUUID();
+  const stored=getLocalWorkspace(uid,selectedId)||cloudRecord?.snapshot;
+  const reviewingThis=Boolean(reviewingTrade&&initialReviewTradeId&&cloudRecord?.trades?.some(t=>t.id===initialReviewTradeId));
   if(loading)return;
   // Flush the current session before switching keys; a pending autosave may not have fired.
   if(sessionRef.current&&bars.length&&targetDay!==day){
@@ -108,10 +120,10 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
    if(!/^\d{4}-\d{2}-\d{2}$/.test(day)||day>yesterday())throw Error('Choose a completed historical UTC day.');
    validateReplayCosts(costs);
    const begin=Date.parse(day+'T00:00:00Z');
-   let historyStart=begin-7*86400000;
-   try{const raw=localStorage.getItem(sessionKey);if(raw){const saved=JSON.parse(raw) as SavedSession;if(saved.version===4&&Number.isFinite(saved.firstTimestamp)&&saved.firstTimestamp*1000< historyStart&&saved.firstTimestamp*1000>=begin-100*86400000)historyStart=Math.floor(saved.firstTimestamp/86400)*86400000;}}catch{}
+   let historyStart=begin-2*86400000;
+   if(stored&&Number.isFinite(stored.firstTimestamp)&&stored.firstTimestamp*1000<historyStart&&stored.firstTimestamp*1000>=begin-399*86400000)historyStart=Math.floor(stored.firstTimestamp/86400)*86400000;
    const [todayResult,historyResult]=await Promise.allSettled([
-    historicalData({venue:'research',asset,timeframe:'m1',from:new Date(begin).toISOString(),to:new Date(begin+86400000).toISOString()}),
+    historicalData({venue:'research',asset,timeframe:'m1',from:new Date(begin).toISOString(),to:new Date(Math.max(begin+86400000,stored?.lastTimestamp?stored.lastTimestamp*1000+60000:0)).toISOString()}),
     historicalData({venue:'research',asset,timeframe:'m1',from:new Date(historyStart).toISOString(),to:new Date(begin).toISOString()})
    ]);
    if(todayResult.status==='rejected')throw todayResult.reason;
@@ -126,21 +138,26 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
    let next=beginReplay(candles,initial,startEquity),resume=false,restoredFirst=initial;
    let restoredAttempt:string=crypto.randomUUID(),restoredFinished=false,restoredNotes='',restoredAnnotations:Record<string,string>={},restoredTimeline:ReplayTimeline|null=null;
    try{
-    const saved=localStorage.getItem(sessionKey);
-    if(saved){let parsed=JSON.parse(saved) as SavedSession;
-     if(parsed.version===4&&parsed.day===day&&parsed.asset===asset&&(parsed.firstTimestamp!==candles[0].time||parsed.lastTimestamp!==candles.at(-1)?.time||parsed.session?.initialBalance!==startEquity))throw Error('Saved replay cannot be restored with the available history or starting balance. The existing save has been preserved.');
-     if(parsed.version===4&&parsed.day===day&&parsed.asset===asset&&parsed.firstTimestamp===candles[0].time&&parsed.lastTimestamp===candles.at(-1)?.time&&parsed.session&&parsed.session.index>=initial&&parsed.session.index<candles.length&&
-      Number.isFinite(parsed.session.balance)&&parsed.session.initialBalance===startEquity&&
-      (parsed.session.position===null||typeof parsed.session.position?.entry==='number')&&Array.isArray(parsed.session.trades)){
-      next=parsed.session;if(Number.isInteger(parsed.firstIndex)&&parsed.firstIndex>=initial&&parsed.firstIndex<=parsed.session.index){restoredFirst=parsed.firstIndex}restoredAttempt=parsed.attemptId||crypto.randomUUID();restoredFinished=parsed.finished===true;restoredNotes=typeof parsed.notes==='string'?parsed.notes:'';restoredAnnotations=parsed.annotations||{};resume=true;
-      if(parsed.costs?.currency!=='ZAR'||parsed.costs.usdZar!==undefined)throw Error('This is not a native rand replay session.');
-      validateReplayCosts(parsed.costs);setCosts(parsed.costs);
-      if(parsed.timeline&&parsed.timeline.origin?.index<=next.index&&Array.isArray(parsed.timeline.decisions)&&parsed.timeline.decisions.every(x=>Number.isInteger(x.index)&&x.index>=parsed.timeline!.origin.index&&x.index<candles.length))restoredTimeline=parsed.timeline;
-     }
+    const parsed=stored;
+    if(parsed&&parsed.version===5&&parsed.day===day&&parsed.asset===asset&&parsed.session&&
+      parsed.firstTimestamp===candles[0].time&&Number.isInteger(parsed.session.index)&&parsed.session.index<candles.length&&
+      Number.isFinite(parsed.session.balance)&&Array.isArray(parsed.session.trades)&&parsed.costs.currency==='ZAR'){
+     next=parsed.session;restoredFirst=Math.max(0,Math.min(parsed.firstIndex,next.index));
+     restoredAttempt=parsed.id;restoredNotes=parsed.notes;restoredAnnotations=parsed.annotations||{};resume=true;
+     validateReplayCosts(parsed.costs);setCosts(parsed.costs);
+     if(parsed.timeline?.origin&&Array.isArray(parsed.timeline.decisions))restoredTimeline=parsed.timeline;
     }
-   }catch(error){if(error instanceof Error&&error.message.startsWith('Saved replay cannot'))throw error;/* Invalid browser-only practice saves are ignored. */}
+   }catch{/* Preserve invalid snapshots without stopping a new workspace. */}
+   if(reviewingThis){
+    const trade=cloudRecord!.trades!.find(t=>t.id===initialReviewTradeId)!;
+    const at=candles.findIndex(c=>c.time>=trade.entryTime);
+    if(at>=0){const index=Math.max(0,at-6);next=beginReplay(candles,index,stored?.session.initialBalance||startEquity);restoredFirst=index;restoredTimeline=null;resume=false;}
+   }
    if(!resume)setCosts({...NEW_REPLAY_COSTS});
-   setDay(day);setShowDate(false);setShowTicket(false);setShowReview(false);setTicketMinimized(false);setPreview(null);setAttemptId(restoredAttempt);setFinished(restoredFinished);setNotes(restoredNotes);setAnnotations(restoredAnnotations);
+   setSessionName(stored?.name||cloudRecord?.name||('Gold · '+day+' · '+startClock));
+   setElapsedSeconds(stored?.elapsedSeconds||cloudRecord?.spentSeconds||0);setStartedAt(stored?.startedAt||cloudRecord?.startedAt||new Date().toISOString());
+   setReviewTrade(reviewingThis?cloudRecord!.trades!.find(t=>t.id===initialReviewTradeId)!:null);nextUnavailableRef.current=false;
+   setDay(day);setShowDate(false);setShowTicket(false);setShowReview(false);setTicketMinimized(false);setPreview(null);setAttemptId(reviewingThis?selectedId:resume?restoredAttempt:selectedId);setFinished(false);setNotes(restoredNotes);setAnnotations(restoredAnnotations);
    barsRef.current=candles;firstIndexRef.current=restoredFirst;setBars(candles);setFirstIndex(restoredFirst);updateTimeline(restoredTimeline||newReplayTimeline(next));setCurrent(next);
    const restored=replayPositions(next)[0];setSelectedPositionId(restored?.id||'');setAdjustStop(restored?String(restored.stop):'');setAdjustTarget(restored?String(restored.target):'');
    setPlaying(false);setProgressTime(Date.now());
