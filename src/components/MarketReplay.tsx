@@ -187,7 +187,10 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
   setLoading(true);setLoadingStatus('Connecting to historical Gold candles…');setPlaying(false);setError('');setArchiveNotice('');setNotice('');
   setNextExhausted(false);noEarlierRef.current=false;earlierRetryAtRef.current=0;
   try{
-   const source=archiveId?(readLocalReplayArchive(uid,archiveId)||await client.loadReplaySession(archiveId)):null;
+   const local=archiveId?readLocalReplayArchive(uid,archiveId):null;
+   let remote:ReplayArchive|null=null;
+   if(archiveId)try{remote=await client.loadReplaySession(archiveId)}catch(error){if(!local&&!initialTrade)throw error}
+   const source=remote&&(!local||remote.updatedAt>local.updatedAt)?remote:local;
    if(archiveId&&!source&&!initialTrade)throw Error('Saved session could not be found. It may have been deleted.');
    const chosenDay=source?.day||targetDay;
    if(!/^\d{4}-\d{2}-\d{2}$/.test(chosenDay)||chosenDay>yesterday())throw Error('Choose a completed historical UTC day.');
