@@ -12,6 +12,7 @@ import {aggregateReplayBars,beginReplay,NEW_REPLAY_COSTS,replayAdvance,replayClo
 import {ReplayIndicators} from './ReplayIndicators';
 import type {IndicatorSpec} from '../replay-indicators';
 import {ReplayPositionPreview,type PositionPreview} from './ReplayPositionPreview';
+import {visibleArchivedTrades} from '../replay-journal';
 import './market-replay.css';
 
 type Props={client:CloudClient;theme:AppTheme;onClose:()=>void;onHistoryChange?:()=>void;initialDay?:string;initialReviewTradeId?:string};
@@ -148,7 +149,8 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  },[session,bars,sessionKey,day,firstIndex,notes,costs,annotations,attemptId,finished,timeline]);
  useEffect(()=>{
   if(!session?.trades.length||finished)return;
-  const record:PracticeRecord={id:attemptId,kind:'free',asset,day,completedAt:new Date().toISOString(),candlesViewed:session.index-firstIndex,tradeCount:session.trades.length,net:session.trades.reduce((sum,t)=>sum+t.net,0),currency:'ZAR',notes:notes.trim().slice(0,3000),trades:session.trades,annotations};
+  const archived=visibleArchivedTrades(uid,attemptId,session.trades);
+  const record:PracticeRecord={id:attemptId,kind:'free',asset,day,completedAt:new Date().toISOString(),candlesViewed:session.index-firstIndex,tradeCount:archived.length,net:archived.reduce((sum,t)=>sum+t.net,0),currency:'ZAR',notes:notes.trim().slice(0,3000),trades:archived,annotations};
   const timer=window.setTimeout(()=>{
    try{saveLocalHistory(uid,record)}catch{return}
    void client.savePracticeRecord(record).then(()=>{saveLocalHistory(uid,record,true);onHistoryChange?.()}).catch(()=>{/* Retry from locally saved history in My Progress. */});
@@ -161,7 +163,8 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
 
  const persistLatestTrades=()=>{
   const current=sessionRef.current;if(!current?.trades.length)return;
-  const record:PracticeRecord={id:attemptId,kind:'free',asset,day,completedAt:new Date().toISOString(),candlesViewed:current.index-firstIndex,tradeCount:current.trades.length,net:current.trades.reduce((sum,t)=>sum+t.net,0),currency:'ZAR',notes:notes.trim().slice(0,3000),trades:current.trades,annotations};
+  const archived=visibleArchivedTrades(uid,attemptId,current.trades);
+  const record:PracticeRecord={id:attemptId,kind:'free',asset,day,completedAt:new Date().toISOString(),candlesViewed:current.index-firstIndex,tradeCount:archived.length,net:archived.reduce((sum,t)=>sum+t.net,0),currency:'ZAR',notes:notes.trim().slice(0,3000),trades:archived,annotations};
   try{saveLocalHistory(uid,record)}catch{return}
   void client.savePracticeRecord(record).then(()=>saveLocalHistory(uid,record,true)).catch(()=>{/* Retained in locally queued history. */});
  };
@@ -170,7 +173,8 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
   if(current.index<=firstIndex){setError('Reveal at least one candle before finishing your practice.');return}
   if(replayPositions(current).length||current.pending){setError('Close simulated positions and cancel pending orders before finishing.');return}
   setPlaying(false);setError('');setSavingHistory(true);
-  const record:PracticeRecord={id:attemptId,kind:'free',asset,day,completedAt:new Date().toISOString(),candlesViewed:current.index-firstIndex,tradeCount:current.trades.length,net:current.trades.reduce((sum,t)=>sum+t.net,0),currency:'ZAR',notes:notes.trim().slice(0,3000),trades:current.trades,annotations};
+  const archived=visibleArchivedTrades(uid,attemptId,current.trades);
+  const record:PracticeRecord={id:attemptId,kind:'free',asset,day,completedAt:new Date().toISOString(),candlesViewed:current.index-firstIndex,tradeCount:archived.length,net:archived.reduce((sum,t)=>sum+t.net,0),currency:'ZAR',notes:notes.trim().slice(0,3000),trades:archived,annotations};
   try{saveLocalHistory(uid,record);await client.savePracticeRecord(record);saveLocalHistory(uid,record,true);setFinished(true);setNotice('Session and trade reviews saved to your account.');onHistoryChange?.();}
   catch{setError('Could not save this practice on this device. Check browser storage and try again.')}
   finally{setSavingHistory(false)}
