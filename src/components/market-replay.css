@@ -193,3 +193,65 @@
 /* Keep the Rewind label visible on small screens so it cannot be confused with Back. */
 .tv-replay-page .replay-rewind-text{display:inline;font-size:10px;font-weight:750;white-space:nowrap}
 @media(max-width:720px){.tv-replay-page .replay-rewind-text{display:inline}}
+
+
+/* Refined replay transport — compact touch targets, translucent instrument bar */
+.tv-replay-page .tv-replay-controls{display:flex;flex-wrap:nowrap;align-items:center;gap:10px;margin:0 0 8px;padding:5px 7px;min-height:48px;border:1px solid var(--tv-shell-line);background:color-mix(in srgb,var(--tv-shell-panel) 90%,transparent);box-shadow:0 6px 25px #12281b13;border-radius:17px;backdrop-filter:blur(22px)}
+.tv-replay-page .tv-replay-playback,.tv-replay-page .tv-replay-chart-controls{display:flex;flex-wrap:nowrap;align-items:center;gap:3px;flex:none}
+.tv-replay-page .tv-replay-playback{padding-right:9px;border-right:1px solid var(--tv-shell-line)}
+.tv-replay-page .tv-replay-controls button,.tv-replay-page .tv-replay-controls label{display:inline-flex;align-items:center;justify-content:center;flex:none;gap:6px;white-space:nowrap;border:1px solid transparent;border-radius:11px;padding:8px 10px;min-height:36px;background:transparent;color:var(--tv-shell-ink);font-size:11px;font-weight:750;transition:background .16s,box-shadow .16s,transform .16s,border-color .16s}
+.tv-replay-page .tv-replay-controls button:hover{background:var(--tv-shell-panel-muted);border-color:var(--tv-shell-line)}
+.tv-replay-page .tv-replay-controls button:active{transform:scale(.95)}
+.tv-replay-page .tv-replay-controls button:disabled{opacity:.35}
+.tv-replay-page .tv-replay-controls .tv-replay-play{color:white;background:linear-gradient(135deg,#236c4b,#174a38);box-shadow:0 4px 13px #1e65472c;padding:8px 14px}
+.tv-replay-page .tv-replay-controls .tv-replay-play:hover{background:linear-gradient(135deg,#32855c,#205c45);border-color:transparent}
+.tv-replay-page .tv-replay-controls select{font-size:11px;font-weight:800;min-height:20px;max-width:75px;cursor:pointer;outline:none;background:transparent;color:var(--tv-shell-ink)}
+.tv-replay-page .tv-replay-chart-controls button.is-selected{background:var(--tv-shell-panel-muted);border-color:var(--tv-shell-accent)}
+.tv-replay-page .tv-replay-controls svg{flex:none}
+.tv-replay-page .replay-rewind-text{display:inline;font-size:10px;letter-spacing:0}
+.tv-replay-page .replay-control-text{display:inline}
+.tv-replay-page .tv-replay-speed>span{display:inline}
+.tv-replay-page .tv-replay-controls{overflow-x:auto;scrollbar-width:none}
+.tv-replay-page .tv-replay-controls::-webkit-scrollbar{display:none}
+.tv-replay-page .tv-replay-controls button:focus-visible,.tv-replay-page .tv-replay-controls select:focus-visible{outline:2px solid #6fcf9b;outline-offset:1px}
+@media(max-width:800px){.tv-replay-page .tv-replay-controls{margin:0 3px 6px;padding:5px;gap:6px;border-radius:14px}.tv-replay-page .tv-replay-controls button,.tv-replay-page .tv-replay-controls label{min-height:36px;padding:7px 9px;font-size:10px}.tv-replay-page .tv-replay-playback{padding-right:6px}.tv-replay-page .tv-replay-speed>span{display:none}}
+@media(max-width:560px){.tv-replay-page .tv-replay-controls .replay-control-text,.tv-replay-page .tv-replay-controls .replay-rewind-text{display:inline}.tv-replay-page .tv-replay-controls .tv-replay-chart-controls{width:auto;flex:none}.tv-replay-page .tv-replay-controls button,.tv-replay-page .tv-replay-controls label{min-height:35px}.tv-replay-page .tv-replay-controls .tv-replay-play{padding:7px 12px}}
+
+/* Draggable, dockable paper-trading ticket */
+.tv-replay-page .tv-replay-ticket{overscroll-behavior:contain;min-width:270px;max-width:calc(100vw - 14px);border:1px solid var(--tv-shell-line);border-radius:17px;box-shadow:0 18px 60px #0003;backdrop-filter:blur(20px);background:var(--tv-shell-panel)}
+.tv-replay-page .replay-ticket-drag{display:flex;align-items:center;justify-content:center;gap:7px;position:sticky;top:-18px;z-index:5;margin:-18px -18px 13px;padding:9px 10px 8px;min-height:36px;background:var(--tv-shell-panel-muted);border-radius:16px 16px 0 0;border-bottom:1px solid var(--tv-shell-line);font-size:10px;font-weight:800;letter-spacing:.5px;color:var(--tv-shell-muted);cursor:grab;touch-action:none;user-select:none}
+.tv-replay-page .replay-ticket-drag:active{cursor:grabbing}
+.tv-replay-page .replay-ticket-drag span{font-size:14px;color:var(--tv-shell-accent)}
+.tv-replay-page .replay-panel-close{position:relative;z-index:7}
+.tv-replay-page .tv-replay-ticket .tv-replay-buy,.tv-replay-page .tv-replay-ticket .tv-replay-sell{transition:transform .13s,filter .13s,box-shadow .13s}
+.tv-replay-page .tv-replay-ticket .tv-replay-buy:hover,.tv-replay-page .tv-replay-ticket .tv-replay-sell:hover{transform:translateY(-2px);filter:brightness(1.1)}
+.tv-replay-page .replay-order-confirm{border:1px solid #54b88b80;border-radius:14px;background:var(--tv-shell-panel-muted);box-shadow:0 0 0 3px #27a4740b}
+.tv-replay-page .replay-order-confirm .replay-drag-hint{font-size:11px;line-height:1.55;margin:0;padding:9px 11px;border-radius:8px;color:var(--tv-shell-accent);background:var(--tv-shell-bg);font-weight:650}
+.tv-replay-page .replay-order-confirm button:not(:last-child){background:linear-gradient(135deg,#23845f,#196043);font-weight:800;border-radius:10px;min-height:40px}
+@media(max-width:720px){.tv-replay-page .tv-replay-ticket{min-width:0;max-height:65%;border-radius:14px}.tv-replay-page .replay-ticket-drag{top:-14px;margin:-14px -14px 12px}.tv-replay-page .tv-replay-feedback{top:58px;bottom:auto;max-width:calc(100% - 18px)}}
+@media(min-width:721px){.tv-replay-page .tv-replay-feedback{top:65px;bottom:auto;right:14px;left:auto;transform:none;max-width:min(370px,80%);padding:9px 12px;border-radius:11px;font-size:11px;box-shadow:0 8px 25px #0002}}
+
+/* Price lines are both visibly actionable and easy to grab by mouse or finger. */
+.tv-replay-page .replay-position-preview{z-index:10}
+.tv-replay-page .replay-position-line{height:26px;border:0;outline:0;width:60%;left:25%;background:linear-gradient(currentColor,currentColor) center/100% 1.5px no-repeat;cursor:ns-resize;touch-action:none;pointer-events:auto;transition:filter .12s}
+.tv-replay-page .replay-position-line:not(.is-fixed):hover,.tv-replay-page .replay-position-line:not(.is-fixed):focus-visible{filter:drop-shadow(0 0 5px currentColor)}
+.tv-replay-page .replay-position-line.is-fixed{pointer-events:none;cursor:default}
+.tv-replay-page .replay-position-line span{right:0;top:0;display:flex;gap:5px;align-items:center;border:1px solid #ffffff35;box-shadow:0 3px 15px #0004;font-size:10px;font-weight:750;white-space:nowrap;padding:6px 8px;border-radius:7px}
+.tv-replay-page .replay-position-line span b{font-size:12px;font-weight:800}
+.tv-replay-page .replay-position-line span small{font-size:8px;letter-spacing:.8px;color:#ffffffce}
+.tv-replay-page .replay-position-zone{left:25%;right:15%}
+@media(max-width:650px){.tv-replay-page .replay-position-line{width:80%;left:8%}.tv-replay-page .replay-position-zone{left:8%;right:12%}.tv-replay-page .replay-position-line span{font-size:9px;padding:6px}.tv-replay-page .replay-position-line span small{display:none}}
+
+/* Drawings: visible active tool, clear selection and accessible labels. */
+.tv-replay-page .drawing-toolbar button.active,.tv-replay-page .drawing-toolbar button[aria-pressed=true]{background:#285b43!important;color:#dbffe3!important;border:1px solid #70dca4!important;box-shadow:0 0 0 2px #43b88140}
+.tv-replay-page .drawing-toolbar{box-shadow:0 8px 25px #0006;border:1px solid #608d683d;border-radius:11px}
+.tv-replay-page .drawing-overlay{z-index:3}
+.chart-text-backdrop{position:absolute;inset:0;z-index:45;display:grid;place-items:center;padding:16px;box-sizing:border-box;background:#08140ed1;backdrop-filter:blur(9px)}
+.chart-text-dialog{box-sizing:border-box;width:min(380px,100%);padding:25px;border-radius:19px;border:1px solid var(--tv-shell-line);background:var(--tv-shell-panel);color:var(--tv-shell-ink);box-shadow:0 25px 70px #0007;display:grid;gap:10px}
+.chart-text-kicker{font-size:9px;font-weight:800;letter-spacing:1.7px;color:var(--tv-shell-accent)}
+.chart-text-dialog strong{font-size:22px;letter-spacing:-.6px}
+.chart-text-dialog p{font-size:12px;line-height:1.65;color:var(--tv-shell-muted);margin:0 0 6px}
+.chart-text-dialog textarea{width:100%;box-sizing:border-box;min-height:98px;resize:vertical;padding:12px;border:1px solid var(--tv-shell-line);border-radius:10px;background:var(--tv-shell-bg);color:var(--tv-shell-ink);font:13px Inter,system-ui,sans-serif}
+.chart-text-actions{display:flex;justify-content:flex-end;gap:8px}
+.chart-text-actions button{border:1px solid var(--tv-shell-line);padding:10px 14px;border-radius:9px;background:var(--tv-shell-panel-muted);color:var(--tv-shell-ink);font-size:12px;font-weight:800}
+.chart-text-actions button[type=submit]{border-color:transparent;background:#245b47;color:#fff}
