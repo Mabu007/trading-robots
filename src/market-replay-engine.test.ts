@@ -1,9 +1,19 @@
 import {describe,it,expect} from 'vitest';
-import {aggregateReplayBars,beginReplay,DEFAULT_REPLAY_COSTS,replayAdvance,replayClose,replayEMA,replayEnter,replayMetrics,replayModifyPosition,replayStep,replayVisibleBars,validateReplayBars,type ReplayBar} from './market-replay-engine';
+import {aggregateReplayBars,beginReplay,DEFAULT_REPLAY_COSTS,NEW_REPLAY_COSTS,replaySessionCosts,replayAdvance,replayClose,replayEMA,replayEnter,replayMetrics,replayModifyPosition,replayStep,replayVisibleBars,validateReplayBars,type ReplayBar} from './market-replay-engine';
 const base=Date.parse('2026-11-06T08:00:00Z')/1000;
 const bars:ReplayBar[]=Array.from({length:9},(_,i)=>({time:base+i*60,open:4000,high:4001,low:3999,close:4000}));
 const costs={...DEFAULT_REPLAY_COSTS,spread:0,slippage:0,feePerOunce:0,leverage:20};
 describe('ZAR account simulation',()=>{
+ it('keeps saved USD sessions in USD but starts an unsaved new date in ZAR',()=>{
+  const legacy={...DEFAULT_REPLAY_COSTS,leverage:20};
+  const restored=replaySessionCosts(NEW_REPLAY_COSTS,legacy);
+  expect(restored.currency).toBe('USD');
+  expect(restored.leverage).toBe(20);
+  expect(replaySessionCosts(restored)).toMatchObject({currency:'ZAR',usdZar:18,leverage:1});
+  const configured={...NEW_REPLAY_COSTS,usdZar:17.5};
+  expect(replaySessionCosts(configured)).toMatchObject({currency:'ZAR',usdZar:17.5,leverage:1});
+ });
+
  const zar={...costs,currency:'ZAR' as const,usdZar:18,leverage:1};
  it('converts USD notional, profit and fees into the persisted account currency',()=>{
   const start=beginReplay(bars,0,10000);
