@@ -13,10 +13,11 @@ export function ReplayPositionPreview({chart,series,preview,onChange}:Props){
  if(e===null||s===null||t===null)return null;
  const drag=(which:'entry'|'stop'|'target')=>(event:React.PointerEvent<HTMLButtonElement>)=>{
   event.preventDefault();event.stopPropagation();const el=event.currentTarget,host=el.parentElement;if(!host)return;el.setPointerCapture(event.pointerId);
+  const emit=(next:PositionPreview)=>{latest.current=next;onChange(next)};
   const move=(ev:PointerEvent)=>{const value=series.coordinateToPrice(ev.clientY-host.getBoundingClientRect().top);if(value===null||!Number.isFinite(value)||value<=0)return;const v=Math.round(value*1000)/1000;
-   if(which==='entry'){const current=latest.current,delta=v-current.entry;onChange({...current,entry:v,stop:Math.max(.001,current.stop+delta),target:Math.max(.001,current.target+delta)});}
-   else if(which==='stop'&&(latest.current.side==='BUY'?v<latest.current.entry:v>latest.current.entry))onChange({...latest.current,stop:v});
-   else if(which==='target'&&(latest.current.side==='BUY'?v>latest.current.entry:v<latest.current.entry))onChange({...latest.current,target:v});
+   if(which==='entry'){const current=latest.current,delta=v-current.entry;emit({...current,entry:v,stop:Math.max(.001,current.stop+delta),target:Math.max(.001,current.target+delta)});}
+   else if(which==='stop'&&(latest.current.side==='BUY'?v<latest.current.entry:v>latest.current.entry))emit({...latest.current,stop:v});
+   else if(which==='target'&&(latest.current.side==='BUY'?v>latest.current.entry:v<latest.current.entry))emit({...latest.current,target:v});
   };
   const end=()=>{el.removeEventListener('pointermove',move);el.removeEventListener('pointerup',end);el.removeEventListener('pointercancel',end)};
   el.addEventListener('pointermove',move);el.addEventListener('pointerup',end);el.addEventListener('pointercancel',end);
