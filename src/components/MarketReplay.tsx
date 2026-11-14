@@ -1,5 +1,5 @@
 import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
-import {Activity,ArrowLeft,ArrowRight,BarChart3,BookOpen,CalendarDays,Camera,CheckCircle2,ChevronRight,Clock3,Download,FastForward,Flag,Maximize2,Minimize2,Pause,Play,RotateCcw,Settings2,SkipForward,Target,TrendingDown,TrendingUp,Trophy,X} from 'lucide-react';
+import {Activity,ArrowLeft,ArrowRight,BarChart3,BookOpen,CalendarDays,Camera,CheckCircle2,ChevronRight,Clock3,Download,FastForward,Flag,Maximize2,Minimize2,Pause,Play,RotateCcw,Settings2,SkipBack,SkipForward,GripHorizontal,Undo2,Redo2,Target,TrendingDown,TrendingUp,Trophy,X} from 'lucide-react';
 import {createChart,CandlestickSeries,LineSeries,createSeriesMarkers,ColorType} from 'lightweight-charts';
 import {historicalData} from '../history-cache';
 import {installChartTools} from '../chart-tools';
@@ -14,7 +14,7 @@ import type {IndicatorSpec} from '../replay-indicators';
 import {ReplayPositionPreview,type PositionPreview} from './ReplayPositionPreview';
 import './market-replay.css';
 
-type Props={client:CloudClient;theme:AppTheme;onClose:()=>void;onHistoryChange?:()=>void};
+type Props={client:CloudClient;theme:AppTheme;onClose:()=>void;onHistoryChange?:()=>void;initialDay?:string;initialReviewTradeId?:string};
 const price=(value:number)=>new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:3}).format(value);
 const utc=(timestamp:number)=>new Date(timestamp*1000).toLocaleString('en-GB',{timeZone:'UTC',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});
 const yesterday=()=>new Date(Date.now()-86400000).toISOString().slice(0,10);
@@ -31,10 +31,12 @@ function exportJournal(session:ReplaySession,notes:Record<string,string>,day:str
  window.setTimeout(()=>URL.revokeObjectURL(url),1500);
 }
 const speeds=[0.5,1,2,4,8,16] as const;
-export function MarketReplay({client,theme,onClose,onHistoryChange}:Props){
- const [day,setDay]=useState(yesterday),[startClock,setStartClock]=useState('08:00'),[startingBalance,setStartingBalance]=useState('10000');
+export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,initialReviewTradeId}:Props){
+ const [day,setDay]=useState(()=>initialDay||yesterday()),[startClock,setStartClock]=useState('08:00'),[startingBalance,setStartingBalance]=useState('10000');
  const [asset,setAsset]=useState<'XAUUSD'>('XAUUSD');
  const [showTicket,setShowTicket]=useState(false),[showReview,setShowReview]=useState(false);
+ const [ticketXY,setTicketXY]=useState<{x:number;y:number}|null>(null);
+ const ticketDrag=useRef<{x:number;y:number;left:number;top:number;width:number;height:number}|null>(null);
  const [attemptId,setAttemptId]=useState<string>(()=>crypto.randomUUID()),[finished,setFinished]=useState(false),[savingHistory,setSavingHistory]=useState(false);
  const [bars,setBars]=useState<ReplayBar[]>([]),[session,setSession]=useState<ReplaySession|null>(null),[firstIndex,setFirstIndex]=useState(0);
  const [timeline,setTimeline]=useState<ReplayTimeline|null>(null);
@@ -82,11 +84,6 @@ export function MarketReplay({client,theme,onClose,onHistoryChange}:Props){
  const estimatedRisk=Math.max(0,riskPerOunce*Number(quantity)||0);
  const riskPercent=mark&&mark.equity>0?estimatedRisk/mark.equity*100:0;
  const recommendedSize=mark&&riskPerOunce>0?Math.max(0.01,Math.floor(mark.equity*.01/riskPerOunce*100)/100):0;
- const milestones=[
-   {label:'Observe at least 10 candles',done:!!session&&session.index-firstIndex>=10},
-   {label:'Place a risk-defined paper trade',done:!!session&&(!!session.position||session.trades.length>0)},
-   {label:'Record a trading lesson',done:notes.trim().length>=15||Object.values(annotations).some(v=>v.trim().length>=15)}
- ];
  const start=async(targetDay=day)=>{
   if(loading)return;
   // Flush the current session before switching keys; a pending autosave may not have fired.
@@ -138,7 +135,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange}:Props){
    barsRef.current=candles;firstIndexRef.current=restoredFirst;setBars(candles);setFirstIndex(restoredFirst);updateTimeline(restoredTimeline||newReplayTimeline(next));setCurrent(next);
    const restored=replayPositions(next)[0];setSelectedPositionId(restored?.id||'');setAdjustStop(restored?String(restored.stop):'');setAdjustTarget(restored?String(restored.target):'');
    setPlaying(false);setProgressTime(Date.now());
-   setNotice(resume?'Your last practice session is restored.':historyResult.status==='rejected'?'Replay ready. Earlier history could not be loaded; showing the selected day only.':'Market replay ready. Future candles are hidden.');
+   setNotice(''); // Never cover the chart's historical date and time on start.
   }catch(e){setError(e instanceof Error?e.message:'Historical candles unavailable. Try another date.')}
   finally{setLoading(false)}
   }
@@ -149,12 +146,25 @@ export function MarketReplay({client,theme,onClose,onHistoryChange}:Props){
    try{localStorage.setItem(sessionKey,JSON.stringify({version:4,day,asset,firstTimestamp:bars[0].time,lastTimestamp:bars[bars.length-1].time,session,firstIndex,notes,costs,annotations,attemptId,finished,timeline:timelineRef.current||undefined} satisfies SavedSession))}catch{}
   },350);return()=>window.clearTimeout(timer);
  },[session,bars,sessionKey,day,firstIndex,notes,costs,annotations,attemptId,finished,timeline]);
+ useEffect(()=>{
+  if(!session?.trades.length||finished)return;
+  const record:PracticeRecord={id:attemptId,kind:'free',asset,day,completedAt:new Date().toISOString(),candlesViewed:session.index-firstIndex,tradeCount:session.trades.length,net:session.trades.reduce((sum,t)=>sum+t.net,0),currency:'ZAR',notes:notes.trim().slice(0,3000),trades:session.trades,annotations};
+  const timer=window.setTimeout(()=>{
+   try{saveLocalHistory(uid,record)}catch{return}
+   void client.savePracticeRecord(record).then(()=>{saveLocalHistory(uid,record,true);onHistoryChange?.()}).catch(()=>{/* Retry from locally saved history in My Progress. */});
+  },1150);
+  return()=>window.clearTimeout(timer);
+ },[session?.trades,annotations,notes,attemptId,asset,day,firstIndex,uid,client,finished]);
+ useEffect(()=>{if(!notice)return;const timer=window.setTimeout(()=>setNotice(''),2800);return()=>window.clearTimeout(timer)},[notice]);
+ useEffect(()=>{if(!session?.trades.some(t=>t.id===initialReviewTradeId))return;setSelectedTrade(initialReviewTradeId||null);setShowReview(true)},[session?.trades,initialReviewTradeId]);
+ useEffect(()=>{const reset=()=>setTicketXY(null);window.addEventListener('resize',reset);return()=>window.removeEventListener('resize',reset)},[]);
+
  const finishPractice=async()=>{
   const current=sessionRef.current;if(!current||finished||savingHistory)return;
   if(current.index<=firstIndex){setError('Reveal at least one candle before finishing your practice.');return}
   if(replayPositions(current).length||current.pending){setError('Close simulated positions and cancel pending orders before finishing.');return}
   setPlaying(false);setError('');setSavingHistory(true);
-  const record:PracticeRecord={id:attemptId,kind:'free',asset,day,completedAt:new Date().toISOString(),candlesViewed:current.index-firstIndex,tradeCount:current.trades.length,net:current.trades.reduce((sum,t)=>sum+t.net,0),currency:costs.currency||'USD',notes:notes.trim().slice(0,3000)};
+  const record:PracticeRecord={id:attemptId,kind:'free',asset,day,completedAt:new Date().toISOString(),candlesViewed:current.index-firstIndex,tradeCount:current.trades.length,net:current.trades.reduce((sum,t)=>sum+t.net,0),currency:'ZAR',notes:notes.trim().slice(0,3000),trades:current.trades,annotations};
   try{saveLocalHistory(uid,record);setFinished(true);setNotice('Session saved on this device. Account sync will run in the background.');onHistoryChange?.();}
   catch{setError('Could not save this practice on this device. Check browser storage and try again.')}
   finally{setSavingHistory(false)}
@@ -244,7 +254,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange}:Props){
  };
  const reset=()=>{
   if(!bars.length||!window.confirm('Reset this replay session? This clears all paper trades and practice progress for this date.'))return;
-  setPlaying(false);setAttemptId(crypto.randomUUID());setFinished(false);const fresh=beginReplay(bars,firstIndex,number(startingBalance));updateTimeline(newReplayTimeline(fresh));setCurrent(fresh);setAdjustStop('');setAdjustTarget('');setAnnotations({});setNotes('');setNotice('Practice reset. Start a new attempt.');
+  setPlaying(false);setAttemptId(crypto.randomUUID());setFinished(false);const fresh=beginReplay(bars,firstIndex,number(startingBalance));updateTimeline(newReplayTimeline(fresh));setCurrent(fresh);setAdjustStop('');setAdjustTarget('');setAnnotations({});setNotes('');setNotice('Replay reset. Start again when you are ready.');
  };
  useEffect(()=>{
   if(!sessionOpen)return;
@@ -353,9 +363,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange}:Props){
       <details className="tv-replay-settings" open={showCosts} onToggle={e=>setShowCosts((e.currentTarget as HTMLDetailsElement).open)}><summary><Settings2 size={14}/> Execution assumptions</summary><p>{costs.currency==='ZAR'?`Simplified paper-account units in rand, without currency conversion.`:'Simulated rand account.'}</p><div><label>Spread · points/oz<input type="number" min="0" max="30" step="0.05" disabled={!!timeline&&(session.index>timeline.origin.index||timeline.decisions.length>0)} value={costs.spread} onChange={e=>setCosts(v=>({...v,spread:Number(e.target.value)}))}/></label><label>Slippage · points/oz<input type="number" min="0" max="10" step="0.01" disabled={!!timeline&&(session.index>timeline.origin.index||timeline.decisions.length>0)} value={costs.slippage} onChange={e=>setCosts(v=>({...v,slippage:Number(e.target.value)}))}/></label><label>Fee · R/oz / side<input type="number" min="0" max="5" step="0.01" disabled={!!timeline&&(session.index>timeline.origin.index||timeline.decisions.length>0)} value={costs.feePerOunce} onChange={e=>setCosts(v=>({...v,feePerOunce:Number(e.target.value)}))}/></label><label>Leverage<input type="number" min="1" max="100" step="1" disabled={!!timeline&&(session.index>timeline.origin.index||timeline.decisions.length>0)} value={costs.leverage} onChange={e=>setCosts(v=>({...v,leverage:Number(e.target.value)}))}/></label></div><p>Practice assumptions only. Historical M1 bars do not resolve the exact order of intrabar stop/target touches; replay assumes the stop first when both are hit.</p></details>
      </aside></div>
     <section className="tv-replay-review" hidden={!showReview} aria-label="Practice review"><button type="button" className="replay-panel-close" aria-label="Close review panel" onClick={()=>setShowReview(false)}><X size={16}/></button><div className="tv-replay-stats">{[['Win rate',metrics&&metrics.trades?metrics.winRate.toFixed(1)+'%':'—'],['Profit factor',metrics&&metrics.trades?(Number.isFinite(metrics.profitFactor)?metrics.profitFactor.toFixed(2):'∞'):'—'],['Max drawdown',metrics?metrics.maxDrawdown.toFixed(2)+'%':'0%'],['Best win streak',metrics?String(metrics.bestStreak):'0']].map(([label,val])=><div key={label}><span>{label}</span><strong>{val}</strong></div>)}</div>
-     <div className="tv-replay-milestones"><div><span className="tv-replay-eyebrow"><Trophy size={14}/> PRACTICE PROGRESS</span><strong>{milestones.filter(x=>x.done).length} / {milestones.length} completed</strong></div>
-      <div>{milestones.map((goal,i)=><span key={goal.label} className={goal.done?'is-done':''}><CheckCircle2 size={15}/>{i+1}. {goal.label}</span>)}</div></div>
-     {<div className="tv-replay-finish"><div><strong>Finished your session?</strong><p>Save your trading journal and review your progress.</p></div><button type="button" disabled={finished||savingHistory} onClick={()=>void finishPractice()}>{finished?'Session saved':savingHistory?'Saving…':'Finish session'}</button></div>}<div className="tv-replay-journal-head"><div><span className="tv-replay-eyebrow"><Flag size={14}/> SESSION JOURNAL</span><h3>Every trade is a lesson.</h3></div><div><button type="button" disabled={!session.trades.length} onClick={()=>exportJournal(session,annotations,day,costs)}><Download size={15}/> Export CSV</button><button type="button" onClick={reset}><RotateCcw size={15}/> Reset session</button></div></div>
+     <div className="tv-replay-finish"><div><strong>Finished your session?</strong><p>Save your trading journal and review your progress.</p></div><button type="button" disabled={finished||savingHistory} onClick={()=>void finishPractice()}>{finished?'Session saved':savingHistory?'Saving…':'Finish session'}</button></div><div className="tv-replay-journal-head"><div><span className="tv-replay-eyebrow"><Flag size={14}/> SESSION JOURNAL</span><h3>Every trade is a lesson.</h3></div><div><button type="button" disabled={!session.trades.length} onClick={()=>exportJournal(session,annotations,day,costs)}><Download size={15}/> Export CSV</button><button type="button" onClick={reset}><RotateCcw size={15}/> Reset session</button></div></div>
      {session.trades.length?<div className="tv-replay-table-wrap"><table className="tv-replay-table"><thead><tr><th>Side</th><th>Entry · UTC</th><th>Exit · UTC</th><th>Entry</th><th>Exit</th><th>Reason</th><th>Net</th><th></th></tr></thead><tbody>{[...session.trades].reverse().map(t=><tr key={t.id}><td>{t.side==='BUY'?'LONG':'SHORT'}</td><td>{utc(t.entryTime)}</td><td>{utc(t.exitTime)}</td><td>{price(t.entry)}</td><td>{price(t.exit)}</td><td>{t.reason}</td><td className={t.net>=0?'is-profit':'is-loss'}>{t.net>=0?'+':''}{money(t.net)}</td><td><button type="button" onClick={()=>setSelectedTrade(t.id)}>Note <ChevronRight size={12}/></button></td></tr>)}</tbody></table></div>:
       <div className="tv-replay-no-trades"><Target size={22}/><span>Make your first trade when you see a setup. Record what you learned below.</span></div>}
      {selected&&<div className="tv-replay-trade-notes"><strong>Note for {selected.side} at {utc(selected.entryTime)} UTC</strong><textarea value={annotations[selected.id]||''} placeholder="Why did you enter? What worked? What would you change?" maxLength={1200} onChange={e=>setAnnotations(v=>({...v,[selected.id]:e.target.value}))}/><button type="button" onClick={()=>setSelectedTrade(null)}>Close note</button></div>}
