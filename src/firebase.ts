@@ -51,6 +51,7 @@ export type CloudClient = {
   deleteVersionPointer: (botId: string, versionId: string) => Promise<void>;
   getProfile: () => { uid: string; email: string | null; displayName: string; isAnonymous: boolean; emailVerified: boolean } | null;
   signIn: (email: string, password: string) => Promise<void>;
+  signUp: (email: string, password: string) => Promise<void>;
   sendVerificationEmail: () => Promise<void>;
   refreshIdentity: () => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
@@ -305,6 +306,10 @@ export function connectFirebase(): Promise<CloudClient | null> {
         if (!user) return null;
         return { uid: user.uid, email: user.email, displayName: user.displayName || '', isAnonymous: user.isAnonymous, emailVerified:user.emailVerified };
       },
+      async signUp(email: string, password: string) {
+        await authSdk.createUserWithEmailAndPassword(auth, email, password);
+        await auth.authStateReady();
+      },
       async signIn(email: string, password: string) {
         await authSdk.signInWithEmailAndPassword(auth, email, password);
         await auth.authStateReady();
@@ -339,7 +344,7 @@ export function readableFirebaseError(error: unknown): string {
   if (code.includes('auth/account-exists-with-different-credential')) return 'An account already uses this email. Try signing in or resetting your password.';
   if (code.includes('auth/admin-restricted-operation') || code.includes('auth/operation-not-allowed')) return 'This sign-in option is temporarily unavailable. Try another option or contact support.';
   if (code.includes('permission-denied')) return 'Could not access your saved workspace. Please refresh and try again.';
-  if (code.includes('auth/email-already-in-use') || code.includes('auth/credential-already-in-use')) return 'That email already has an account. Choose Sign in to open its robot library.';
+  if (code.includes('auth/email-already-in-use') || code.includes('auth/credential-already-in-use')) return 'That email already has an account. Choose Sign in to access your account.';
   if (code.includes('auth/weak-password')) return 'Choose a password with at least 6 characters.';
   if (code.includes('auth/invalid-email')) return 'Enter a valid email address.';
   if (code.includes('auth/invalid-credential') || code.includes('auth/wrong-password') || code.includes('auth/user-not-found')) return 'Email or password is incorrect. Check the details or reset your password.';

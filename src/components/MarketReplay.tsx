@@ -3,14 +3,14 @@ import {Activity,ArrowRight,BarChart3,CalendarDays,CheckCircle2,ChevronRight,Clo
 import {createChart,CandlestickSeries,LineSeries,createSeriesMarkers,ColorType} from 'lightweight-charts';
 import {historicalData} from '../history-cache';
 import {installChartTools} from '../chart-tools';
-import {findSweepMoments} from '../practice-moments';
+import {findWorkoutMoments,WORKOUTS,type WorkoutId} from '../practice-workouts';
 import {saveLocalHistory,type PracticeRecord} from '../practice-history';
 import type {CloudClient} from '../firebase';
 import type {AppTheme} from '../theme';
 import {aggregateReplayBars,beginReplay,DEFAULT_REPLAY_COSTS,replayAdvance,replayClose,replayEMA,replayEnter,replayPlacePending,replayCancelPending,replayMark,replayMetrics,replayModifyPosition,replayPositions,replayVisibleBars,validateReplayBars,validateReplayCosts,type ReplayBar,type ReplayCosts,type ReplaySession,type ReplaySide} from '../market-replay-engine';
 import './market-replay.css';
 
-type Props={client:CloudClient;theme:AppTheme;onClose:()=>void;initialWorkout?:boolean;onHistoryChange?:()=>void};
+type Props={client:CloudClient;theme:AppTheme;onClose:()=>void;initialWorkout?:WorkoutId;onHistoryChange?:()=>void};
 const money=(value:number)=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(value);
 const price=(value:number)=>new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:3}).format(value);
 const utc=(timestamp:number)=>new Date(timestamp*1000).toLocaleString('en-GB',{timeZone:'UTC',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});
@@ -27,9 +27,10 @@ function exportJournal(session:ReplaySession,notes:Record<string,string>,day:str
  window.setTimeout(()=>URL.revokeObjectURL(url),1500);
 }
 const speeds=[0.5,1,2,4,8,16] as const;
-export function MarketReplay({client,theme,onClose,initialWorkout=false,onHistoryChange}:Props){
+export function MarketReplay({client,theme,onClose,initialWorkout,onHistoryChange}:Props){
  const [day,setDay]=useState(yesterday),[startClock,setStartClock]=useState('08:00'),[startingBalance,setStartingBalance]=useState('10000');
- const [practiceSweep,setPracticeSweep]=useState(initialWorkout);
+ const workout=WORKOUTS.find(item=>item.id===initialWorkout);
+ const practiceSweep=Boolean(workout);
  const [momentOrdinal,setMomentOrdinal]=useState(0);
  const [attemptId,setAttemptId]=useState<string>(()=>crypto.randomUUID()),[finished,setFinished]=useState(false),[savingHistory,setSavingHistory]=useState(false);
  const [bars,setBars]=useState<ReplayBar[]>([]),[session,setSession]=useState<ReplaySession|null>(null),[firstIndex,setFirstIndex]=useState(0);
@@ -48,12 +49,12 @@ export function MarketReplay({client,theme,onClose,initialWorkout=false,onHistor
  const drawingRef=useRef<ReturnType<typeof installChartTools>|null>(null);
  const chartRef=useRef<{chart:any;series:any;ema20:any;ema50:any;markers:any;lines:any[]} |null>(null);
  const uid=client.getProfile()?.uid||'local';
- const sessionKey='trading-vibes:replay:v2:'+uid+':'+day+(practiceSweep?':sweep-workout':'');
+ const sessionKey='trading-vibes:replay:v2:'+uid+':'+day+(workout?':'+workout.id+'-workout':'');
  const setCurrent=(next:ReplaySession)=>{sessionRef.current=next;setSession(next)};
  const currentBar=session?bars[session.index]:null;
  const replayAtEnd=Boolean(session&&(finished||session.index>=bars.length-1));
  const metrics=useMemo(()=>session&&currentBar?replayMetrics(session,bars,costs):null,[session,bars,costs,currentBar]);
- const workoutMoments=useMemo(()=>practiceSweep?findSweepMoments(bars):[],[practiceSweep,bars]);
+ const workoutMoments=useMemo(()=>workout?findWorkoutMoments(bars,workout.id):[],[workout,bars]);
  const visible=useMemo(()=>session?replayVisibleBars(bars,session):[],[bars,session]);
  const aggregates=useMemo(()=>aggregateReplayBars(visible,timeframe),[visible,timeframe]);
  const mark=useMemo(()=>session&&currentBar?replayMark(session,currentBar,costs):null,[session,currentBar,costs]);
@@ -83,8 +84,8 @@ export function MarketReplay({client,theme,onClose,initialWorkout=false,onHistor
    const candles=validateReplayBars(data.candles.map(c=>({time:c.time,open:c.open,high:c.high,low:c.low,close:c.close})));
    const clock=Date.parse(day+'T'+startClock+':00Z');
    if(!Number.isFinite(clock))throw Error('Select a valid UTC start time.');
-   const moments=practiceSweep?findSweepMoments(candles):[];
-   if(practiceSweep&&!moments.length)throw Error('No matching sweeps found on this day. Try another completed trading day.');
+   const moments=workout?findWorkoutMoments(candles,workout.id):[];
+   if(practiceSweep&&!moments.length)throw Error('No matching moments found on this day. Try another completed trading day.');
    const desired=practiceSweep?Math.max(0,moments[0]-5):candles.findIndex(c=>c.time*1000>=clock);
    if(desired<0||desired>=candles.length-1)throw Error('No candles after the chosen replay start time. Try another session or date.');
    const initial=Math.max(0,desired),startEquity=number(startingBalance);
@@ -118,7 +119,7 @@ export function MarketReplay({client,theme,onClose,initialWorkout=false,onHistor
   if(current.index<=firstIndex){setError('Reveal at least one candle before finishing your practice.');return}
   if(replayPositions(current).length||current.pending){setError('Close simulated positions and cancel pending orders before finishing.');return}
   setPlaying(false);setError('');setSavingHistory(true);
-  const record:PracticeRecord={id:attemptId,kind:practiceSweep?'sweep':'free',day,completedAt:new Date().toISOString(),candlesViewed:current.index-firstIndex,tradeCount:current.trades.length,net:current.trades.reduce((sum,t)=>sum+t.net,0),notes:notes.trim().slice(0,3000)};
+  const record:PracticeRecord={id:attemptId,kind:workout?.id||'free',day,completedAt:new Date().toISOString(),candlesViewed:current.index-firstIndex,tradeCount:current.trades.length,net:current.trades.reduce((sum,t)=>sum+t.net,0),notes:notes.trim().slice(0,3000)};
   try{saveLocalHistory(uid,record);setFinished(true);setNotice('Rep saved on this device. Account sync will run in the background.');onHistoryChange?.();}
   catch{setError('Could not save this practice on this device. Check browser storage and try again.')}
   finally{setSavingHistory(false)}
@@ -238,15 +239,14 @@ export function MarketReplay({client,theme,onClose,initialWorkout=false,onHistor
  const selected=session?.trades.find(t=>t.id===selectedTrade);
  return <div className={'tv-replay-backdrop'+(expanded?' is-expanded':'')} role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}>
   <section ref={modalRef} className={'tv-replay-modal'+(import.meta.env.VITE_TRAINING_PREVIEW==='true'?' tv-practice-redesign '+(theme==='light'?'tv-practice-light':'tv-practice-dark'):'')+(expanded?' is-expanded':'')} role="dialog" aria-modal="true" aria-label="Market Replay practice terminal">
-   <header className="tv-replay-top"><div className="tv-replay-brand"><span className="tv-replay-brand-icon"><BarChart3 size={21}/></span><div><span className="tv-replay-eyebrow">TRADING VIBES · PRACTICE LAB</span><h2>{practiceSweep?'Liquidity Sweep Fundamentals':'Market Lab'} <span>GOLD / XAUUSD{practiceSweep&&workoutMoments.length?` · Rep ${momentOrdinal+1} of ${workoutMoments.length}`:''}</span></h2></div></div>
+   <header className="tv-replay-top"><div className="tv-replay-brand"><span className="tv-replay-brand-icon"><BarChart3 size={21}/></span><div><span className="tv-replay-eyebrow">TRADING VIBES · PRACTICE LAB</span><h2>{workout?.title||'Market Lab'} <span>GOLD / XAUUSD{practiceSweep&&workoutMoments.length?` · Rep ${momentOrdinal+1} of ${workoutMoments.length}`:''}</span></h2></div></div>
     <div className="tv-replay-top-actions">{session&&<button type="button" onClick={()=>void toggleFullscreen()} aria-label={expanded?'Exit full screen':'Full screen'}>{expanded?<Minimize2 size={16}/>:<Maximize2 size={16}/>}</button>}<button type="button" onClick={onClose} aria-label="Close replay"><X size={18}/></button></div>
    </header>
    {!session?<div className="tv-replay-setup"><div className="tv-replay-setup-main">
      <span className="tv-replay-eyebrow"><CalendarDays size={14}/> BUILD YOUR PRACTICE SESSION</span>
      <h3>Trade the past like it's happening now.</h3>
      <p>Choose a completed trading day. Only candles available at your replay time will be visible. Practice entries, manage stops and targets, then review every decision.</p>
-     {import.meta.env.VITE_TRAINING_PREVIEW==='true'&&<label><input type="checkbox" checked={practiceSweep} disabled={loading} onChange={e=>setPracticeSweep(e.target.checked)}/> Liquidity sweep workout (early preview)</label>}
-     {practiceSweep&&<p>Find Gold M1 candles that sweep the previous 20 consecutive minutes' high or low and close back inside. Replay starts five candles before the first match. The pattern is confirmed only at the candle close.</p>}
+     {workout&&<p><strong>{workout.title}.</strong> {workout.rule} Replay begins five candles before a match; confirmation is available at candle close.</p>}
      <div className="tv-replay-setup-fields">
       <label><span>Historical date · UTC</span><input aria-label="Historical replay date" type="date" max={yesterday()} value={day} disabled={loading} onChange={e=>setDay(e.target.value)}/></label>
       {!practiceSweep&&<label><span>Start time · UTC</span><input aria-label="Replay start time" type="time" step={60} value={startClock} disabled={loading} onChange={e=>setStartClock(e.target.value)}/></label>}

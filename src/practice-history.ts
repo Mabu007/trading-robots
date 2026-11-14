@@ -1,4 +1,5 @@
-export type PracticeRecord={id:string;kind:'sweep'|'free';day:string;completedAt:string;candlesViewed:number;tradeCount:number;net:number;notes:string};
+import type {WorkoutId} from './practice-workouts';
+export type PracticeRecord={id:string;kind:WorkoutId|'free';day:string;completedAt:string;candlesViewed:number;tradeCount:number;net:number;notes:string};
 const key=(uid:string)=>`trading-vibes:practice-history:v1:${uid}`;
 type Entry={record:PracticeRecord;synced:boolean};
 export function readLocalHistory(uid:string):Entry[]{
