@@ -174,7 +174,6 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
   setArchiveBusy(true);
   try{
    await client.deleteReplaySession(id);
-   await client.deletePracticeRecord(id);
    removeLocalPracticeRecord(uid,id);
    removeLocalReplayArchive(uid,id);
    try{localStorage.removeItem(`trading-vibes:replay-drawings:${uid}:${id}`)}catch{}
