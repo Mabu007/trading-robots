@@ -72,7 +72,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  const [progressTime,setProgressTime]=useState(0);
  const sessionRef=useRef<ReplaySession|null>(null),chartDiv=useRef<HTMLDivElement|null>(null),modalRef=useRef<HTMLElement|null>(null);
  const drawingRef=useRef<ReturnType<typeof installChartTools>|null>(null);
- const chartRef=useRef<{chart:any;series:any;ema20:any;ema50:any;markers:any;lines:any[];lastBarTime?:number;lastBarCount?:number;firstBarTime?:number;lastTimeframe?:number} |null>(null);
+ const chartRef=useRef<{chart:any;series:any;ema20:any;ema50:any;markers:any;lines:any[];lastBarTime?:number;lastBarCount?:number;firstBarTime?:number;lastTimeframe?:number;lastBarsRef?:ReplayBar[]} |null>(null);
  const uid=client.getProfile()?.uid||'local';
  const sessionSuffix=uid+':'+asset+':'+day;
  const sessionKey='trading-vibes:replay:zar:v4:'+sessionSuffix;
@@ -345,7 +345,14 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  useEffect(()=>{
   const c=chartRef.current;if(!c||!session)return;
   const follow=Math.abs(c.chart.timeScale().scrollPosition())<=10;
-  c.series.setData(aggregates.map(b=>({time:b.time as any,open:b.open,high:b.high,low:b.low,close:b.close})));
+  const first=aggregates[0],last=aggregates.at(-1);
+  const sameSource=c.lastBarsRef===bars&&c.lastTimeframe===timeframe&&c.firstBarTime===first?.time;
+  const appendOrReplace=sameSource&&last&&(
+   (aggregates.length===c.lastBarCount&&last.time===c.lastBarTime)||
+   (aggregates.length===(c.lastBarCount||0)+1&&last.time>(c.lastBarTime||-Infinity)));
+  if(appendOrReplace)c.series.update({time:last.time as any,open:last.open,high:last.high,low:last.low,close:last.close});
+  else c.series.setData(aggregates.map(b=>({time:b.time as any,open:b.open,high:b.high,low:b.low,close:b.close})));
+  c.lastBarsRef=bars;c.lastBarCount=aggregates.length;c.lastBarTime=last?.time;c.firstBarTime=first?.time;c.lastTimeframe=timeframe;
   drawingRef.current?.updateCandles(aggregates as any);
 
   const marks:any[]=[];
