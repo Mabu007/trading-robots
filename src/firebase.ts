@@ -35,6 +35,8 @@ export type CloudClient = {
   savePersonality: (instructions:string) => Promise<void>;
   listPracticeRecords: () => Promise<PracticeRecord[]>;
   savePracticeRecord: (record:PracticeRecord) => Promise<void>;
+  deletePracticeRecord: (id:string) => Promise<void>;
+  clearPracticeRecords: () => Promise<void>;
   listBots: () => Promise<CloudBot[]>;
   listCodeAnalyses: () => Promise<CodeAnalysis[]>;
   saveCodeAnalysis: (analysis:CodeAnalysis) => Promise<void>;
@@ -102,13 +104,32 @@ export function connectFirebase(): Promise<CloudClient | null> {
     return {
       async listPracticeRecords(){
         const uid=await currentUserId();
-        const snapshot=await storeSdk.getDocs(storeSdk.query(storeSdk.collection(db,'users',uid,'practiceRecords'),storeSdk.orderBy('completedAt','desc'),storeSdk.limit(100)));
+        const snapshot=await storeSdk.getDocs(storeSdk.query(storeSdk.collection(db,'users',uid,'replayRecords'),storeSdk.orderBy('completedAt','desc'),storeSdk.limit(500)));
         return snapshot.docs.map((doc:any)=>({...doc.data(),id:doc.id}) as PracticeRecord);
       },
       async savePracticeRecord(record:PracticeRecord){
         if(!/^[a-zA-Z0-9-]{1,80}$/.test(record.id))throw Error('Invalid practice record identifier.');
         const uid=await currentUserId();
-        await storeSdk.setDoc(storeSdk.doc(db,'users',uid,'practiceRecords',record.id),record);
+        await storeSdk.setDoc(storeSdk.doc(db,'users',uid,'replayRecords',record.id),record);
+      },
+      async deletePracticeRecord(id:string){
+        if(!/^[a-zA-Z0-9-]{1,80}$/.test(id))throw Error('Invalid replay record identifier.');
+        const uid=await currentUserId();
+        await storeSdk.deleteDoc(storeSdk.doc(db,'users',uid,'replayRecords',id));
+      },
+      async clearPracticeRecords(){
+        const uid=await currentUserId();
+        // Only records belonging to this signed-in account. Retired workouts are
+        // cleared here only after explicit user confirmation in the UI.
+        for(const collectionName of ['replayRecords','practiceRecords']){
+          while(true){
+            const snapshot=await storeSdk.getDocs(storeSdk.query(storeSdk.collection(db,'users',uid,collectionName),storeSdk.limit(100)));
+            if(snapshot.empty)break;
+            const batch=storeSdk.writeBatch(db);
+            snapshot.docs.forEach((doc:any)=>batch.delete(doc.ref));
+            await batch.commit();
+          }
+        }
       },
       async listBots() {
         const botCollection = storeSdk.collection(db, 'users', await currentUserId(), 'bots');

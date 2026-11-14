@@ -12,6 +12,9 @@ export function replayTo(timeline:ReplayTimeline,index:number,bars:ReplayBar[],c
  if(!Number.isInteger(index)||index<timeline.origin.index||index>=bars.length)throw Error('Replay cursor is outside the session.');
  const candidates=timeline.decisions.filter(s=>s.index<=index);
  let state=candidates.at(-1)||timeline.origin;
+ // With no open position or queued order, no price move can change the
+ // paper account: seeking is O(1) instead of replaying every candle.
+ if(!state.position&&(!state.positions||state.positions.length===0)&&!state.pending)return {...state,index};
  while(state.index<index){const next=replayStep(state,bars,costs);if(next.index===state.index)break;state=next;}
  return state;
 }

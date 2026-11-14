@@ -1,6 +1,8 @@
 import type {WorkoutId} from './practice-workouts';
-export type PracticeRecord={id:string;kind:WorkoutId|'free';day:string;completedAt:string;candlesViewed:number;tradeCount:number;net:number;currency?:'USD'|'ZAR';asset?:'XAUUSD';notes:string};
-const key=(uid:string)=>`trading-vibes:practice-history:v1:${uid}`;
+import type {ReplayTrade} from './market-replay-engine';
+export type PracticeRecord={id:string;kind:WorkoutId|'free';day:string;completedAt:string;candlesViewed:number;tradeCount:number;net:number;currency?:'USD'|'ZAR';asset?:'XAUUSD';notes:string;trades?:ReplayTrade[];annotations?:Record<string,string>};
+// A clean Market Replay journal, separate from retired workout history.
+const key=(uid:string)=>`trading-vibes:replay-trade-history:v2:${uid}`;
 type Entry={record:PracticeRecord;synced:boolean};
 export function readLocalHistory(uid:string):Entry[]{
  try{const data=JSON.parse(localStorage.getItem(key(uid))||'[]');return Array.isArray(data)?data.filter((entry:any)=>entry?.record?.id&&typeof entry.record.completedAt==='string'):[]}catch{return []}
@@ -18,3 +20,9 @@ export function mergePracticeHistory(local:Entry[],remote:PracticeRecord[]):Prac
 export async function syncPracticeHistory(uid:string,client:{savePracticeRecord:(record:PracticeRecord)=>Promise<void>}){
  for(const entry of readLocalHistory(uid))if(!entry.synced){await client.savePracticeRecord(entry.record);saveLocalHistory(uid,entry.record,true)}
 }
+
+export function removeLocalPracticeRecord(uid:string,id:string){
+ const entries=readLocalHistory(uid).filter(item=>item.record.id!==id);
+ localStorage.setItem(key(uid),JSON.stringify(entries));
+}
+export function clearLocalPracticeHistory(uid:string){localStorage.removeItem(key(uid));}
