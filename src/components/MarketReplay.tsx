@@ -310,7 +310,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
   const boundary=Math.floor(currentBars[0].time/86400)*86400000;
   earlierBusyRef.current=true;setLoadingEarlier(true);
   try{
-   const history=await historicalData({venue:'research',asset,timeframe:'m1',from:new Date(boundary-2*86400000).toISOString(),to:new Date(boundary).toISOString()});
+   const history=await historicalData({venue:'research',asset,timeframe:'m1',from:new Date(boundary-7*86400000).toISOString(),to:new Date(boundary).toISOString()});
    const older=history.candles.filter(c=>c.time<currentBars[0].time).map(c=>({time:c.time,open:c.open,high:c.high,low:c.low,close:c.close}));
    const latest=barsRef.current,current=sessionRef.current;
    if(!current||!latest.length||latest[0].time!==currentBars[0].time)return;
