@@ -85,6 +85,10 @@ describe('extra chart annotations',()=>{
   const chart={timeScale:()=>scale,subscribeCrosshairMove:vi.fn(),unsubscribeCrosshairMove:vi.fn()};
   const series={priceToCoordinate:(v:number)=>200-v,coordinateToPrice:(v:number)=>200-v};
   const el=new FakeElement(),cleanup=installChartTools(el as unknown as HTMLElement,chart,series,candles,'future-rectangle',true);
+  expect(find(el,n=>n.attributes['aria-label']==='Measure movement')).toBeUndefined();
+  expect(find(el,n=>n.attributes['aria-label']==='Undo drawing')).toBeUndefined();
+  expect(find(el,n=>n.attributes['aria-label']==='Redo drawing')).toBeUndefined();
+  expect(typeof cleanup.undo).toBe('function');expect(typeof cleanup.redo).toBe('function');
   find(el,n=>n.attributes['aria-label']==='Rectangle')!.dispatchEvent(new Event('click'));
   el.dispatchEvent(pointer('pointerdown',45,55));el.dispatchEvent(pointer('pointermove',275,155));el.dispatchEvent(pointer('pointerup',275,155));
   const saved=JSON.parse(store.get('future-rectangle')!).drawings;
