@@ -4,6 +4,7 @@ import {mergePracticeHistory,readLocalHistory,syncPracticeHistory,saveLocalHisto
 import type {CloudClient} from '../firebase';
 import type {AppTheme} from '../theme';
 import {MarketReplay} from './MarketReplay';
+import {hideArchivedTrade,patchSavedReplayReview} from '../replay-journal';
 import './practice-app.css';
 
 type Page='home'|'replay'|'progress';
@@ -43,7 +44,7 @@ export function PracticeApp({client,theme,onSignOut,onThemeToggle}:Props){
   try{
    if(!trades.length){await client.deletePracticeRecord(record.id);removeLocalPracticeRecord(uid,record.id);setHistory(items=>items.filter(item=>item.id!==record.id))}
    else await saveRecord({...record,trades,annotations,tradeCount:trades.length,net:trades.reduce((sum,t)=>sum+t.net,0)});
-   setEdit(null);
+   hideArchivedTrade(uid,record.id,tradeId);setEdit(null);
   }catch{setHistoryError('Could not delete this archived trade. Please retry.')}
   finally{setSaving(false)}
  };
@@ -53,7 +54,7 @@ export function PracticeApp({client,theme,onSignOut,onThemeToggle}:Props){
   try{
    await client.clearPracticeRecords();
    for(const key of Object.keys(localStorage)){
-    if(key.startsWith('trading-vibes:replay:zar:v4:'+uid+':')||key.startsWith('trading-vibes:replay:v3:'+uid+':')||key.startsWith('trading-vibes:replay:v2:'+uid+':')||key.startsWith('trading-vibes:replay-drawings:'+uid+':')||key==='trading-vibes:practice-history:v1:'+uid)localStorage.removeItem(key);
+    if(key.startsWith('trading-vibes:replay:zar:v4:'+uid+':')||key.startsWith('trading-vibes:replay:v3:'+uid+':')||key.startsWith('trading-vibes:replay:v2:'+uid+':')||key.startsWith('trading-vibes:replay-drawings:'+uid+':')||key.startsWith('trading-vibes:replay-deleted-trades:v1:'+uid+':')||key==='trading-vibes:practice-history:v1:'+uid)localStorage.removeItem(key);
    }
    clearLocalPracticeHistory(uid);setHistory([]);setEdit(null);
   }catch{setHistoryError('The reset was not completed. Please retry while signed in.')}
@@ -100,7 +101,7 @@ export function PracticeApp({client,theme,onSignOut,onThemeToggle}:Props){
        </tr>)}
       </tbody></table></div>
      </section>:<div className="practice-empty"><div className="practice-free-icon"><BarChart3 size={22}/></div><h2>No trades placed yet.</h2><p>Open Market Replay, place a simulated trade, and close it to see your trade journal here.</p><button type="button" className="practice-primary" onClick={()=>openReplay()}>Launch Market Replay <ArrowRight size={16}/></button></div>}
-     {edit&&<div className="practice-review-backdrop" onClick={()=>setEdit(null)}><form className="practice-review-dialog" role="dialog" aria-modal="true" aria-label="Edit trade review" onClick={e=>e.stopPropagation()} onSubmit={e=>{e.preventDefault();const record=history.find(item=>item.id===edit.recordId);if(record){void saveRecord({...record,annotations:{...(record.annotations||{}),[edit.tradeId]:edit.note.trim().slice(0,1200)}}).then(()=>setEdit(null))}}}><span className="practice-overline">MY PROGRESS</span><h3>Edit trade review</h3><p>What did you see? What would you do differently?</p><textarea aria-label="Trade review" rows={5} maxLength={1200} autoFocus value={edit.note} onChange={e=>setEdit(value=>value?{...value,note:e.target.value}:null)}/><div><button type="button" onClick={()=>setEdit(null)}>Cancel</button><button type="submit" disabled={saving}><Save size={15}/> Save review</button></div></form></div>}
+     {edit&&<div className="practice-review-backdrop" onClick={()=>setEdit(null)}><form className="practice-review-dialog" role="dialog" aria-modal="true" aria-label="Edit trade review" onClick={e=>e.stopPropagation()} onSubmit={e=>{e.preventDefault();const record=history.find(item=>item.id===edit.recordId);if(record){const note=edit.note.trim().slice(0,1200);patchSavedReplayReview(uid,record,edit.tradeId,note);void saveRecord({...record,annotations:{...(record.annotations||{}),[edit.tradeId]:note}}).then(()=>setEdit(null))}}}><span className="practice-overline">MY PROGRESS</span><h3>Edit trade review</h3><p>What did you see? What would you do differently?</p><textarea aria-label="Trade review" rows={5} maxLength={1200} autoFocus value={edit.note} onChange={e=>setEdit(value=>value?{...value,note:e.target.value}:null)}/><div><button type="button" onClick={()=>setEdit(null)}>Cancel</button><button type="submit" disabled={saving}><Save size={15}/> Save review</button></div></form></div>}
      <div className="practice-danger-zone"><p>Want to start fresh? Remove saved replay sessions, drawings and trade reviews for this account.</p><button type="button" disabled={saving} onClick={()=>void resetProgress()}><Trash2 size={15}/> Reset replay data</button></div>
 
     </>}
