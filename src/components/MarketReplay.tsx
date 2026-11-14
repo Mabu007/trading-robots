@@ -13,7 +13,7 @@ import {ReplayIndicators} from './ReplayIndicators';
 import type {IndicatorSpec} from '../replay-indicators';
 import {ReplayPositionPreview,type PositionPreview} from './ReplayPositionPreview';
 import {visibleArchivedTrades} from '../replay-journal';
-import {getLocalWorkspace,saveLocalWorkspace,formatPracticeDuration,type StoredReplayWorkspace} from '../replay-sessions';
+import {getLocalWorkspace,saveLocalWorkspace,formatPracticeDuration,type StoredReplayWorkspace,renameLocalWorkspace} from '../replay-sessions';
 import './market-replay.css';
 
 type Props={client:CloudClient;theme:AppTheme;onClose:()=>void;onHistoryChange?:()=>void;initialDay?:string;initialReviewTradeId?:string;initialRecord?:PracticeRecord};
@@ -51,7 +51,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  const [sessionName,setSessionName]=useState(''),[nameEditing,setNameEditing]=useState(false);
  const [elapsedSeconds,setElapsedSeconds]=useState(0),[startedAt,setStartedAt]=useState(()=>new Date().toISOString());
  const [savedSessions,setSavedSessions]=useState<PracticeRecord[]>([]),[renameId,setRenameId]=useState<string|null>(null),[renameDraft,setRenameDraft]=useState('');
- const [markerTrade,setMarkerTrade]=useState<{trade:NonNullable<PracticeRecord['trades']>[number];event:'entry'|'exit'}|null>(null);
+ const [markerTrade,setMarkerTrade]=useState<{trade:NonNullable<PracticeRecord['trades']>[number];event:'entry'|'exit';pinned?:boolean}|null>(null);
  const [reviewTrade,setReviewTrade]=useState<NonNullable<PracticeRecord['trades']>[number]|null>(()=>initialRecord?.trades?.find(t=>t.id===initialReviewTradeId)||null);
  const reviewing=Boolean(reviewTrade);
  const initialized=useRef(false),nextBusyRef=useRef(false),nextUnavailableRef=useRef(false),snapshotRef=useRef<()=>void>(()=>{});
@@ -215,6 +215,14 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  useEffect(()=>{if(!notice)return;const timer=window.setTimeout(()=>setNotice(''),2800);return()=>window.clearTimeout(timer)},[notice]);
  useEffect(()=>{const reset=()=>setTicketXY(null);window.addEventListener('resize',reset);return()=>window.removeEventListener('resize',reset)},[]);
  const persistLatestTrades=()=>snapshotRef.current();
+ const renameSaved=async(record:PracticeRecord)=>{
+  const name=renameDraft.trim().slice(0,80);if(!name)return;
+  const updated:PracticeRecord={...record,name,snapshot:record.snapshot?{...record.snapshot,name}:undefined};
+  if(updated.snapshot){try{saveLocalWorkspace(uid,updated.snapshot)}catch{}}
+  else renameLocalWorkspace(uid,record.id,name);
+  setSavedSessions(items=>items.map(item=>item.id===record.id?updated:item));setRenameId(null);
+  try{await client.savePracticeRecord(updated)}catch{setNotice('Renamed on this device. Account sync will retry when online.')}
+ };
  const loadEarlier=async()=>{
   const currentBars=barsRef.current;if(earlierBusyRef.current||noEarlierRef.current||Date.now()<earlierRetryAtRef.current||!currentBars.length||!sessionRef.current)return;
   if(currentBars.length>=50000){noEarlierRef.current=true;setNotice('This device has reached the 50,000-candle chart limit.');return}
@@ -342,7 +350,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  };
  const reset=()=>{
   if(!bars.length||!window.confirm('Reset this replay session? This clears all paper trades and practice progress for this date.'))return;
-  setPlaying(false);setPreview(null);setShowTicket(false);setShowReview(false);setTicketMinimized(false);setOrderPrice('');setAttemptId(crypto.randomUUID());setFinished(false);const fresh=beginReplay(bars,firstIndex,number(startingBalance));updateTimeline(newReplayTimeline(fresh));setCurrent(fresh);setAdjustStop('');setAdjustTarget('');setAnnotations({});setNotes('');setNotice('Replay reset. Start again when you are ready.');
+  setPlaying(false);setPreview(null);setShowTicket(false);setShowReview(false);setTicketMinimized(false);setOrderPrice('');snapshotRef.current();setAttemptId(crypto.randomUUID());setElapsedSeconds(0);setStartedAt(new Date().toISOString());setSessionName('Gold · '+day+' · Fresh practice');setFinished(false);const fresh=beginReplay(bars,firstIndex,number(startingBalance));updateTimeline(newReplayTimeline(fresh));setCurrent(fresh);setAdjustStop('');setAdjustTarget('');setAnnotations({});setNotes('');setNotice('Replay reset. Start again when you are ready.');
  };
  const holdStart=useRef<ReturnType<typeof setTimeout>|null>(null),holdRepeat=useRef<ReturnType<typeof setInterval>|null>(null);
  const stopHold=()=>{if(holdStart.current!==null)clearTimeout(holdStart.current);if(holdRepeat.current!==null)clearInterval(holdRepeat.current);holdStart.current=null;holdRepeat.current=null};
@@ -370,9 +378,11 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  useEffect(()=>{
   if(!sessionOpen)return;
   const handle=(e:KeyboardEvent)=>{
-   if(e.altKey||e.ctrlKey||e.metaKey||showDate||showIndicators||/INPUT|TEXTAREA|SELECT/.test((e.target as HTMLElement)?.tagName||''))return;
+   if(e.altKey||e.ctrlKey||e.metaKey||showDate||showIndicators||/INPUT|TEXTAREA|SELECT/.test((e.target as HTMLElement)?.tagName||'')||(e.target instanceof HTMLElement&&e.target.isContentEditable))return;
    if(e.key==='ArrowRight'){e.preventDefault();advance(e.repeat?5:1)}
    else if(e.key==='ArrowLeft'){e.preventDefault();rewind(e.repeat?5:1)}
+   else if(e.key==='+'||e.key==='='||e.code==='NumpadAdd'){e.preventDefault();zoomChart(1)}
+   else if(e.key==='-'||e.key==='_'||e.code==='NumpadSubtract'){e.preventDefault();zoomChart(-1)}
   };
   window.addEventListener('keydown',handle);return()=>window.removeEventListener('keydown',handle);
  },[sessionOpen,advance,bars,costs,preview,showDate,showIndicators,finished]);
@@ -438,7 +448,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  const accountStats=session&&<div className="tv-replay-market-stats"><div><span>Account equity</span><strong>{mark?money(mark.equity):'—'}</strong></div><div><span>Session P/L</span><strong className={metrics&&metrics.returnPercent>=0?'is-profit':'is-loss'}>{metrics?(metrics.returnPercent>=0?'+':'')+money(mark!.equity-session.initialBalance):'—'}</strong></div><div><span>Open positions</span><strong>{positions.length}</strong></div><div><span>Margin used</span><strong>{mark?money(mark.marginUsed):'—'}</strong></div><div><span>Trades</span><strong>{session.trades.length}</strong></div></div>;
  return <main className={'tv-replay-backdrop tv-replay-page'+(expanded?' is-expanded':'')}>
   <section ref={modalRef} className={'tv-replay-modal'+(' tv-practice-redesign '+(theme==='light'?'tv-practice-light':'tv-practice-dark'))+(expanded?' is-expanded':'')} aria-label="Market Replay practice terminal">
-   <header className="tv-replay-top"><div className="tv-replay-brand"><span className="tv-replay-brand-icon"><BarChart3 size={21}/></span><div><span className="tv-replay-eyebrow">TRADING VIBES · MARKET REPLAY</span><h2>Market Replay</h2></div></div>
+   <header className="tv-replay-top"><div className="tv-replay-brand"><span className="tv-replay-brand-icon"><BarChart3 size={21}/></span><div><span className="tv-replay-eyebrow">TRADING VIBES · MARKET REPLAY</span><h2>Market Replay</h2>{session&&<div className="replay-workspace-title">{nameEditing?<input aria-label="Workspace name" maxLength={80} autoFocus value={sessionName} onChange={e=>setSessionName(e.target.value)} onBlur={()=>{setNameEditing(false);snapshotRef.current()}} onKeyDown={e=>{if(e.key==='Enter'){setNameEditing(false);snapshotRef.current()}}}/>:<button type="button" title="Rename workspace" onClick={()=>setNameEditing(true)}>{sessionName||'Gold session'} <span>✎</span></button>}<small>{reviewing?'Trade review · replay from before entry':'Autosaved · '+formatPracticeDuration(elapsedSeconds)+' practised'}</small></div>}</div></div>
     {session&&<div className="tv-replay-header-market"><div className="tv-replay-quote"><span>GOLD · XAUUSD <i/></span><strong>{currentBar?price(currentBar.close):'—'}</strong><small>{currentBar?utc(currentBar.time+60)+' UTC':'—'} · Historical</small></div>
      <div className="tv-replay-desktop-stats">{accountStats}</div><details className="tv-replay-mobile-stats"><summary>Account</summary>{accountStats}</details></div>}
     <div className="tv-replay-top-actions">{session&&<button type="button" onClick={()=>void toggleFullscreen()} aria-label={expanded?'Exit full screen':'Full screen'}>{expanded?<Minimize2 size={16}/>:<Maximize2 size={16}/>}</button>}<button type="button" onClick={()=>{persistLatestTrades();onClose()}} aria-label="Exit replay" title="Exit replay"><ArrowLeft size={18}/></button></div>
@@ -453,8 +463,10 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
       <label><span>Practice balance · ZAR</span><input aria-label="Practice starting balance" type="number" min={100} max={1e8} value={startingBalance} disabled={loading} onChange={e=>setStartingBalance(e.target.value)}/></label>
       <label><span>Choose asset</span><select aria-label="Replay asset" value={asset} disabled={loading} onChange={e=>setAsset(e.target.value as 'XAUUSD')}><option value="XAUUSD">Gold · XAUUSD</option></select></label>
      </div>
+     <label className="replay-new-session-name">Workspace name <input aria-label="New workspace name" placeholder="Gold · Morning practice" maxLength={80} value={sessionName} onChange={e=>setSessionName(e.target.value)}/></label>
      <button className="tv-replay-launch" type="button" disabled={loading||!day} onClick={()=>void start()}>{loading?'Loading shared historical candles…':'Launch market replay'} <ArrowRight size={17}/></button>
      {error&&<p className="tv-replay-error" role="alert">{error}</p>}
+     <section className="replay-saved-workspaces"><h3>Saved workspaces</h3><p>Every replay autosaves. Resume a named session right where you left it.</p><div className="replay-workspace-table">{savedSessions.length?savedSessions.map(record=><div className="replay-workspace-row" key={record.id}><div>{renameId===record.id?<input autoFocus aria-label="Rename saved workspace" maxLength={80} value={renameDraft} onChange={e=>setRenameDraft(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();void renameSaved(record)}}}/>:<strong>{record.name||'Gold session'}</strong>}<small>{record.day} · {formatPracticeDuration(record.spentSeconds||0)} · {record.tradeCount} trades</small></div><div>{renameId===record.id?<button type="button" onClick={()=>void renameSaved(record)}>Save</button>:<button type="button" onClick={()=>{setRenameId(record.id);setRenameDraft(record.name||'Gold session')}}>Rename</button>}<button type="button" disabled={loading} className="replay-resume" onClick={()=>void start(record.day,record.id,record)}>Resume <ArrowRight size={14}/></button></div></div>):<div className="replay-workspace-empty">Your saved sessions will appear here after you launch a replay.</div>}</div></section>
      <p className="tv-replay-source"><CheckCircle2 size={15}/> ZAR practice balances are simulated. Gold's chart is quoted in USD; paper P/L uses simplified rand units with no live FX conversion. Earlier candles load as you scroll back (50,000-candle limit).</p>
     </div><aside className="tv-replay-setup-aside"><span className="tv-replay-eyebrow">THE PRACTICE LOOP</span>
      {[[Clock3,'Reveal','Watch new candles form one by one.'],[Target,'Execute','Enter trades with stops, targets and costs.'],[Trophy,'Review','Learn from your journal, win rate and drawdown.']].map(([Icon,title,body],i)=><div className="tv-replay-how" key={String(title)}><span>{typeof Icon==='function'?<Icon size={20}/>:i+1}</span><div><strong>{String(title)}</strong><p>{String(body)}</p></div></div>)}
@@ -488,7 +500,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
       <details className="tv-replay-settings" open={showCosts} onToggle={e=>setShowCosts((e.currentTarget as HTMLDetailsElement).open)}><summary><Settings2 size={14}/> Execution assumptions</summary><p>{costs.currency==='ZAR'?`Simplified paper-account units in rand, without currency conversion.`:'Simulated rand account.'}</p><div><label>Spread · points/oz<input type="number" min="0" max="30" step="0.05" disabled={!!timeline&&(session.index>timeline.origin.index||timeline.decisions.length>0)} value={costs.spread} onChange={e=>setCosts(v=>({...v,spread:Number(e.target.value)}))}/></label><label>Slippage · points/oz<input type="number" min="0" max="10" step="0.01" disabled={!!timeline&&(session.index>timeline.origin.index||timeline.decisions.length>0)} value={costs.slippage} onChange={e=>setCosts(v=>({...v,slippage:Number(e.target.value)}))}/></label><label>Fee · R/oz / side<input type="number" min="0" max="5" step="0.01" disabled={!!timeline&&(session.index>timeline.origin.index||timeline.decisions.length>0)} value={costs.feePerOunce} onChange={e=>setCosts(v=>({...v,feePerOunce:Number(e.target.value)}))}/></label><label>Leverage<input type="number" min="1" max="100" step="1" disabled={!!timeline&&(session.index>timeline.origin.index||timeline.decisions.length>0)} value={costs.leverage} onChange={e=>setCosts(v=>({...v,leverage:Number(e.target.value)}))}/></label></div><p>Practice assumptions only. Historical M1 bars do not resolve the exact order of intrabar stop/target touches; replay assumes the stop first when both are hit.</p></details>
      </aside></div>
     <section className="tv-replay-review" hidden={!showReview} aria-label="Practice review"><button type="button" className="replay-panel-close" aria-label="Close review panel" onClick={()=>setShowReview(false)}><X size={16}/></button><div className="tv-replay-stats">{[['Win rate',metrics&&metrics.trades?metrics.winRate.toFixed(1)+'%':'—'],['Profit factor',metrics&&metrics.trades?(Number.isFinite(metrics.profitFactor)?metrics.profitFactor.toFixed(2):'∞'):'—'],['Max drawdown',metrics?metrics.maxDrawdown.toFixed(2)+'%':'0%'],['Best win streak',metrics?String(metrics.bestStreak):'0']].map(([label,val])=><div key={label}><span>{label}</span><strong>{val}</strong></div>)}</div>
-     <div className="tv-replay-finish"><div><strong>Finished your session?</strong><p>Save your trading journal and review your progress.</p></div><button type="button" disabled={finished||savingHistory} onClick={()=>void finishPractice()}>{finished?'Session saved':savingHistory?'Saving…':'Finish session'}</button></div><div className="tv-replay-journal-head"><div><span className="tv-replay-eyebrow"><Flag size={14}/> SESSION JOURNAL</span><h3>Every trade is a lesson.</h3></div><div><button type="button" disabled={!session.trades.length} onClick={()=>exportJournal(session,annotations,day,costs)}><Download size={15}/> Export CSV</button><button type="button" onClick={reset}><RotateCcw size={15}/> Reset session</button></div></div>
+<div className="tv-replay-journal-head"><div><span className="tv-replay-eyebrow"><Flag size={14}/> SESSION JOURNAL</span><h3>Every trade is a lesson.</h3></div><div><button type="button" disabled={!session.trades.length} onClick={()=>exportJournal(session,annotations,day,costs)}><Download size={15}/> Export CSV</button><button type="button" onClick={reset}><RotateCcw size={15}/> Reset session</button></div></div>
      {session.trades.length?<div className="tv-replay-table-wrap"><table className="tv-replay-table"><thead><tr><th>Side</th><th>Entry · UTC</th><th>Exit · UTC</th><th>Entry</th><th>Exit</th><th>Reason</th><th>Net</th><th></th></tr></thead><tbody>{[...session.trades].reverse().map(t=><tr key={t.id}><td>{t.side==='BUY'?'LONG':'SHORT'}</td><td>{utc(t.entryTime)}</td><td>{utc(t.exitTime)}</td><td>{price(t.entry)}</td><td>{price(t.exit)}</td><td>{t.reason}</td><td className={t.net>=0?'is-profit':'is-loss'}>{t.net>=0?'+':''}{money(t.net)}</td><td><button type="button" onClick={()=>setSelectedTrade(t.id)}>Note <ChevronRight size={12}/></button></td></tr>)}</tbody></table></div>:
       <div className="tv-replay-no-trades"><Target size={22}/><span>Make your first trade when you see a setup. Record what you learned below.</span></div>}
      {selected&&<div className="tv-replay-trade-notes"><strong>Note for {selected.side} at {utc(selected.entryTime)} UTC</strong><textarea value={annotations[selected.id]||''} placeholder="Why did you enter? What worked? What would you change?" maxLength={1200} onChange={e=>setAnnotations(v=>({...v,[selected.id]:e.target.value}))}/><button type="button" onClick={()=>setSelectedTrade(null)}>Close note</button></div>}
