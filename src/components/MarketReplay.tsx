@@ -1,5 +1,5 @@
 import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
-import {Activity,ArrowLeft,ArrowRight,BarChart3,BookOpen,CalendarDays,Camera,CheckCircle2,ChevronRight,Clock3,Download,FastForward,Flag,Maximize2,Minimize2,Pause,Play,RotateCcw,Settings2,SkipBack,SkipForward,GripHorizontal,Undo2,Redo2,Target,TrendingDown,TrendingUp,Trophy,X} from 'lucide-react';
+import {Activity,ArrowLeft,ArrowRight,BarChart3,BookOpen,CalendarDays,Camera,CheckCircle2,ChevronRight,Clock3,Download,FastForward,Flag,Maximize2,Minimize2,Pause,Play,RotateCcw,Settings2,SkipBack,SkipForward,GripHorizontal,Undo2,Redo2,ZoomIn,ZoomOut,LocateFixed,ChevronDown,ChevronUp,Target,TrendingDown,TrendingUp,Trophy,X} from 'lucide-react';
 import {createChart,CandlestickSeries,LineSeries,createSeriesMarkers,ColorType} from 'lightweight-charts';
 import {historicalData} from '../history-cache';
 import {installChartTools} from '../chart-tools';
@@ -37,6 +37,14 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  const [asset,setAsset]=useState<'XAUUSD'>('XAUUSD');
  const [showTicket,setShowTicket]=useState(false),[showReview,setShowReview]=useState(false);
  const [ticketXY,setTicketXY]=useState<{x:number;y:number}|null>(null);
+ const [isMobile,setIsMobile]=useState(false),[ticketMinimized,setTicketMinimized]=useState(false);
+ useEffect(()=>{
+  const media=window.matchMedia('(max-width: 720px)');
+  const sync=()=>{setIsMobile(media.matches);setTicketXY(null);if(!media.matches)setTicketMinimized(false)};
+  sync();
+  media.addEventListener?.('change',sync);
+  return()=>media.removeEventListener?.('change',sync);
+ },[]);
  const ticketDrag=useRef<{x:number;y:number;left:number;top:number;width:number;height:number}|null>(null);
  const [attemptId,setAttemptId]=useState<string>(()=>crypto.randomUUID()),[finished,setFinished]=useState(false),[savingHistory,setSavingHistory]=useState(false);
  const [bars,setBars]=useState<ReplayBar[]>([]),[session,setSession]=useState<ReplaySession|null>(null),[firstIndex,setFirstIndex]=useState(0);
@@ -64,7 +72,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  const [progressTime,setProgressTime]=useState(0);
  const sessionRef=useRef<ReplaySession|null>(null),chartDiv=useRef<HTMLDivElement|null>(null),modalRef=useRef<HTMLElement|null>(null);
  const drawingRef=useRef<ReturnType<typeof installChartTools>|null>(null);
- const chartRef=useRef<{chart:any;series:any;ema20:any;ema50:any;markers:any;lines:any[]} |null>(null);
+ const chartRef=useRef<{chart:any;series:any;ema20:any;ema50:any;markers:any;lines:any[];lastBarTime?:number;lastBarCount?:number;firstBarTime?:number;lastTimeframe?:number} |null>(null);
  const uid=client.getProfile()?.uid||'local';
  const sessionSuffix=uid+':'+asset+':'+day;
  const sessionKey='trading-vibes:replay:zar:v4:'+sessionSuffix;
@@ -233,7 +241,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
   setPlaying(false);setError('');
   if(!preview||preview.side!==side)return;
   try{const previous=sessionRef.current;const sl=Math.abs(preview.entry-preview.stop),tp=Math.abs(preview.target-preview.entry);const next=orderType==='market'?replayEnter(sessionRef.current,bars,side,number(quantity),sl,tp,costs):replayPlacePending(sessionRef.current,bars,side,orderType,preview.entry,number(quantity),sl,tp,costs);
-   setPreview(null);recordDecision(next);const opened=replayPositions(next).find(p=>!replayPositions(previous).some(old=>old.id===p.id));if(opened){setSelectedPositionId(opened.id);setAdjustStop(String(opened.stop));setAdjustTarget(String(opened.target))}setShowNewOrder(false);if(next.pending)setManagePending(true);setNotice(orderType!=='market'?'Paper order queued for future candles.':side==='BUY'?'Long opened. Manage the risk; the next candle is still hidden.':'Short opened. Let the market reveal the next candle.');
+   setPreview(null);setTicketMinimized(isMobile);recordDecision(next);const opened=replayPositions(next).find(p=>!replayPositions(previous).some(old=>old.id===p.id));if(opened){setSelectedPositionId(opened.id);setAdjustStop(String(opened.stop));setAdjustTarget(String(opened.target))}setShowNewOrder(false);if(next.pending)setManagePending(true);setNotice(orderType!=='market'?'Paper order queued for future candles.':side==='BUY'?'Long opened. Manage the risk; the next candle is still hidden.':'Short opened. Let the market reveal the next candle.');
   }catch(e){setError(e instanceof Error?e.message:'Order rejected')}
  };
  const previewOrder=(side:ReplaySide)=>{
@@ -242,6 +250,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
   const dir=side==='BUY'?1:-1,stop=entry-dir*Number(stopDistance),target=entry+dir*Number(targetDistance);
   if(!Number.isFinite(stop)||!Number.isFinite(target)||stop<=0||target<=0||stop===entry||target===entry){setError('Choose valid stop and target distances.');return;}
   setPreview({side,entry,stop,target,movableEntry:orderType!=='market'});
+  if(isMobile)setTicketMinimized(true);
  };
  const close=()=>{
   if(!sessionRef.current)return;setPlaying(false);
@@ -285,7 +294,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  const beginHold=(dir:'back'|'next')=>{stopHold();holdStart.current=setTimeout(()=>{holdRepeat.current=setInterval(()=>{if(dir==='back')rewind(4);else advance(4)},115)},340)};
  useEffect(()=>()=>stopHold(),[]);
  const dragTicketStart=(e:React.PointerEvent<HTMLDivElement>)=>{
-  if(e.button!==0)return;
+  if(isMobile||e.button!==0)return;
   const panel=e.currentTarget.closest('aside'),grid=panel?.parentElement;
   if(!panel||!grid)return;
   const rect=panel.getBoundingClientRect(),bounds=grid.getBoundingClientRect();
@@ -297,6 +306,12 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
   setTicketXY({x:Math.max(0,Math.min(grid.clientWidth-drag.width,drag.left+e.clientX-drag.x)),y:Math.max(0,Math.min(grid.clientHeight-drag.height,drag.top+e.clientY-drag.y))});
  };
  const dragTicketEnd=()=>{ticketDrag.current=null};
+ const zoomChart=(direction:1|-1)=>{
+  const timeScale=chartRef.current?.chart?.timeScale?.();if(!timeScale)return;
+  const spacing=Number(timeScale.options?.().barSpacing)||7;
+  timeScale.applyOptions({barSpacing:Math.max(2,Math.min(36,spacing+direction*2.5))});
+ };
+ const followChart=()=>chartRef.current?.chart?.timeScale?.().scrollToRealTime();
  useEffect(()=>{
   if(!sessionOpen)return;
   const handle=(e:KeyboardEvent)=>{
@@ -312,9 +327,9 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
   const chart=createChart(chartDiv.current,{autoSize:true,height:420,
    layout:{background:{type:ColorType.Solid,color:dark?'#171a17':'#ffffff'},textColor:dark?'#a0aaa2':'#727d76',fontFamily:'Inter,system-ui,sans-serif',fontSize:11},
    grid:{vertLines:{color:dark?'#263026':'#f2f4f3'},horzLines:{color:dark?'#263026':'#f2f4f3'}},
-   timeScale:{borderColor:dark?'#2b322c':'#e5e8e6',timeVisible:true,secondsVisible:false,rightOffset:9},
+   timeScale:{borderColor:dark?'#2b322c':'#e5e8e6',timeVisible:true,secondsVisible:false,rightOffset:6,barSpacing:8},
    rightPriceScale:{borderColor:dark?'#2b322c':'#e5e8e6',scaleMargins:{top:0.13,bottom:0.18}},
-   crosshair:{mode:0},localization:{locale:'en-US'},handleScroll:true,handleScale:true
+   crosshair:{mode:0},localization:{locale:'en-US'},handleScroll:{mouseWheel:true,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:false},handleScale:{mouseWheel:true,pinch:true,axisPressedMouseMove:true,axisDoubleClickReset:true},kineticScroll:{mouse:true,touch:true}
   });
   const series=chart.addSeries(CandlestickSeries,{upColor:'#19a578',downColor:'#db6a6b',borderUpColor:'#19a578',borderDownColor:'#db6a6b',wickUpColor:'#19a578',wickDownColor:'#db6a6b',
    priceFormat:{type:'price',precision:3,minMove:0.001}});
@@ -355,7 +370,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
   indicatorSeriesRef.current=indicators.map(spec=>{const pane=overlays.includes(spec.type)?0:chart.panes().length;const series=Array.from({length:multiple[spec.type]||1},(_,i)=>chart.addSeries(LineSeries,{color:spec.color,lineWidth:i?1:2,title:i?'':spec.type,priceLineVisible:false,lastValueVisible:false},pane));return {spec,series};});
   return()=>{for(const group of indicatorSeriesRef.current)for(const series of group.series){try{chart.removeSeries(series)}catch{}}indicatorSeriesRef.current=[]};
  },[indicators,sessionOpen,theme,day]);
- useEffect(()=>{let active=true;if(!sessionOpen)return;void import('../replay-indicators').then(({calculateIndicator})=>{if(!active)return;for(const item of indicatorSeriesRef.current){const lines=calculateIndicator(aggregates,item.spec);item.series.forEach((series,index)=>series.setData(lines[index]?.points||[]));}});return()=>{active=false}},[aggregates,indicators,sessionOpen,theme,day]);
+ useEffect(()=>{let active=true;if(!sessionOpen||!indicators.length)return;void import('../replay-indicators').then(({calculateIndicator})=>{if(!active)return;for(const item of indicatorSeriesRef.current){const lines=calculateIndicator(aggregates,item.spec);item.series.forEach((series,index)=>series.setData(lines[index]?.points||[]));}});return()=>{active=false}},[aggregates,indicators,sessionOpen,theme,day]);
  const percent=bars.length&&session?100*session.index/Math.max(1,bars.length-1):0;
  const selected=session?.trades.find(t=>t.id===selectedTrade);
  const accountStats=session&&<div className="tv-replay-market-stats"><div><span>Account equity</span><strong>{mark?money(mark.equity):'—'}</strong></div><div><span>Session P/L</span><strong className={metrics&&metrics.returnPercent>=0?'is-profit':'is-loss'}>{metrics?(metrics.returnPercent>=0?'+':'')+money(mark!.equity-session.initialBalance):'—'}</strong></div><div><span>Open positions</span><strong>{positions.length}</strong></div><div><span>Margin used</span><strong>{mark?money(mark.marginUsed):'—'}</strong></div><div><span>Trades</span><strong>{session.trades.length}</strong></div></div>;
