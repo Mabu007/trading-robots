@@ -123,6 +123,11 @@ describe('market replay has no lookahead or broker execution',()=>{
   expect(Math.max(...aggregated.map(x=>x.time))).toBeLessThanOrEqual(revealed.at(-1)!.time);
   expect(replayEMA(revealed,3)).toHaveLength(5);
  });
+ it('does not impose a fixed candle-count cap on long-running sessions',()=>{
+  const many:ReplayBar[]=Array.from({length:50010},(_,i)=>({time:base+i*60,open:4000,high:4001,low:3999,close:4000}));
+  expect(validateReplayBars(many)).toHaveLength(50010);
+  expect(beginReplay(many,50000).index).toBe(50000);
+ });
  it('rejects out-of-order and invalid raw history',()=>{
   expect(()=>validateReplayBars([...bars].reverse())).toThrow();
   expect(()=>beginReplay(bars,99)).toThrow();
