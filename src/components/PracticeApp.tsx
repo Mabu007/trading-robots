@@ -6,7 +6,7 @@ import type {AppTheme} from '../theme';
 import {MarketReplay} from './MarketReplay';
 import {installPlatform,isAppStandalone,requestAppInstall,subscribeInstallPrompt} from '../pwa-install';
 import {hideArchivedTrade,patchSavedReplayReview} from '../replay-journal';
-import {removeLocalReplayArchive} from '../replay-session-store';
+import {readLocalReplayArchive,saveLocalReplayArchive} from '../replay-session-store';
 import type {ReplayTrade} from '../market-replay-engine';
 import './practice-app.css';
 
@@ -57,6 +57,19 @@ export function PracticeApp({client,theme,onSignOut,onThemeToggle}:Props){
  const tradeRows=history.flatMap(record=>(record.trades||[]).map(trade=>({record,trade}))).sort((a,b)=>b.trade.exitTime-a.trade.exitTime);
  const money=(value:number)=>(value<0?'−':value>0?'+':'')+'R'+Math.abs(value).toLocaleString('en-ZA',{minimumFractionDigits:2,maximumFractionDigits:2});
  const uid=profile?.uid||'';
+ const updateLinkedSessionReview=async(recordId:string,tradeId:string,note:string|null)=>{
+  const local=readLocalReplayArchive(uid,recordId);
+  let remote=await client.loadReplaySession(recordId).catch(()=>null);
+  const source=remote&&(!local||remote.updatedAt>local.updatedAt)?remote:local;
+  if(!source)return;
+  const annotations={...source.annotations};
+  const hidden=new Set(source.hiddenTradeIds||[]);
+  if(note===null){hidden.add(tradeId);delete annotations[tradeId]}
+  else annotations[tradeId]=note;
+  const next={...source,annotations,hiddenTradeIds:[...hidden],updatedAt:new Date().toISOString()};
+  saveLocalReplayArchive(uid,next);
+  await client.saveReplaySession(next);
+ };
  const saveRecord=async(record:PracticeRecord)=>{
   setSaving(true);setHistoryError('');saveLocalHistory(uid,record);
   setHistory(items=>items.map(item=>item.id===record.id?record:item));
@@ -73,6 +86,9 @@ export function PracticeApp({client,theme,onSignOut,onThemeToggle}:Props){
    if(!trades.length){await client.deletePracticeRecord(record.id);removeLocalPracticeRecord(uid,record.id);setHistory(items=>items.filter(item=>item.id!==record.id))}
    else await saveRecord({...record,trades,annotations,tradeCount:trades.length,net:trades.reduce((sum,t)=>sum+t.net,0)});
    hideArchivedTrade(uid,record.id,tradeId);setEdit(null);
+   try{await updateLinkedSessionReview(record.id,tradeId,null)}
+   catch{setHistoryError('Trade removed. Its saved-session annotation is still queued on this device.')}
+
   }catch{setHistoryError('Could not delete this archived trade. Please retry.')}
   finally{setSaving(false)}
  };
@@ -130,7 +146,7 @@ export function PracticeApp({client,theme,onSignOut,onThemeToggle}:Props){
        </tr>)}
       </tbody></table></div>
      </section>:<div className="practice-empty"><div className="practice-free-icon"><BarChart3 size={22}/></div><h2>No trades placed yet.</h2><p>Open Market Replay, place a simulated trade, and close it to see your trade journal here.</p><button type="button" className="practice-primary" onClick={()=>openReplay()}>Launch Market Replay <ArrowRight size={16}/></button></div>}
-     {edit&&<div className="practice-review-backdrop" onClick={()=>setEdit(null)}><form className="practice-review-dialog" role="dialog" aria-modal="true" aria-label="Edit trade review" onClick={e=>e.stopPropagation()} onSubmit={e=>{e.preventDefault();const record=history.find(item=>item.id===edit.recordId);if(record){const note=edit.note.trim().slice(0,1200);patchSavedReplayReview(uid,record,edit.tradeId,note);void saveRecord({...record,annotations:{...(record.annotations||{}),[edit.tradeId]:note}}).then(()=>setEdit(null))}}}><span className="practice-overline">MY PROGRESS</span><h3>Edit trade review</h3><p>What did you see? What would you do differently?</p><textarea aria-label="Trade review" rows={5} maxLength={1200} autoFocus value={edit.note} onChange={e=>setEdit(value=>value?{...value,note:e.target.value}:null)}/><div><button type="button" onClick={()=>setEdit(null)}>Cancel</button><button type="submit" disabled={saving}><Save size={15}/> Save review</button></div></form></div>}
+     {edit&&<div className="practice-review-backdrop" onClick={()=>setEdit(null)}><form className="practice-review-dialog" role="dialog" aria-modal="true" aria-label="Edit trade review" onClick={e=>e.stopPropagation()} onSubmit={e=>{e.preventDefault();const record=history.find(item=>item.id===edit.recordId);if(record){const note=edit.note.trim().slice(0,1200);patchSavedReplayReview(uid,record,edit.tradeId,note);void (async()=>{await saveRecord({...record,annotations:{...(record.annotations||{}),[edit.tradeId]:note}});try{await updateLinkedSessionReview(record.id,edit.tradeId,note)}catch{setHistoryError('Review saved on this device; session cloud sync could not complete.')}setEdit(null)})()}}}><span className="practice-overline">MY PROGRESS</span><h3>Edit trade review</h3><p>What did you see? What would you do differently?</p><textarea aria-label="Trade review" rows={5} maxLength={1200} autoFocus value={edit.note} onChange={e=>setEdit(value=>value?{...value,note:e.target.value}:null)}/><div><button type="button" onClick={()=>setEdit(null)}>Cancel</button><button type="submit" disabled={saving}><Save size={15}/> Save review</button></div></form></div>}
      <div className="practice-danger-zone"><p>Want to start fresh? Remove saved replay sessions, drawings and trade reviews for this account.</p><button type="button" disabled={saving} onClick={()=>void resetProgress()}><Trash2 size={15}/> Reset replay data</button></div>
 
     </>}
