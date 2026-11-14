@@ -19,6 +19,20 @@ export function installChartTools(el:HTMLElement, chart:any, series:any, candles
  const precision=Math.min(8,Math.max(2,...candles.slice(0,100).flatMap(c=>[c.open,c.high,c.low,c.close].map(price=>{const s=String(price);return s.includes('.')?s.split('.')[1].length:0}))));
  const svg=document.createElementNS(NS,'svg'); svg.classList.add('drawing-overlay');svg.style.position='absolute';svg.style.inset='0';svg.style.width='100%';svg.style.height='100%';svg.style.pointerEvents='none';el.appendChild(svg);
  const toolbar=document.createElement('div');toolbar.className='drawing-toolbar';el.appendChild(toolbar);
+ // On phones the full drawing palette lives behind one thumb-sized button.
+ // Keep its state on the toolbar so CSS can collapse it without hiding the chart.
+ let mobileToolsOpen=false;
+ toolbar.setAttribute('data-mobile-open','false');
+ const mobileToggle=document.createElement('button');
+ mobileToggle.type='button';mobileToggle.className='drawing-mobile-trigger';
+ mobileToggle.title='Drawing tools';mobileToggle.setAttribute('aria-label','Drawing tools');
+ mobileToggle.setAttribute('aria-expanded','false');mobileToggle.innerHTML=icon('draw');
+ mobileToggle.addEventListener('click',()=>{
+  mobileToolsOpen=!mobileToolsOpen;
+  toolbar.setAttribute('data-mobile-open',String(mobileToolsOpen));
+  mobileToggle.setAttribute('aria-expanded',String(mobileToolsOpen));
+ });
+ toolbar.appendChild(mobileToggle);
  const label=document.createElement('div');label.className='chart-measure-label';label.style.display='none';el.appendChild(label);
  const button=(name:string,title:string,click:()=>void)=>{const b=document.createElement('button');b.type='button';b.title=title;b.setAttribute('aria-label',title);if(icons[name])b.innerHTML=icon(name);else b.textContent=name;b.addEventListener('click',click);toolbar.appendChild(b);return b};
  const panButton=button('pan','Pan chart',()=>setTool('pan'));
@@ -32,7 +46,7 @@ export function installChartTools(el:HTMLElement, chart:any, series:any, candles
  const directButtons=new Map<Tool,HTMLButtonElement>();
  if(directTools){dropdown.style.display='none';for(const [kind,symbol,title] of [['trend','╱','Trendline'],['horizontal','━','Horizontal line'],['vertical','│','Vertical line'],['rectangle','□','Rectangle'],['fibonacci','F','Fibonacci retracement'],['text','T','Text label']] as const){const b=button(symbol,title,()=>setTool(kind));directButtons.set(kind,b)}}
  const remove=button('×','Delete selected drawing',()=>deleteSelected());remove.style.display='none';
- function setTool(next:Tool){tool=next;first=null;preview=null;measure=null;selected=null;label.style.display='none';panButton.classList.toggle('active',next==='pan');measureButton.classList.toggle('active',next==='measure');summary.classList.toggle('active',!['pan','measure'].includes(next));for(const [key,item] of directButtons)item.classList.toggle('active',key===next);el.classList.toggle('drawing-mode',next!=='pan');render()}
+ function setTool(next:Tool){tool=next;first=null;preview=null;measure=null;selected=null;label.style.display='none';panButton.classList.toggle('active',next==='pan');panButton.setAttribute('aria-pressed',String(next==='pan'));measureButton.classList.toggle('active',next==='measure');measureButton.setAttribute('aria-pressed',String(next==='measure'));summary.classList.toggle('active',!['pan','measure'].includes(next));mobileToggle.classList.toggle('active',next!=='pan');mobileToggle.setAttribute('aria-pressed',String(next!=='pan'));for(const [key,item] of directButtons){item.classList.toggle('active',key===next);item.setAttribute('aria-pressed',String(key===next))}el.classList.toggle('drawing-mode',next!=='pan');render()}
  function checkpoint(){undo.push(structuredClone(drawings));redo=[];if(undo.length>50)undo.shift()}
  function undoDraw(){if(!undo.length)return;redo.push(structuredClone(drawings));drawings=undo.pop()!;selected=null;persist();render()}
  function redoDraw(){if(!redo.length)return;undo.push(structuredClone(drawings));drawings=redo.pop()!;selected=null;persist();render()}
