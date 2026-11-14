@@ -159,13 +159,19 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  useEffect(()=>{if(!session?.trades.some(t=>t.id===initialReviewTradeId))return;setSelectedTrade(initialReviewTradeId||null);setShowReview(true)},[session?.trades,initialReviewTradeId]);
  useEffect(()=>{const reset=()=>setTicketXY(null);window.addEventListener('resize',reset);return()=>window.removeEventListener('resize',reset)},[]);
 
+ const persistLatestTrades=()=>{
+  const current=sessionRef.current;if(!current?.trades.length)return;
+  const record:PracticeRecord={id:attemptId,kind:'free',asset,day,completedAt:new Date().toISOString(),candlesViewed:current.index-firstIndex,tradeCount:current.trades.length,net:current.trades.reduce((sum,t)=>sum+t.net,0),currency:'ZAR',notes:notes.trim().slice(0,3000),trades:current.trades,annotations};
+  try{saveLocalHistory(uid,record)}catch{return}
+  void client.savePracticeRecord(record).then(()=>saveLocalHistory(uid,record,true)).catch(()=>{/* Retained in locally queued history. */});
+ };
  const finishPractice=async()=>{
   const current=sessionRef.current;if(!current||finished||savingHistory)return;
   if(current.index<=firstIndex){setError('Reveal at least one candle before finishing your practice.');return}
   if(replayPositions(current).length||current.pending){setError('Close simulated positions and cancel pending orders before finishing.');return}
   setPlaying(false);setError('');setSavingHistory(true);
   const record:PracticeRecord={id:attemptId,kind:'free',asset,day,completedAt:new Date().toISOString(),candlesViewed:current.index-firstIndex,tradeCount:current.trades.length,net:current.trades.reduce((sum,t)=>sum+t.net,0),currency:'ZAR',notes:notes.trim().slice(0,3000),trades:current.trades,annotations};
-  try{saveLocalHistory(uid,record);setFinished(true);setNotice('Session saved on this device. Account sync will run in the background.');onHistoryChange?.();}
+  try{saveLocalHistory(uid,record);await client.savePracticeRecord(record);saveLocalHistory(uid,record,true);setFinished(true);setNotice('Session and trade reviews saved to your account.');onHistoryChange?.();}
   catch{setError('Could not save this practice on this device. Check browser storage and try again.')}
   finally{setSavingHistory(false)}
  };
@@ -273,7 +279,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  const beginHold=(dir:'back'|'next')=>{stopHold();holdStart.current=setTimeout(()=>{holdRepeat.current=setInterval(()=>{if(dir==='back')rewind(4);else advance(4)},115)},340)};
  useEffect(()=>()=>stopHold(),[]);
  const dragTicketStart=(e:React.PointerEvent<HTMLDivElement>)=>{
-  if(e.button!==0||!(e.target instanceof HTMLElement))return;
+  if(e.button!==0)return;
   const panel=e.currentTarget.closest('aside'),grid=panel?.parentElement;
   if(!panel||!grid)return;
   const rect=panel.getBoundingClientRect(),bounds=grid.getBoundingClientRect();
@@ -352,7 +358,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
    <header className="tv-replay-top"><div className="tv-replay-brand"><span className="tv-replay-brand-icon"><BarChart3 size={21}/></span><div><span className="tv-replay-eyebrow">TRADING VIBES · MARKET REPLAY</span><h2>Market Replay</h2></div></div>
     {session&&<div className="tv-replay-header-market"><div className="tv-replay-quote"><span>GOLD · XAUUSD <i/></span><strong>{currentBar?price(currentBar.close):'—'}</strong><small>{currentBar?utc(currentBar.time+60)+' UTC':'—'} · Historical</small></div>
      <div className="tv-replay-desktop-stats">{accountStats}</div><details className="tv-replay-mobile-stats"><summary>Account</summary>{accountStats}</details></div>}
-    <div className="tv-replay-top-actions">{session&&<button type="button" onClick={()=>void toggleFullscreen()} aria-label={expanded?'Exit full screen':'Full screen'}>{expanded?<Minimize2 size={16}/>:<Maximize2 size={16}/>}</button>}<button type="button" onClick={onClose} aria-label="Exit replay" title="Exit replay"><ArrowLeft size={18}/></button></div>
+    <div className="tv-replay-top-actions">{session&&<button type="button" onClick={()=>void toggleFullscreen()} aria-label={expanded?'Exit full screen':'Full screen'}>{expanded?<Minimize2 size={16}/>:<Maximize2 size={16}/>}</button>}<button type="button" onClick={()=>{persistLatestTrades();onClose()}} aria-label="Exit replay" title="Exit replay"><ArrowLeft size={18}/></button></div>
    </header>
    {!session?<div className="tv-replay-setup"><div className="tv-replay-setup-main">
      <span className="tv-replay-eyebrow"><CalendarDays size={14}/> BUILD YOUR PRACTICE SESSION</span>
@@ -382,7 +388,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
        <div className="tv-replay-edit-position"><label>New stop price<input type="number" step="0.01" value={adjustStop} onChange={e=>setAdjustStop(e.target.value)}/></label><label>New target price<input type="number" step="0.01" value={adjustTarget} onChange={e=>setAdjustTarget(e.target.value)}/></label></div>
        <div className="tv-replay-position-actions"><button type="button" onClick={()=>modifyPosition(false)}>Update SL / TP</button><button type="button" onClick={()=>modifyPosition(true)}>Move stop to entry</button></div>
        <button type="button" className="tv-replay-close-position" onClick={close}>Close position</button></div>:
-      <><div className="tv-replay-ticket-inputs"><label>Order type<select aria-label="Paper order type" value={orderType} onChange={e=>{setPreview(null);setOrderType(e.target.value as typeof orderType)}}><option value="market">Market</option><option value="limit">Limit</option><option value="stop">Stop</option></select></label>{orderType!=='market'&&<label>Order price<input aria-label="Pending order price" type="number" min="0.01" step="0.01" value={orderPrice} onChange={e=>setOrderPrice(e.target.value)}/></label>} {orderType!=='market'&&<button type="button" className="tv-replay-risk-sizing" onClick={()=>{pickingRef.current=!pickingRef.current;setPickingPrice(pickingRef.current)}}>{pickingPrice?'Click chart to set price…':'Set order price on chart'}</button>}<label>Quantity · oz<input type="number" min="0.01" step="0.1" value={quantity} onChange={e=>setQuantity(e.target.value)}/></label><label>Stop distance · points/oz<input type="number" min="0.01" step="0.5" value={stopDistance} onChange={e=>setStopDistance(e.target.value)}/></label><label>Target distance · points/oz<input type="number" min="0.01" step="0.5" value={targetDistance} onChange={e=>setTargetDistance(e.target.value)}/></label></div>
+      <><div className="tv-replay-ticket-inputs"><label>Order type<select aria-label="Paper order type" value={orderType} onChange={e=>{setPreview(null);setOrderPrice('');setOrderType(e.target.value as typeof orderType)}}><option value="market">Market</option><option value="limit">Limit</option><option value="stop">Stop</option></select></label>{orderType!=='market'&&<label>Order price<input aria-label="Pending order price" type="number" min="0.01" step="0.01" value={orderPrice} onChange={e=>setOrderPrice(e.target.value)}/></label>} {orderType!=='market'&&<button type="button" className="tv-replay-risk-sizing" onClick={()=>{pickingRef.current=!pickingRef.current;setPickingPrice(pickingRef.current)}}>{pickingPrice?'Click chart to set price…':'Set order price on chart'}</button>}<label>Quantity · oz<input type="number" min="0.01" step="0.1" value={quantity} onChange={e=>setQuantity(e.target.value)}/></label><label>Stop distance · points/oz<input type="number" min="0.01" step="0.5" value={stopDistance} onChange={e=>setStopDistance(e.target.value)}/></label><label>Target distance · points/oz<input type="number" min="0.01" step="0.5" value={targetDistance} onChange={e=>setTargetDistance(e.target.value)}/></label></div>
       <div className="tv-replay-risk"><div><span>Planned stop risk</span><strong>{money(estimatedRisk)}</strong></div>
        <div><span>Account risk</span><strong className={riskPercent>2?'is-loss':''}>{Number.isFinite(riskPercent)?riskPercent.toFixed(2)+'%':'—'}</strong></div>
        <div><span>Risk / reward</span><strong>1 : {number(stopDistance)>0?(number(targetDistance)/number(stopDistance)).toFixed(2):'—'}</strong></div>
