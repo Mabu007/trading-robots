@@ -534,7 +534,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
    timeframe,markerTradeRef.current.map(t=>t.id+':'+t.exitTime+':'+t.net).join('|'),
    replayPositions(session).map(p=>p.id+':'+p.stop+':'+p.target).join('|'),
    session.pending?.price||'',
-   reviewMode&&focusedTrade?Number(visibleNow>=focusedTrade.entryTime)+':'+Number(visibleNow>=focusedTrade.exitTime):''
+   reviewMode&&initialTrade?Number(visibleNow>=initialTrade.entryTime)+':'+Number(visibleNow>=initialTrade.exitTime):''
   ].join('~');
   if(c.markerKey!==markerSignature){
    c.markerKey=markerSignature;
