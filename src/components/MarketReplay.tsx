@@ -49,6 +49,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  const ticketDrag=useRef<{x:number;y:number;left:number;top:number;width:number;height:number}|null>(null);
  const [attemptId,setAttemptId]=useState<string>(()=>initialSessionId||crypto.randomUUID()),[finished,setFinished]=useState(false);
  const [sessionName,setSessionName]=useState(''),[sessionCreatedAt,setSessionCreatedAt]=useState(()=>new Date().toISOString());
+ const [renameId,setRenameId]=useState<string|null>(null),[renameDraft,setRenameDraft]=useState(''),[editingSessionName,setEditingSessionName]=useState(false);
  const [savedSessions,setSavedSessions]=useState<ReplayArchiveSummary[]>([]);
  const [activeSeconds,setActiveSeconds]=useState(0),activeSecondsRef=useRef(0);
  const [archiveNotice,setArchiveNotice]=useState('');
@@ -145,10 +146,36 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
   catch{/* Offline sessions remain accessible. */}
  };
  useEffect(()=>{void refreshSavedSessions()},[uid]);
+ const renameArchive=async(id:string,name:string)=>{
+  const safe=name.trim().slice(0,85);if(!safe)return;
+  setArchiveBusy(true);
+  try{
+   const existing=readLocalReplayArchive(uid,id)||await client.loadReplaySession(id);
+   if(!existing)throw Error('Saved session could not be found.');
+   const next={...existing,name:safe,updatedAt:new Date().toISOString()};
+   saveLocalReplayArchive(uid,next);
+   await client.saveReplaySession(next);
+   if(id===attemptId)setSessionName(safe);
+   setRenameId(null);setRenameDraft('');
+   await refreshSavedSessions();
+  }catch(error){setArchiveNotice(error instanceof Error?error.message:'Could not rename the session.')}
+  finally{setArchiveBusy(false)}
+ };
+ const deleteArchive=async(id:string)=>{
+  if(!window.confirm('Delete this saved replay session and its linked trade journal? This cannot be undone.'))return;
+  setArchiveBusy(true);
+  try{
+   await client.deleteReplaySession(id);
+   await client.deletePracticeRecord(id).catch(()=>{});
+   removeLocalReplayArchive(uid,id);
+   setSavedSessions(items=>items.filter(item=>item.id!==id));
+  }catch(error){setArchiveNotice(error instanceof Error?error.message:'Could not delete the session.')}
+  finally{setArchiveBusy(false)}
+ };
  const start=async(targetDay=day,archiveId?:string)=>{
   if(loading)return;
   if(sessionRef.current&&!reviewMode)saveArchive(true);
-  setLoading(true);setPlaying(false);setError('');setArchiveNotice('');setNotice('');
+  setLoading(true);setLoadingStatus('Connecting to historical Gold candles…');setPlaying(false);setError('');setArchiveNotice('');setNotice('');
   setNextExhausted(false);noEarlierRef.current=false;earlierRetryAtRef.current=0;
   try{
    const source=archiveId?(readLocalReplayArchive(uid,archiveId)||await client.loadReplaySession(archiveId)):null;
@@ -176,11 +203,11 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
    if(!Number.isFinite(clock))throw Error('Select a valid UTC start time.');
    const desired=candles.findIndex(c=>c.time*1000>=clock);
    const initial=source?source.firstIndex:Math.max(0,desired);
-   if(initial<0||initial>=candles.length)throw Error('No candles exist after this saved session start. Try another historical date.');
+   if((!source&&desired<0&&!initialTrade)||initial<0||initial>=candles.length)throw Error('No candles exist after this session start. Try another historical date.');
    if(source&&source.firstTimestamp!==candles[0].time)throw Error('Saved session history differs from the latest downloaded candles; the original save has been preserved.');
    if(source&&(!Number.isInteger(source.session.index)||source.session.index<0||source.session.index>=candles.length))throw Error('Saved session cursor is outside available historical history.');
    const id=source?.id||crypto.randomUUID();
-   const name=source?.name||`Gold · ${chosenDay}`;
+   const name=source?.name||(!sessionRef.current?sessionName.trim():'')||`Gold · ${chosenDay}`;
    const sourceTrade=initialTrade||null;
    const tradeIndex=sourceTrade?candles.findIndex(c=>c.time>=sourceTrade.entryTime):-1;
    if(sourceTrade&&tradeIndex<0)throw Error('Could not locate the original trade candle in this historical session.');
