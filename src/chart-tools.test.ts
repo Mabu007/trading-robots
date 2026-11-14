@@ -37,6 +37,9 @@ describe('chart drawing controls',()=>{
   const saved=JSON.parse(data.get('test')!);expect(saved.drawings).toHaveLength(1);expect(saved.drawings[0].a).toEqual({time:1120,price:120});expect(saved.drawings[0].b).toEqual({time:1300,price:100});
   const shape=find(el,n=>n instanceof FakeSvg&&n.attributes['stroke-opacity']==='0.01')!;shape.dispatchEvent(pointer('pointerdown',20,80));el.dispatchEvent(pointer('pointerup',20,80));
   const handle=find(el,n=>n instanceof FakeSvg&&n.attributes.r==='5')!;handle.dispatchEvent(pointer('pointerdown',20,80));el.dispatchEvent(pointer('pointermove',30,90));el.dispatchEvent(pointer('pointerup',30,90));expect(JSON.parse(data.get('test')!).drawings[0].a).toEqual({time:1180,price:110});
+  const color=find(el,n=>n.attributes['aria-label']==='Drawing color')!;color.value='#ff7881';color.dispatchEvent(new Event('input'));expect(JSON.parse(data.get('test')!).drawings[0].color).toBe('#ff7881');
+  const back=new Event('keydown',{cancelable:true});Object.assign(back,{key:'Backspace'});win.dispatchEvent(back);expect(JSON.parse(data.get('test')!).drawings).toHaveLength(0);
+  const undoBack=find(el,n=>n.attributes['aria-label']==='Undo drawing')!;undoBack.dispatchEvent(new Event('click'));expect(JSON.parse(data.get('test')!).drawings).toHaveLength(1);
   const del=find(el,n=>n.attributes['aria-label']==='Delete selected drawing')!;del.dispatchEvent(new Event('click'));expect(JSON.parse(data.get('test')!).drawings).toHaveLength(0);
   const undo=find(el,n=>n.attributes['aria-label']==='Undo drawing')!;undo.dispatchEvent(new Event('click'));expect(JSON.parse(data.get('test')!).drawings).toHaveLength(1);
   const redo=find(el,n=>n.attributes['aria-label']==='Redo drawing')!;redo.dispatchEvent(new Event('click'));expect(JSON.parse(data.get('test')!).drawings).toHaveLength(0);undo.dispatchEvent(new Event('click'));
@@ -68,8 +71,8 @@ describe('extra chart annotations',()=>{
   find(el,n=>n.textContent==='Fibonacci retracement')!.dispatchEvent(new Event('click'));
   el.dispatchEvent(pointer('pointerdown',20,80));el.dispatchEvent(pointer('pointerdown',50,100));
   find(el,n=>n.textContent==='Text label')!.dispatchEvent(new Event('click'));el.dispatchEvent(pointer('pointerdown',40,90));
-  const field=find(el,n=>n.attributes['aria-label']==='Text label')!;field.value='Break of structure';
-  const dialog=find(el,n=>n.attributes['role']==='dialog')!;expect(dialog).toBeDefined();dialog.dispatchEvent(new Event('submit',{cancelable:true}));
+  const field=find(el,n=>n.attributes['aria-label']==='Type chart label')!;field.value='Break of structure';
+  const editor=find(el,n=>n.className==='chart-inline-text-editor')!;expect(editor).toBeDefined();editor.value='Break of structure';const enter=new Event('keydown',{cancelable:true});Object.assign(enter,{key:'Enter'});editor.dispatchEvent(enter);
   const saved=JSON.parse(data.get('annotation-test')!).drawings;expect(saved.map((d:any)=>d.kind)).toEqual(['fibonacci','text']);expect(saved[1].text).toBe('Break of structure');expect(find(el,n=>n.textContent==='0.618')).toBeDefined();cleanup();
  });
  it('draws rectangles past the last revealed candle and highlights the selected shape',()=>{
@@ -91,7 +94,7 @@ describe('extra chart annotations',()=>{
   expect(saved[0].b.time).toBeGreaterThan(candles.at(-1)!.time);
   const shape=find(el,n=>n instanceof FakeSvg&&n.attributes['stroke-opacity']==='0.01')!;
   shape.dispatchEvent(pointer('pointerdown',45,55));el.dispatchEvent(pointer('pointerup',45,55));
-  expect(find(el,n=>n instanceof FakeSvg&&n.attributes.stroke==='#51ecc0')).toBeDefined();
+  expect(find(el,n=>n instanceof FakeSvg&&n.attributes.stroke==='#52e5a6')).toBeDefined();
   cleanup();
  });
 
