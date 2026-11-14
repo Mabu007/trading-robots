@@ -10,11 +10,11 @@ export type ReplayTrade=ReplayPosition&{exit:number;exitTime:number;exitIndex:nu
 export type ReplayPending={side:ReplaySide;type:'limit'|'stop';price:number;quantity:number;stopDistance:number;targetDistance:number};
 export type ReplaySession={index:number;initialBalance:number;balance:number;position:ReplayPosition|null;positions?:ReplayPosition[];sequence?:number;trades:ReplayTrade[];pending?:ReplayPending|null};
 const finite=(value:number)=>Number.isFinite(value);
-/** USD-priced gold values are converted to the account's persisted currency. */
-export const replayFx=(costs:ReplayCosts)=>costs.currency==='ZAR'?(costs.usdZar??NaN):1;
+/** Older ZAR sessions keep their stored FX assumption. New practice-only ZAR sessions use one simulated rand per quoted price-point, without foreign-exchange conversion. */
+export const replayFx=(costs:ReplayCosts)=>costs.currency==='ZAR'?(costs.usdZar??1):1;
 export const DEFAULT_REPLAY_COSTS:ReplayCosts={spread:0.25,slippage:0.05,feePerOunce:0.03,leverage:20};
 /** New dates default to an unlevered ZAR account; existing saved sessions keep their original currency. */
-export const NEW_REPLAY_COSTS:ReplayCosts={...DEFAULT_REPLAY_COSTS,leverage:1,currency:'ZAR',usdZar:18};
+export const NEW_REPLAY_COSTS:ReplayCosts={...DEFAULT_REPLAY_COSTS,leverage:1,currency:'ZAR'};
 export function replaySessionCosts(current:ReplayCosts,saved?:ReplayCosts):ReplayCosts{
  return saved?{...saved,currency:saved.currency??'USD'}:current.currency==='ZAR'?{...current}:{...NEW_REPLAY_COSTS};
 }

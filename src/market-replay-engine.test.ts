@@ -9,11 +9,22 @@ describe('ZAR account simulation',()=>{
   const restored=replaySessionCosts(NEW_REPLAY_COSTS,legacy);
   expect(restored.currency).toBe('USD');
   expect(restored.leverage).toBe(20);
-  expect(replaySessionCosts(restored)).toMatchObject({currency:'ZAR',usdZar:18,leverage:1});
+  expect(replaySessionCosts(restored)).toMatchObject({currency:'ZAR',leverage:1});
+  expect(replaySessionCosts(restored).usdZar).toBeUndefined();
   const configured={...NEW_REPLAY_COSTS,usdZar:17.5};
   expect(replaySessionCosts(configured)).toMatchObject({currency:'ZAR',usdZar:17.5,leverage:1});
  });
 
+ it('starts a native rand practice balance without an FX input or multiplier',()=>{
+  expect(NEW_REPLAY_COSTS).toMatchObject({currency:'ZAR',leverage:1});
+  expect(NEW_REPLAY_COSTS.usdZar).toBeUndefined();
+  const initial=beginReplay(bars,0,10000);
+  const opened=replayEnter(initial,bars,'BUY',0.5,5,10,{...NEW_REPLAY_COSTS,spread:0,slippage:0,feePerOunce:0});
+  const moved=[...bars]; moved[0]={...moved[0],close:4001};
+  const closed=replayClose(opened,moved,{...NEW_REPLAY_COSTS,spread:0,slippage:0,feePerOunce:0});
+  expect(closed.balance).toBeCloseTo(10000.5);
+  expect(()=>replayEnter(initial,bars,'BUY',3,5,10,NEW_REPLAY_COSTS)).toThrow(/Insufficient/);
+ });
  const zar={...costs,currency:'ZAR' as const,usdZar:18,leverage:1};
  it('converts USD notional, profit and fees into the persisted account currency',()=>{
   const start=beginReplay(bars,0,10000);
