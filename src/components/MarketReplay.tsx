@@ -233,7 +233,15 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
    setAdjustStop(position?String(position.stop):'');setAdjustTarget(position?String(position.target):'');
    setPlaying(false);setProgressTime(Date.now());setLoadingStatus('');
    if(priorResult.status==='rejected')setNotice('Earlier candles will load as you scroll left.');
-   if(source&&!sourceTrade)saveLocalReplayArchive(uid,source);
+   if(source&&!sourceTrade){
+    saveLocalReplayArchive(uid,source);
+    try{
+     const oldKey=`trading-vibes:replay-drawings:${uid}:${chosenDay}`;
+     const newKey=`trading-vibes:replay-drawings:${uid}:${id}`;
+     const old=localStorage.getItem(oldKey);
+     if(old&&!localStorage.getItem(newKey))localStorage.setItem(newKey,old);
+    }catch{/* Drawing storage may be unavailable. */}
+   }
   }catch(e){setError(e instanceof Error?e.message:'Historical candles unavailable. Retry or choose another date.')}
   finally{setLoadingStatus('');setLoading(false)}
  };
@@ -420,8 +428,9 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
   }catch(e){setError(e instanceof Error?e.message:'Chart capture failed.')}
  };
  const reset=()=>{
-  if(!bars.length||!window.confirm('Reset this replay session? This clears all paper trades and practice progress for this date.'))return;
-  setPlaying(false);setPreview(null);setShowTicket(false);setShowReview(false);setTicketMinimized(false);setOrderPrice('');setAttemptId(crypto.randomUUID());setFinished(false);const fresh=beginReplay(bars,firstIndex,number(startingBalance));updateTimeline(newReplayTimeline(fresh));setCurrent(fresh);setAdjustStop('');setAdjustTarget('');setAnnotations({});setNotes('');setNotice('Replay reset. Start again when you are ready.');
+  if(!bars.length||!window.confirm('Start a fresh replay from this date? Your current named session will remain saved.'))return;
+  saveArchive(true);
+  setPlaying(false);setPreview(null);setShowTicket(false);setShowReview(false);setTicketMinimized(false);setOrderPrice('');setAttemptId(crypto.randomUUID());setSessionName(`Gold · ${day} · new practice`);setSessionCreatedAt(new Date().toISOString());activeSecondsRef.current=0;setActiveSeconds(0);setFinished(false);const fresh=beginReplay(bars,firstIndex,number(startingBalance));updateTimeline(newReplayTimeline(fresh));setCurrent(fresh);setAdjustStop('');setAdjustTarget('');setAnnotations({});setNotes('');setNotice('Replay reset. Start again when you are ready.');
  };
  const holdStart=useRef<ReturnType<typeof setTimeout>|null>(null),holdRepeat=useRef<ReturnType<typeof setInterval>|null>(null);
  const stopHold=()=>{if(holdStart.current!==null)clearTimeout(holdStart.current);if(holdRepeat.current!==null)clearInterval(holdRepeat.current);holdStart.current=null;holdRepeat.current=null};
@@ -495,9 +504,9 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
   chart.subscribeCrosshairMove(inspectTrade);
   chartRef.current={chart,series,ema20,ema50,markers,lines:[]};
   const loadAtLeft=(range:any)=>{if(range&&range.from<20)loadEarlierRef.current()};chart.timeScale().subscribeVisibleLogicalRangeChange(loadAtLeft);
-  const drawing=installChartTools(chartDiv.current,chart,series,[],`trading-vibes:replay-drawings:${uid}:${day}`,true);drawingRef.current=drawing;
+  const drawing=installChartTools(chartDiv.current,chart,series,[],`trading-vibes:replay-drawings:${uid}:${attemptId}`,true);drawingRef.current=drawing;
   return()=>{chart.timeScale().unsubscribeVisibleLogicalRangeChange(loadAtLeft);chart.unsubscribeClick(chooseChartPrice);chart.unsubscribeCrosshairMove(inspectTrade);drawingRef.current=null;drawing();chartRef.current=null;chart.remove()};
- },[sessionOpen,theme,day]);
+ },[sessionOpen,theme,day,attemptId]);
  useEffect(()=>{
   const c=chartRef.current;if(!c||!session)return;
   const follow=Math.abs(c.chart.timeScale().scrollPosition())<=10;
