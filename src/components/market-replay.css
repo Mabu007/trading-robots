@@ -368,3 +368,22 @@
 
 /* A narrow phone stays readable with room for the market timestamp. */
 @media(max-width:365px){.tv-replay-page .tv-replay-top-actions button:first-child:not(:last-child){display:none!important}.tv-replay-page .tv-replay-mobile-stats>summary{padding:9px 7px}.tv-replay-page .tv-replay-quote>strong{font-size:14px!important}}
+
+
+/* Inline chart annotation: no interruptive modal. */
+.tv-replay-chart .chart-inline-text-editor{position:absolute;z-index:55;width:min(220px,70vw);min-height:70px;box-sizing:border-box;resize:both;border:1px dashed #8ae6b1;background:#101d18d9;box-shadow:0 7px 25px #0007;color:#52e5a6;padding:10px;border-radius:9px;font-family:Inter,system-ui,sans-serif;line-height:1.4;outline:none;touch-action:auto}
+.tv-replay-chart .chart-inline-text-editor:focus{border:1px solid #68dba0;box-shadow:0 0 0 3px #59d49b40}
+.tv-replay-chart .chart-drawing-properties{position:absolute;z-index:65;display:grid;gap:11px;min-width:210px;padding:14px;border:1px solid #7d9b8c5c;border-radius:13px;box-shadow:0 14px 40px #0007;background:#14251eea;backdrop-filter:blur(16px);color:#e5f8eb;font:12px Inter,system-ui,sans-serif}
+.tv-replay-chart .chart-drawing-properties strong{font-weight:850;font-size:12px}
+.tv-replay-chart .chart-drawing-properties button:not(.chart-drawing-swatches button){border:1px solid #62756888;background:#294336;color:#e0f8eb;min-height:35px;border-radius:8px;font:600 11px Inter,system-ui,sans-serif}
+.tv-replay-chart .chart-drawing-swatches{display:flex;flex-wrap:wrap;gap:6px}
+.tv-replay-chart .chart-drawing-swatches button{height:24px;width:24px;min-width:24px;border:2px solid #fff6;border-radius:50%;padding:0;cursor:pointer}
+.tv-replay-chart .chart-drawing-properties input[type=range]{width:100%;accent-color:#64e7a4}
+.tv-replay-page .drawing-color-input{appearance:none;-webkit-appearance:none;box-sizing:border-box;width:31px;min-width:31px;height:31px;padding:3px;border:1px solid #62876d;border-radius:8px;background:#19281d;cursor:pointer}
+.tv-replay-page .drawing-color-input::-webkit-color-swatch-wrapper{padding:0}
+.tv-replay-page .drawing-color-input::-webkit-color-swatch{border:0;border-radius:5px}
+.tv-replay-page .drawing-font-input{width:49px;min-width:49px;height:32px;border:1px solid #62876d;border-radius:8px;background:#182d21;color:#eef8e9;text-align:center;font-size:12px}
+@media(max-width:720px){.tv-replay-page .drawing-toolbar[data-mobile-open=true]>.drawing-color-input,.tv-replay-page .drawing-toolbar[data-mobile-open=true]>.drawing-font-input{display:block!important;height:44px!important}.tv-replay-page .drawing-toolbar[data-mobile-open=true]>.drawing-color-input{width:44px!important;min-width:44px!important}.tv-replay-page .drawing-toolbar[data-mobile-open=true]>.drawing-font-input{width:54px!important}}
+.tv-replay-page .replay-zoom-desktop{display:flex;gap:4px;align-items:center}
+.tv-replay-page .replay-zoom-desktop button{min-width:35px}
+@media(max-width:720px){.tv-replay-page .replay-zoom-desktop{display:none}}
