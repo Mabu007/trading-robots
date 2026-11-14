@@ -43,3 +43,27 @@ export const formatPracticeDuration=(seconds:number)=>{
  const mins=Math.floor(Math.max(0,seconds)/60),hours=Math.floor(mins/60);
  return hours?hours+'h '+String(mins%60).padStart(2,'0')+'m':mins+'m';
 };
+
+/** One-time, non-destructive upgrade of pre-workspace day-keyed saves. */
+export function migrateLegacyReplaySaves(uid:string):number{
+ const prefix=`trading-vibes:replay:zar:v4:${uid}:XAUUSD:`;
+ let migrated=0;
+ for(let i=0;i<localStorage.length;i++){
+  const key=localStorage.key(i);
+  if(!key?.startsWith(prefix))continue;
+  try{
+   const saved=JSON.parse(localStorage.getItem(key)||'null');
+   if(saved?.version!==4||saved.asset!=='XAUUSD'||!saved.session||!Array.isArray(saved.session.trades))continue;
+   const id=typeof saved.attemptId==='string'&&/^[a-zA-Z0-9-]{1,80}$/.test(saved.attemptId)?saved.attemptId:crypto.randomUUID();
+   if(getLocalWorkspace(uid,id))continue;
+   const when=new Date().toISOString();
+   saveLocalWorkspace(uid,{version:5,id,day:saved.day,asset:'XAUUSD',name:'Gold · '+saved.day+' · Earlier replay',
+    firstTimestamp:saved.firstTimestamp,lastTimestamp:saved.lastTimestamp,session:saved.session,
+    firstIndex:saved.firstIndex||0,notes:saved.notes||'',costs:saved.costs,
+    annotations:saved.annotations||{},startedAt:when,elapsedSeconds:0,lastActiveAt:when,
+    timeline:saved.timeline||undefined});
+   migrated++;
+  }catch{/* Never modify or delete the original v4 data. */}
+ }
+ return migrated;
+}
