@@ -66,4 +66,27 @@ describe('extra chart annotations',()=>{
   const dialog=find(el,n=>n.attributes['role']==='dialog')!;expect(dialog).toBeDefined();dialog.dispatchEvent(new Event('submit',{cancelable:true}));
   const saved=JSON.parse(data.get('annotation-test')!).drawings;expect(saved.map((d:any)=>d.kind)).toEqual(['fibonacci','text']);expect(saved[1].text).toBe('Break of structure');expect(find(el,n=>n.textContent==='0.618')).toBeDefined();cleanup();
  });
+ it('draws rectangles past the last revealed candle and highlights the selected shape',()=>{
+  const store=new Map<string,string>(),win=new EventTarget() as any;
+  win.confirm=()=>true;win.prompt=()=>null;
+  vi.stubGlobal('HTMLElement',FakeElement);vi.stubGlobal('SVGElement',FakeSvg);
+  vi.stubGlobal('localStorage',{getItem:(k:string)=>store.get(k)||null,setItem:(k:string,v:string)=>store.set(k,v)});
+  vi.stubGlobal('window',win);
+  vi.stubGlobal('document',{createElement:()=>new FakeElement(),createElementNS:()=>new FakeSvg()});
+  vi.stubGlobal('ResizeObserver',class{observe(){}disconnect(){}});
+  const scale={logicalToCoordinate:(v:number)=>v*10,coordinateToLogical:(v:number)=>v/10,subscribeVisibleLogicalRangeChange:vi.fn(),unsubscribeVisibleLogicalRangeChange:vi.fn()};
+  const chart={timeScale:()=>scale,subscribeCrosshairMove:vi.fn(),unsubscribeCrosshairMove:vi.fn()};
+  const series={priceToCoordinate:(v:number)=>200-v,coordinateToPrice:(v:number)=>200-v};
+  const el=new FakeElement(),cleanup=installChartTools(el as unknown as HTMLElement,chart,series,candles,'future-rectangle',true);
+  find(el,n=>n.attributes['aria-label']==='Rectangle')!.dispatchEvent(new Event('click'));
+  el.dispatchEvent(pointer('pointerdown',45,55));el.dispatchEvent(pointer('pointermove',275,155));el.dispatchEvent(pointer('pointerup',275,155));
+  const saved=JSON.parse(store.get('future-rectangle')!).drawings;
+  expect(saved).toHaveLength(1);
+  expect(saved[0].b.time).toBeGreaterThan(candles.at(-1)!.time);
+  const shape=find(el,n=>n instanceof FakeSvg&&n.attributes['stroke-opacity']==='0.01')!;
+  shape.dispatchEvent(pointer('pointerdown',45,55));el.dispatchEvent(pointer('pointerup',45,55));
+  expect(find(el,n=>n instanceof FakeSvg&&n.attributes.stroke==='#51ecc0')).toBeDefined();
+  cleanup();
+ });
+
 });
