@@ -26,6 +26,9 @@ describe('Market Replay-first product',()=>{
   expect(html).not.toContain('Challenges');
   expect(html).not.toContain('Liquidity Sweep Fundamentals');
   expect(html).toContain('Gift');
+  expect(html).toContain('Download App');
+  expect(html).not.toContain('Replay it. Learn from it.');
+  expect(html).toContain('Keep Trading Vibes on your home screen.');
  });
  it('starts a native ZAR market replay with a single Gold asset and no FX field',()=>{
   const html=renderToStaticMarkup(<MarketReplay client={client} theme="light" onClose={()=>{}}/>);

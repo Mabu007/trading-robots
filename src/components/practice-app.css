@@ -76,3 +76,35 @@
 .practice-review-dialog>div button{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--p-border,#e5e9e1);background:var(--p-bg);color:var(--p-ink);padding:11px 16px;border-radius:10px;font-size:12px;font-weight:800}
 .practice-review-dialog>div button[type=submit]{background:#245b47;color:white;border-color:transparent}
 @media(max-width:700px){.practice-replay-first .practice-history-stats{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.practice-replay-first .practice-history-stats>div{padding:14px 10px;min-width:0}.practice-replay-first .practice-history-stats strong{font-size:25px}.practice-replay-first .practice-history-stats span{font-size:9px;letter-spacing:.4px}.practice-review-dialog{padding:22px}}
+
+
+/* Trading Vibes install experience — accessible in sidebar and on mobile. */
+.practice-replay-first .practice-sidebar-bottom>.practice-install-card{display:flex;flex-direction:column;align-items:stretch;text-align:left;gap:0;min-height:178px;padding:17px 17px 15px;margin-bottom:15px;border:1px solid #a1c7a15b;border-radius:17px;background:linear-gradient(135deg,#e9f6e7,#d7eccb);color:#234d36;box-shadow:0 9px 28px #234c2910;transition:transform .15s,box-shadow .15s,border-color .15s}
+.practice-replay-first .practice-sidebar-bottom>.practice-install-card:hover{transform:translateY(-2px);border-color:#6ca77c;box-shadow:0 13px 33px #234c291f}
+.practice-install-mark{display:grid;place-items:center;width:38px;height:38px;border-radius:12px;background:#fff8;color:#1d7849;margin-bottom:13px}
+.practice-install-card strong{font-size:14px;font-weight:850;line-height:1.2}
+.practice-install-card p{font-size:11px;color:#4b7354;line-height:1.6;margin:8px 0 13px}
+.practice-install-action{display:inline-flex;align-items:center;gap:6px;font-weight:850;font-size:10px;color:#1a633d}
+.practice-replay-first[data-practice-theme=dark] .practice-sidebar-bottom>.practice-install-card{background:linear-gradient(140deg,#224534,#183325);border-color:#437c56;color:#e4fbe7}
+.practice-replay-first[data-practice-theme=dark] .practice-install-mark{background:#2d583b;color:#cbf4d4}
+.practice-replay-first[data-practice-theme=dark] .practice-install-card p{color:#a1c9af}
+.practice-replay-first[data-practice-theme=dark] .practice-install-action{color:#b5efc8}
+.practice-replay-first .practice-header-install{display:inline-flex;align-items:center;gap:6px;padding:10px 12px;min-height:40px;border:1px solid var(--p-border,#d4e0d4);border-radius:11px;font-size:11px;font-weight:850;color:var(--p-green,#245b47);background:var(--p-card,#fff)}
+.practice-replay-first .practice-header-install:hover{background:var(--p-lime,#e9f5e5)}
+.practice-replay-first .practice-header-install span{display:inline}
+.practice-replay-first .practice-mobile-nav button{min-height:48px;min-width:67px;touch-action:manipulation}
+.practice-install-overlay{position:fixed;inset:0;z-index:550;display:grid;place-items:center;padding:20px;background:#08190ecc;backdrop-filter:blur(12px)}
+.practice-install-dialog{position:relative;width:min(440px,100%);max-height:min(88dvh,720px);overflow:auto;border:1px solid var(--p-border,#e5e9e1);border-radius:23px;padding:30px;background:var(--p-card,#fff);color:var(--p-ink,#233d2f);box-shadow:0 28px 90px #0005}
+.practice-install-close{position:absolute;top:18px;right:18px;display:grid;place-items:center;width:38px;height:38px;border:1px solid var(--p-border,#ddd);border-radius:11px;background:var(--p-bg,#f5f6f1);color:var(--p-ink,#283a2c)}
+.practice-install-dialog-icon{display:grid;place-items:center;width:55px;height:55px;border-radius:17px;background:#d6ecd5;color:#28593d;margin-bottom:18px}
+.practice-install-dialog h2{font:400 clamp(31px,6vw,39px)/1.12 Georgia,serif;letter-spacing:-1.1px;margin:11px 0}
+.practice-install-dialog>p{font-size:12px;line-height:1.8;color:var(--p-muted,#77877b);margin:0 0 17px}
+.practice-install-steps{display:grid;gap:10px;margin:19px 0}
+.practice-install-steps>div{display:flex;gap:13px;align-items:flex-start;padding:14px;border:1px solid var(--p-border,#e5e9e1);border-radius:12px;background:var(--p-bg,#f7f8f4)}
+.practice-install-steps>div>span{display:grid;place-items:center;flex:none;width:26px;height:26px;border-radius:8px;background:#cfe6cd;color:#245b47;font-size:11px;font-weight:850}
+.practice-install-steps p{margin:1px 0 0;line-height:1.6;font-size:12px;color:var(--p-ink,#37433b)}
+.practice-install-steps svg{display:inline;vertical-align:middle}
+.practice-install-dialog .practice-install-disclaimer{border-top:1px solid var(--p-border,#ddd);padding-top:14px;font-size:10px}
+.practice-install-done{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:46px;background:#245b47;color:white;font-size:12px;font-weight:850;border:0;border-radius:12px}
+@media(max-width:850px){.practice-replay-first .practice-header-install{min-width:42px;justify-content:center;padding:10px}.practice-replay-first .practice-header-install span{display:none}}
+@media(max-width:600px){.practice-replay-first .practice-top{padding:0 14px}.practice-replay-first .practice-top strong{font-size:13px}.practice-replay-first .practice-mobile-nav{padding-bottom:calc(9px + env(safe-area-inset-bottom));background:var(--p-card,#fff);border-color:var(--p-border,#e6eae2)}.practice-replay-first.practice-shell{padding-bottom:calc(82px + env(safe-area-inset-bottom))}.practice-install-dialog{border-radius:20px;padding:24px 20px}.practice-install-overlay{padding:12px}}

@@ -1,9 +1,10 @@
 import {useEffect,useState} from 'react';
-import {Activity,ArrowRight,BarChart3,CalendarDays,CheckCircle2,ChevronRight,Home,LogOut,Moon,Play,RotateCcw,Sun,Trash2,Pencil,Save} from 'lucide-react';
+import {Activity,ArrowRight,BarChart3,CalendarDays,CheckCircle2,ChevronRight,Home,LogOut,Moon,Play,RotateCcw,Sun,Trash2,Pencil,Save,Download,Smartphone,X,Share2,Check} from 'lucide-react';
 import {mergePracticeHistory,readLocalHistory,syncPracticeHistory,saveLocalHistory,removeLocalPracticeRecord,clearLocalPracticeHistory,type PracticeRecord} from '../practice-history';
 import type {CloudClient} from '../firebase';
 import type {AppTheme} from '../theme';
 import {MarketReplay} from './MarketReplay';
+import {installPlatform,isAppStandalone,requestAppInstall,subscribeInstallPrompt} from '../pwa-install';
 import {hideArchivedTrade,patchSavedReplayReview} from '../replay-journal';
 import './practice-app.css';
 
@@ -13,6 +14,31 @@ const menu=[{id:'home',label:'Home',icon:Home},{id:'replay',label:'Market Replay
 const heroImage='https://pub-60ec726f38cd437c94063e4c72071321.r2.dev/Confident%20Trader%20in%20a%20Modern%20Workspace.png';
 export function PracticeApp({client,theme,onSignOut,onThemeToggle}:Props){
  const [page,setPage]=useState<Page>('home');
+ const [installDialog,setInstallDialog]=useState(false),[installed,setInstalled]=useState(false),[hasInstallPrompt,setHasInstallPrompt]=useState(false);
+ useEffect(()=>{
+  setInstalled(isAppStandalone());
+  const unsub=subscribeInstallPrompt(setHasInstallPrompt);
+  const completed=()=>{setInstalled(true);setInstallDialog(false)};
+  const onModeChange=()=>setInstalled(isAppStandalone());
+  window.addEventListener('appinstalled',completed);
+  const display=window.matchMedia('(display-mode: standalone)');
+  display.addEventListener?.('change',onModeChange);
+  return()=>{unsub();window.removeEventListener('appinstalled',completed);display.removeEventListener?.('change',onModeChange)};
+ },[]);
+ useEffect(()=>{
+  if(!installDialog)return;
+  const onEscape=(event:KeyboardEvent)=>{if(event.key==='Escape')setInstallDialog(false)};
+  window.addEventListener('keydown',onEscape);
+  return()=>window.removeEventListener('keydown',onEscape);
+ },[installDialog]);
+ const openInstall=async()=>{
+  if(!installed&&hasInstallPrompt){
+   const result=await requestAppInstall();
+   if(result==='accepted')return;
+  }
+  setInstallDialog(true);
+ };
+ const device=installPlatform(typeof navigator==='undefined'?'':navigator.userAgent);
  const [replayChoice,setReplayChoice]=useState<{day?:string;tradeId?:string}>({});
  const [edit,setEdit]=useState<{recordId:string;tradeId:string;note:string}|null>(null);
  const [saving,setSaving]=useState(false),[historyError,setHistoryError]=useState('');
@@ -66,10 +92,10 @@ export function PracticeApp({client,theme,onSignOut,onThemeToggle}:Props){
    <div className="practice-brand"><img src="/logo.png" alt="Trading Vibes"/><span>trading<span>vibes</span><small>THE MARKET REPLAY APP</small></span></div>
    <div className="practice-nav-label">YOUR WORKSPACE</div>
    <nav aria-label="Main navigation">{menu.map(({id,label,icon:Icon})=><button key={id} type="button" aria-current={page===id?'page':undefined} onClick={()=>setPage(id)}><Icon size={19}/><span>{label}</span>{page===id&&<ChevronRight size={15}/>}</button>)}</nav>
-   <div className="practice-sidebar-bottom"><div className="practice-sidebar-note"><RotateCcw size={19}/><strong>Replay it. Learn from it.</strong><p>Every session gives you another chance to refine your decisions.</p></div><button type="button" onClick={onSignOut}><LogOut size={18}/> Sign out</button></div>
+   <div className="practice-sidebar-bottom"><button className="practice-install-card" type="button" onClick={()=>void openInstall()} aria-label="Download App"><span className="practice-install-mark"><Download size={22}/></span><strong>{installed?'App installed':'Download App'}</strong><p>Keep Trading Vibes on your home screen. Open Market Replay in one tap.</p><span className="practice-install-action">{installed?'Ready to replay':hasInstallPrompt?'Install Trading Vibes':'See installation steps'} <ArrowRight size={14}/></span></button><button type="button" onClick={onSignOut}><LogOut size={18}/> Sign out</button></div>
   </aside>
   <main className="practice-main">
-   <header className="practice-top"><div><span className="practice-top-kicker">TRADING VIBES · MARKET REPLAY</span><strong>{menu.find(item=>item.id===page)?.label}</strong></div><div className="practice-account"><button type="button" aria-label={theme==='dark'?'Switch to light theme':'Switch to dark theme'} onClick={onThemeToggle}>{theme==='dark'?<Sun size={17}/>:<Moon size={17}/>}</button><button type="button" onClick={onSignOut}>Sign out</button><b title={name}>{name.charAt(0).toUpperCase()}</b></div></header>
+   <header className="practice-top"><div><span className="practice-top-kicker">TRADING VIBES · MARKET REPLAY</span><strong>{menu.find(item=>item.id===page)?.label}</strong></div><div className="practice-account"><button type="button" className="practice-header-install" aria-label="Download App" title="Download App" onClick={()=>void openInstall()}><Download size={18}/><span>Download App</span></button><button type="button" aria-label={theme==='dark'?'Switch to light theme':'Switch to dark theme'} onClick={onThemeToggle}>{theme==='dark'?<Sun size={17}/>:<Moon size={17}/>}</button><button type="button" onClick={onSignOut}>Sign out</button><b title={name}>{name.charAt(0).toUpperCase()}</b></div></header>
    <div className="practice-content">
     {page==='home'&&<>
      <section className="practice-greeting practice-replay-hero">
@@ -107,6 +133,7 @@ export function PracticeApp({client,theme,onSignOut,onThemeToggle}:Props){
     </>}
    </div>
   </main>
+  {installDialog&&<div className="practice-install-overlay" role="presentation" onClick={()=>setInstallDialog(false)}><section className="practice-install-dialog" role="dialog" aria-modal="true" aria-labelledby="practice-install-title" onClick={e=>e.stopPropagation()}><button type="button" className="practice-install-close" autoFocus onClick={()=>setInstallDialog(false)} aria-label="Close install instructions"><X size={20}/></button><div className="practice-install-dialog-icon"><Smartphone size={26}/></div><span className="practice-overline">TRADING VIBES FOR YOUR DEVICE</span><h2 id="practice-install-title">{installed?'Already on your device':'Install Trading Vibes'}</h2><p>{installed?'You are already opening Trading Vibes as an installed app.':'Get one-tap access to your trading replays. Your saved trades stay tied to your account.'}</p>{!installed&&<div className="practice-install-steps">{device==='ios'?<><div><span>1</span><p>Open Trading Vibes in your browser and tap <strong>Share</strong> <Share2 size={15}/>.</p></div><div><span>2</span><p>Choose <strong>Add to Home Screen</strong> (or <strong>Add to Dock</strong> on iPad, where available).</p></div><div><span>3</span><p>Confirm <strong>Add</strong> to launch Trading Vibes like an app.</p></div></>:device==='android'?<><div><span>1</span><p>Open your browser menu <strong>⋮</strong>.</p></div><div><span>2</span><p>Choose <strong>Install app</strong> or <strong>Add to Home screen</strong>.</p></div><div><span>3</span><p>Confirm to add Trading Vibes to your apps.</p></div></>:<><div><span>1</span><p>Open Trading Vibes in Chrome or Edge.</p></div><div><span>2</span><p>Click the install icon in the address bar or select <strong>Install app</strong> from the browser menu.</p></div><div><span>3</span><p>Confirm to open Trading Vibes in its own window.</p></div></>}</div>}<p className="practice-install-disclaimer">Historical market candles still need an internet connection. There is no APK or App Store download.</p><button type="button" className="practice-install-done" onClick={()=>setInstallDialog(false)}>{installed?<><Check size={17}/> Done</>:'Got it'}</button></section></div>}
   <nav className="practice-mobile-nav" aria-label="Mobile navigation">{menu.map(({id,label,icon:Icon})=><button key={id} type="button" aria-current={page===id?'page':undefined} onClick={()=>setPage(id)}><Icon size={20}/><span>{label}</span></button>)}</nav>
  </div>;
 }

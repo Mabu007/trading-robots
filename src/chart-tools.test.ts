@@ -26,6 +26,12 @@ describe('chart drawing controls',()=>{
   const range={logicalToCoordinate:(v:number)=>v*10,coordinateToLogical:(v:number)=>v/10,subscribeVisibleLogicalRangeChange:vi.fn(),unsubscribeVisibleLogicalRangeChange:vi.fn()};
   const chart={timeScale:()=>range,subscribeCrosshairMove:vi.fn(),unsubscribeCrosshairMove:vi.fn()};const series={priceToCoordinate:(v:number)=>200-v,coordinateToPrice:(v:number)=>200-v};
   const el=new FakeElement();const cleanup=installChartTools(el as unknown as HTMLElement,chart,series,candles,'test');
+  const drawingToggle=find(el,n=>n.attributes['aria-label']==='Drawing tools')!;
+  expect(drawingToggle.attributes['aria-expanded']).toBe('false');
+  drawingToggle.dispatchEvent(new Event('click'));
+  expect(drawingToggle.attributes['aria-expanded']).toBe('true');
+  drawingToggle.dispatchEvent(new Event('click'));
+  expect(drawingToggle.attributes['aria-expanded']).toBe('false');
   const rectangle=find(el,n=>n.textContent==='Rectangle')!;rectangle.dispatchEvent(new Event('click'));
   el.dispatchEvent(pointer('pointerdown',20,80));el.dispatchEvent(pointer('pointermove',50,100));el.dispatchEvent(pointer('pointerup',50,100));
   const saved=JSON.parse(data.get('test')!);expect(saved.drawings).toHaveLength(1);expect(saved.drawings[0].a).toEqual({time:1120,price:120});expect(saved.drawings[0].b).toEqual({time:1300,price:100});
