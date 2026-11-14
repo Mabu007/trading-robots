@@ -34,7 +34,7 @@ export function ReplayIndicators({active,onChange,onClose}:{active:IndicatorSpec
    </header>
    <div className="replay-indicator-columns">
     <div className="replay-indicator-browser">
-     <label className="replay-indicator-search"><Search size={17}/><input type="search" aria-label="Find indicators" placeholder="Search indicators..." value={query} onChange={event=>setQuery(event.target.value)}/><span>⌘ K</span></label>
+     <label className="replay-indicator-search"><Search size={17}/><input type="search" aria-label="Find indicators" placeholder="Search indicators..." value={query} onChange={event=>setQuery(event.target.value)}/><span>9 STUDIES</span></label>
      <nav className="replay-indicator-filters" aria-label="Indicator categories">{categories.map(item=><button key={item} type="button" className={category===item?'is-active':''} aria-pressed={category===item} onClick={()=>setCategory(item)}>{item}</button>)}</nav>
      <div className="replay-indicator-results" role="group" aria-label="Available indicators">
       {filtered.map(study=>{const count=active.filter(item=>item.type===study.type).length;return <button key={study.type} type="button" className="replay-indicator-option" onClick={()=>add(study)} aria-label={'Add '+study.type}>
