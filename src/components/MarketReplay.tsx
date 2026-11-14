@@ -9,7 +9,7 @@ import {rebaseDaySession} from '../replay-history-migration';
 import {newReplayTimeline,recordReplayDecision,replayTo,type ReplayTimeline} from '../replay-timeline';
 import type {CloudClient} from '../firebase';
 import type {AppTheme} from '../theme';
-import {aggregateReplayBars,beginReplay,DEFAULT_REPLAY_COSTS,replayAdvance,replayClose,replayEMA,replayFx,replayEnter,replayPlacePending,replayCancelPending,replayMark,replayMetrics,replayModifyPosition,replayPositions,replayVisibleBars,validateReplayBars,validateReplayCosts,type ReplayBar,type ReplayCosts,type ReplaySession,type ReplaySide} from '../market-replay-engine';
+import {aggregateReplayBars,beginReplay,DEFAULT_REPLAY_COSTS,NEW_REPLAY_COSTS,replaySessionCosts,replayAdvance,replayClose,replayEMA,replayFx,replayEnter,replayPlacePending,replayCancelPending,replayMark,replayMetrics,replayModifyPosition,replayPositions,replayVisibleBars,validateReplayBars,validateReplayCosts,type ReplayBar,type ReplayCosts,type ReplaySession,type ReplaySide} from '../market-replay-engine';
 import {ReplayIndicators} from './ReplayIndicators';
 import type {IndicatorSpec} from '../replay-indicators';
 import {ReplayPositionPreview,type PositionPreview} from './ReplayPositionPreview';
@@ -58,7 +58,7 @@ export function MarketReplay({client,theme,onClose,initialWorkout,onHistoryChang
  const pickingRef=useRef(false);
  const [quantity,setQuantity]=useState('0.01'),[stopDistance,setStopDistance]=useState('6'),[targetDistance,setTargetDistance]=useState('12');
  const [adjustStop,setAdjustStop]=useState(''),[adjustTarget,setAdjustTarget]=useState('');
- const [costs,setCosts]=useState<ReplayCosts>({...DEFAULT_REPLAY_COSTS,leverage:1,currency:'ZAR',usdZar:18}),[notes,setNotes]=useState(''),[annotations,setAnnotations]=useState<Record<string,string>>({});
+ const [costs,setCosts]=useState<ReplayCosts>({...NEW_REPLAY_COSTS}),[notes,setNotes]=useState(''),[annotations,setAnnotations]=useState<Record<string,string>>({});
  const money=(value:number)=>new Intl.NumberFormat(costs.currency==='ZAR'?'en-ZA':'en-US',{style:'currency',currency:costs.currency||'USD',maximumFractionDigits:2}).format(value);
  const [selectedTrade,setSelectedTrade]=useState<string|null>(null);
  const [selectedPositionId,setSelectedPositionId]=useState(''),[showNewOrder,setShowNewOrder]=useState(false),[managePending,setManagePending]=useState(true);
@@ -140,11 +140,12 @@ export function MarketReplay({client,theme,onClose,initialWorkout,onHistoryChang
       Number.isFinite(parsed.session.balance)&&parsed.session.initialBalance===startEquity&&
       (parsed.session.position===null||typeof parsed.session.position?.entry==='number')&&Array.isArray(parsed.session.trades)){
       next=parsed.session;if(Number.isInteger(parsed.firstIndex)&&parsed.firstIndex>=initial&&parsed.firstIndex<=parsed.session.index){restoredFirst=parsed.firstIndex;restoredOrdinal=Math.max(0,Math.min(moments.length-1,parsed.momentOrdinal||0))}restoredAttempt=parsed.attemptId||crypto.randomUUID();restoredFinished=parsed.finished===true;restoredNotes=typeof parsed.notes==='string'?parsed.notes:'';restoredAnnotations=parsed.annotations||{};resume=true;
-      if(parsed.costs)validateReplayCosts(parsed.costs),setCosts(parsed.costs);else setCosts({...DEFAULT_REPLAY_COSTS,currency:'USD'});
+      if(parsed.costs)validateReplayCosts(parsed.costs),setCosts(replaySessionCosts(costs,parsed.costs));else setCosts(replaySessionCosts(costs,{...DEFAULT_REPLAY_COSTS,currency:'USD'}));
       if(parsed.timeline&&parsed.timeline.origin?.index<=next.index&&Array.isArray(parsed.timeline.decisions)&&parsed.timeline.decisions.every(x=>Number.isInteger(x.index)&&x.index>=parsed.timeline!.origin.index&&x.index<candles.length))restoredTimeline=parsed.timeline;
      }
     }
    }catch(error){if(error instanceof Error&&error.message.startsWith('Saved replay cannot'))throw error;/* Invalid browser-only practice saves are ignored. */}
+   if(!resume)setCosts(previous=>replaySessionCosts(previous));
    setDay(day);setShowDate(false);setAttemptId(restoredAttempt);setFinished(restoredFinished);setMomentOrdinal(restoredOrdinal);setNotes(restoredNotes);setAnnotations(restoredAnnotations);
    barsRef.current=candles;firstIndexRef.current=restoredFirst;setBars(candles);setFirstIndex(restoredFirst);updateTimeline(restoredTimeline||newReplayTimeline(next));setCurrent(next);
    const restored=replayPositions(next)[0];setSelectedPositionId(restored?.id||'');setAdjustStop(restored?String(restored.stop):'');setAdjustTarget(restored?String(restored.target):'');
