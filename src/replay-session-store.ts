@@ -18,6 +18,7 @@ export type ReplayArchive={
  costs:ReplayCosts;
  notes:string;
  annotations:Record<string,string>;
+ drawingState?:string;
  activeSeconds:number;
  createdAt:string;
  updatedAt:string;
@@ -85,7 +86,7 @@ export function importLegacyReplayArchives(uid:string):number{
     day:value.day,startClock:'08:00',startingBalance:value.session.initialBalance,
     firstTimestamp:value.firstTimestamp,lastTimestamp:value.lastTimestamp,
     firstIndex:value.firstIndex||0,session:value.session,timeline:value.timeline||null,
-    costs:value.costs,notes:value.notes||'',annotations:value.annotations||{},
+    costs:value.costs,notes:value.notes||'',annotations:value.annotations||{},drawingState:localStorage.getItem(`trading-vibes:replay-drawings:${uid}:${value.day}`)||undefined,
     activeSeconds:0,createdAt:now,updatedAt:now
    };
    saveLocalReplayArchive(uid,archive);count++;
