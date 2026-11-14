@@ -1,5 +1,5 @@
 import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
-import {Activity,ArrowLeft,ArrowRight,BarChart3,BookOpen,CalendarDays,CheckCircle2,ChevronRight,Clock3,Download,FastForward,Flag,Maximize2,Minimize2,Pause,Play,RotateCcw,Settings2,SkipForward,Target,TrendingDown,TrendingUp,Trophy,X} from 'lucide-react';
+import {Activity,ArrowLeft,ArrowRight,BarChart3,BookOpen,CalendarDays,Camera,CheckCircle2,ChevronRight,Clock3,Download,FastForward,Flag,Maximize2,Minimize2,Pause,Play,RotateCcw,Settings2,SkipForward,Target,TrendingDown,TrendingUp,Trophy,X} from 'lucide-react';
 import {createChart,CandlestickSeries,LineSeries,createSeriesMarkers,ColorType} from 'lightweight-charts';
 import {historicalData} from '../history-cache';
 import {installChartTools} from '../chart-tools';
@@ -38,17 +38,18 @@ export function MarketReplay({client,theme,onClose,initialWorkout,onHistoryChang
  const [attemptId,setAttemptId]=useState<string>(()=>crypto.randomUUID()),[finished,setFinished]=useState(false),[savingHistory,setSavingHistory]=useState(false);
  const [bars,setBars]=useState<ReplayBar[]>([]),[session,setSession]=useState<ReplaySession|null>(null),[firstIndex,setFirstIndex]=useState(0);
  const [loading,setLoading]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
+ const [showDate,setShowDate]=useState(false),[dateDraft,setDateDraft]=useState('');
  const [loadingEarlier,setLoadingEarlier]=useState(false);
- const barsRef=useRef<ReplayBar[]>([]),firstIndexRef=useRef(0),earlierBusyRef=useRef(false),noEarlierRef=useRef(false),loadEarlierRef=useRef<()=>void>(()=>{}),pendingRangeRef=useRef<{from:number;to:number;added:number}|null>(null);
+ const barsRef=useRef<ReplayBar[]>([]),firstIndexRef=useRef(0),earlierBusyRef=useRef(false),noEarlierRef=useRef(false),earlierRetryAtRef=useRef(0),loadEarlierRef=useRef<()=>void>(()=>{}),pendingRangeRef=useRef<{from:number;to:number;added:number}|null>(null);
  barsRef.current=bars;firstIndexRef.current=firstIndex;
- const [playing,setPlaying]=useState(false),[speed,setSpeed]=useState<number>(2),[timeframe,setTimeframe]=useState<1|5|15|60>(1);
+ const [playing,setPlaying]=useState(false),[speed,setSpeed]=useState<number>(2),[timeframe,setTimeframe]=useState<1|5|15|60|240|1440>(1);
  const [expanded,setExpanded]=useState(false),[emaVisible,setEmaVisible]=useState(true),[showCosts,setShowCosts]=useState(false);
  const [orderType,setOrderType]=useState<'market'|'limit'|'stop'>('market'),[orderPrice,setOrderPrice]=useState(''),[pickingPrice,setPickingPrice]=useState(false);
  const pickingRef=useRef(false);
  const [quantity,setQuantity]=useState('1'),[stopDistance,setStopDistance]=useState('6'),[targetDistance,setTargetDistance]=useState('12');
  const [adjustStop,setAdjustStop]=useState(''),[adjustTarget,setAdjustTarget]=useState('');
  const [costs,setCosts]=useState<ReplayCosts>(DEFAULT_REPLAY_COSTS),[notes,setNotes]=useState(''),[annotations,setAnnotations]=useState<Record<string,string>>({});
- const [selectedTrade,setSelectedTrade]=useState<string|null>(null),[showHelp,setShowHelp]=useState(false);
+ const [selectedTrade,setSelectedTrade]=useState<string|null>(null);
  const [selectedPositionId,setSelectedPositionId]=useState(''),[showNewOrder,setShowNewOrder]=useState(false),[managePending,setManagePending]=useState(true);
  const [progressTime,setProgressTime]=useState(0);
  const sessionRef=useRef<ReplaySession|null>(null),chartDiv=useRef<HTMLDivElement|null>(null),modalRef=useRef<HTMLElement|null>(null);
@@ -79,9 +80,17 @@ export function MarketReplay({client,theme,onClose,initialWorkout,onHistoryChang
    {label:'Place a risk-defined paper trade',done:!!session&&(!!session.position||session.trades.length>0)},
    {label:'Record a trading lesson',done:notes.trim().length>=15||Object.values(annotations).some(v=>v.trim().length>=15)}
  ];
- const start=async()=>{
+ const start=async(targetDay=day)=>{
   if(loading)return;
-  setLoading(true);setError('');setNotice('');setAttemptId(crypto.randomUUID());setFinished(false);setMomentOrdinal(0);noEarlierRef.current=false;
+  // Flush the current session before switching keys; a pending autosave may not have fired.
+  if(sessionRef.current&&bars.length&&targetDay!==day){
+   try{localStorage.setItem(sessionKey,JSON.stringify({version:3,day,firstTimestamp:bars[0].time,lastTimestamp:bars[bars.length-1].time,session:sessionRef.current,firstIndex,notes,costs,annotations,attemptId,finished,momentOrdinal} satisfies SavedSession));}
+   catch{setError('Could not save the current session. Check browser storage before switching dates.');return;}
+  }
+  {const day=targetDay;
+  const sessionSuffix=uid+':'+day+(workout?':'+workout.id+'-workout':'');
+  const sessionKey='trading-vibes:replay:v3:'+sessionSuffix;
+  setLoading(true);setPlaying(false);setError('');setNotice('');noEarlierRef.current=false;earlierRetryAtRef.current=0;
   try{
    if(!/^\d{4}-\d{2}-\d{2}$/.test(day)||day>yesterday())throw Error('Choose a completed historical UTC day.');
    validateReplayCosts(costs);
@@ -104,6 +113,7 @@ export function MarketReplay({client,theme,onClose,initialWorkout,onHistoryChang
    if(desired<0||desired>=candles.length-1)throw Error('No candles after the chosen replay start time. Try another session or date.');
    const initial=Math.max(0,desired),startEquity=number(startingBalance);
    let next=beginReplay(candles,initial,startEquity),resume=false,restoredFirst=initial;
+   let restoredAttempt:string=crypto.randomUUID(),restoredFinished=false,restoredOrdinal=0,restoredNotes='',restoredAnnotations:Record<string,string>={};
    try{
     const currentSave=localStorage.getItem(sessionKey),legacySave=currentSave?null:localStorage.getItem('trading-vibes:replay:v2:'+sessionSuffix);
     const saved=currentSave||legacySave;
@@ -113,20 +123,23 @@ export function MarketReplay({client,theme,onClose,initialWorkout,onHistoryChang
       const offset=candles.length-dayBars.length,rebased=rebaseDaySession(parsed.session,dayBars,offset);
       if(rebased&&Number.isInteger(parsed.firstIndex)&&parsed.firstIndex>=0&&parsed.firstIndex<dayBars.length){parsed={...parsed,version:3,firstTimestamp:candles[0].time,lastTimestamp:candles.at(-1)!.time,session:rebased,firstIndex:parsed.firstIndex+offset};}
      }
+     if(!legacySave&&parsed.version===3&&parsed.day===day&&(parsed.firstTimestamp!==candles[0].time||parsed.lastTimestamp!==candles.at(-1)?.time||parsed.session?.initialBalance!==startEquity))throw Error('Saved replay cannot be restored with the available history or starting balance. The existing save has been preserved.');
      if(parsed.version===3&&parsed.day===day&&parsed.firstTimestamp===candles[0].time&&parsed.lastTimestamp===candles.at(-1)?.time&&parsed.session&&parsed.session.index>=initial&&parsed.session.index<candles.length&&
       Number.isFinite(parsed.session.balance)&&parsed.session.initialBalance===startEquity&&
       (parsed.session.position===null||typeof parsed.session.position?.entry==='number')&&Array.isArray(parsed.session.trades)){
-      next=parsed.session;if(Number.isInteger(parsed.firstIndex)&&parsed.firstIndex>=initial&&parsed.firstIndex<=parsed.session.index){restoredFirst=parsed.firstIndex;setMomentOrdinal(Math.max(0,Math.min(moments.length-1,parsed.momentOrdinal||0)))}setAttemptId(parsed.attemptId||crypto.randomUUID());setFinished(parsed.finished===true);setNotes(typeof parsed.notes==='string'?parsed.notes:'');setAnnotations(parsed.annotations||{});resume=true;
+      next=parsed.session;if(Number.isInteger(parsed.firstIndex)&&parsed.firstIndex>=initial&&parsed.firstIndex<=parsed.session.index){restoredFirst=parsed.firstIndex;restoredOrdinal=Math.max(0,Math.min(moments.length-1,parsed.momentOrdinal||0))}restoredAttempt=parsed.attemptId||crypto.randomUUID();restoredFinished=parsed.finished===true;restoredNotes=typeof parsed.notes==='string'?parsed.notes:'';restoredAnnotations=parsed.annotations||{};resume=true;
       if(parsed.costs)validateReplayCosts(parsed.costs),setCosts(parsed.costs);
      }
     }
-   }catch{/* Invalid browser-only practice saves are ignored. */}
+   }catch(error){if(error instanceof Error&&error.message.startsWith('Saved replay cannot'))throw error;/* Invalid browser-only practice saves are ignored. */}
+   setDay(day);setShowDate(false);setAttemptId(restoredAttempt);setFinished(restoredFinished);setMomentOrdinal(restoredOrdinal);setNotes(restoredNotes);setAnnotations(restoredAnnotations);
    barsRef.current=candles;firstIndexRef.current=restoredFirst;setBars(candles);setFirstIndex(restoredFirst);setCurrent(next);
    const restored=replayPositions(next)[0];setSelectedPositionId(restored?.id||'');setAdjustStop(restored?String(restored.stop):'');setAdjustTarget(restored?String(restored.target):'');
    setPlaying(false);setProgressTime(Date.now());
    setNotice(resume?'Your last practice session is restored.':historyResult.status==='rejected'?'Replay ready. Earlier history could not be loaded; showing the selected day only.':practiceSweep?`${moments.length} matching ${moments.length===1?'moment':'moments'} found. Replay begins before the first confirmation.`:'Market replay ready. Future candles are hidden.');
   }catch(e){setError(e instanceof Error?e.message:'Historical candles unavailable. Try another date.')}
   finally{setLoading(false)}
+  }
  };
  useEffect(()=>{
   if(!session||!bars.length)return;
@@ -152,7 +165,7 @@ export function MarketReplay({client,theme,onClose,initialWorkout,onHistoryChang
   setCurrent(beginReplay(bars,initial,number(startingBalance)));setNotice('Next moment ready. The future remains hidden.');
  };
  const loadEarlier=async()=>{
-  const currentBars=barsRef.current;if(earlierBusyRef.current||noEarlierRef.current||!currentBars.length||!sessionRef.current)return;
+  const currentBars=barsRef.current;if(earlierBusyRef.current||noEarlierRef.current||Date.now()<earlierRetryAtRef.current||!currentBars.length||!sessionRef.current)return;
   if(currentBars.length>=50000){noEarlierRef.current=true;setNotice('This device has reached the 50,000-candle chart limit.');return}
   const boundary=Math.floor(currentBars[0].time/86400)*86400000;
   earlierBusyRef.current=true;setLoadingEarlier(true);
@@ -168,7 +181,7 @@ export function MarketReplay({client,theme,onClose,initialWorkout,onHistoryChang
    const range=chartRef.current?.chart.timeScale().getVisibleLogicalRange();
    if(range){const previousVisible=latest.slice(0,current.index+1),combinedVisible=combined.slice(0,rebased.index+1);const added=aggregateReplayBars(combinedVisible,timeframe).length-aggregateReplayBars(previousVisible,timeframe).length;pendingRangeRef.current={from:range.from,to:range.to,added};}
    barsRef.current=combined;firstIndexRef.current+=older.length;setBars(combined);setFirstIndex(firstIndexRef.current);setCurrent(rebased);setNotice('Earlier candles loaded.');
-  }catch{noEarlierRef.current=true;setNotice('Earlier candles could not be loaded. Your current replay is still available.')}
+  }catch{earlierRetryAtRef.current=Date.now()+20000;setNotice('Earlier candles could not be loaded. Move back to the chart edge to retry shortly.')}
   finally{earlierBusyRef.current=false;setLoadingEarlier(false)}
  };
  loadEarlierRef.current=()=>void loadEarlier();
@@ -225,12 +238,7 @@ export function MarketReplay({client,theme,onClose,initialWorkout,onHistoryChang
   if(!sessionOpen)return;
   const handle=(e:KeyboardEvent)=>{
    if(e.altKey||e.ctrlKey||e.metaKey||/INPUT|TEXTAREA|SELECT/.test((e.target as HTMLElement)?.tagName||''))return;
-   if(e.key===' '){e.preventDefault();setPlaying(v=>!v)}
-   else if(e.key==='ArrowRight'){e.preventDefault();advance(1)}
-   else if(e.key.toLowerCase()==='b')enter('BUY');
-   else if(e.key.toLowerCase()==='s')enter('SELL');
-   else if(e.key.toLowerCase()==='x')close();
-   else if(e.key==='?')setShowHelp(v=>!v);
+   if(e.key==='ArrowRight' && chartDiv.current?.contains(document.activeElement)){e.preventDefault();advance(1)}
   };
   window.addEventListener('keydown',handle);return()=>window.removeEventListener('keydown',handle);
  },[sessionOpen,advance,bars,costs,quantity,stopDistance,targetDistance,orderType,orderPrice,selectedPositionId,session]);
@@ -254,7 +262,7 @@ export function MarketReplay({client,theme,onClose,initialWorkout,onHistoryChang
   const loadAtLeft=(range:any)=>{if(range&&range.from<20)loadEarlierRef.current()};chart.timeScale().subscribeVisibleLogicalRangeChange(loadAtLeft);
   const drawing=installChartTools(chartDiv.current,chart,series,[],`trading-vibes:replay-drawings:${uid}:${day}`,true);drawingRef.current=drawing;
   return()=>{chart.timeScale().unsubscribeVisibleLogicalRangeChange(loadAtLeft);chart.unsubscribeClick(chooseChartPrice);drawingRef.current=null;drawing();chartRef.current=null;chart.remove()};
- },[sessionOpen,theme]);
+ },[sessionOpen,theme,day]);
  useEffect(()=>{
   const c=chartRef.current;if(!c||!session)return;
   const follow=Math.abs(c.chart.timeScale().scrollPosition())<=10;
@@ -279,9 +287,12 @@ export function MarketReplay({client,theme,onClose,initialWorkout,onHistoryChang
  },[aggregates,session,emaVisible,timeframe]);
  const percent=bars.length&&session?100*session.index/Math.max(1,bars.length-1):0;
  const selected=session?.trades.find(t=>t.id===selectedTrade);
+ const accountStats=session&&<div className="tv-replay-market-stats"><div><span>Account equity</span><strong>{mark?money(mark.equity):'—'}</strong></div><div><span>Session P/L</span><strong className={metrics&&metrics.returnPercent>=0?'is-profit':'is-loss'}>{metrics?(metrics.returnPercent>=0?'+':'')+money(mark!.equity-session.initialBalance):'—'}</strong></div><div><span>Open positions</span><strong>{positions.length}</strong></div><div><span>Margin used</span><strong>{mark?money(mark.marginUsed):'—'}</strong></div><div><span>Trades</span><strong>{session.trades.length}</strong></div></div>;
  return <main className={'tv-replay-backdrop tv-replay-page'+(expanded?' is-expanded':'')}>
   <section ref={modalRef} className={'tv-replay-modal'+(import.meta.env.VITE_TRAINING_PREVIEW==='true'?' tv-practice-redesign '+(theme==='light'?'tv-practice-light':'tv-practice-dark'):'')+(expanded?' is-expanded':'')} aria-label="Market Replay practice terminal">
    <header className="tv-replay-top"><div className="tv-replay-brand"><span className="tv-replay-brand-icon"><BarChart3 size={21}/></span><div><span className="tv-replay-eyebrow">TRADING VIBES · PRACTICE LAB</span><h2>{workout?.title||'Market Replay'} <span>GOLD / XAUUSD{practiceSweep&&workoutMoments.length?` · Rep ${momentOrdinal+1} of ${workoutMoments.length}`:''}</span></h2></div></div>
+    {session&&<div className="tv-replay-header-market"><div className="tv-replay-quote"><span>GOLD · XAUUSD <i/></span><strong>{currentBar?price(currentBar.close):'—'}</strong><small>{currentBar?utc(currentBar.time+60)+' UTC':'—'} · Historical</small></div>
+     <div className="tv-replay-desktop-stats">{accountStats}</div><details className="tv-replay-mobile-stats"><summary>Account</summary>{accountStats}</details></div>}
     <div className="tv-replay-top-actions">{session&&<button type="button" onClick={()=>void toggleFullscreen()} aria-label={expanded?'Exit full screen':'Full screen'}>{expanded?<Minimize2 size={16}/>:<Maximize2 size={16}/>}</button>}<button type="button" onClick={onClose} aria-label="Exit replay" title="Exit replay"><ArrowLeft size={18}/></button></div>
    </header>
    {!session?<div className="tv-replay-setup"><div className="tv-replay-setup-main">
@@ -301,20 +312,17 @@ export function MarketReplay({client,theme,onClose,initialWorkout,onHistoryChang
      {[[Clock3,'Reveal','Watch new candles form one by one.'],[Target,'Execute','Enter trades with stops, targets and costs.'],[Trophy,'Review','Learn from your journal, win rate and drawdown.']].map(([Icon,title,body],i)=><div className="tv-replay-how" key={String(title)}><span>{typeof Icon==='function'?<Icon size={20}/>:i+1}</span><div><strong>{String(title)}</strong><p>{String(body)}</p></div></div>)}
     </aside></div>:
    <div className="tv-replay-terminal">
-    <div className="tv-replay-marketbar"><div className="tv-replay-quote"><span>GOLD · XAUUSD <i/></span><strong>{currentBar?price(currentBar.close):'—'}</strong><small>{currentBar?utc(currentBar.time+60)+' UTC':'—'} · Historical</small></div>
-     <div className="tv-replay-market-stats"><div><span>Account equity</span><strong>{mark?money(mark.equity):'—'}</strong></div><div><span>Session P/L</span><strong className={metrics&&metrics.returnPercent>=0?'is-profit':'is-loss'}>{metrics?(metrics.returnPercent>=0?'+':'')+money(mark!.equity-session.initialBalance):'—'}</strong></div><div><span>Open positions</span><strong>{positions.length}</strong></div><div><span>Margin used</span><strong>{mark?money(mark.marginUsed):'—'}</strong></div><div><span>Trades</span><strong>{session.trades.length}</strong></div></div></div>
     <div className="tv-replay-progress"><span style={{width:percent+'%'}}/></div>
     <div className="tv-replay-controls"><div className="tv-replay-playback"><button className="tv-replay-play" type="button" disabled={replayAtEnd} onClick={()=>setPlaying(v=>!v)} aria-label={playing?'Pause replay':'Play replay'}>{playing?<Pause size={16}/>:<Play size={16}/>}<span className="replay-control-text">{playing?'Pause':'Play'}</span></button><button type="button" disabled={replayAtEnd} onClick={()=>advance(1)} title="Next M1 candle (→)"><SkipForward size={16}/><span className="replay-control-text">Step</span></button><button type="button" disabled={replayAtEnd} onClick={()=>advance(5)} title="Reveal next 5 completed M1 candles"><FastForward size={16}/><span className="replay-control-text">+5</span></button>
      <label className="tv-replay-speed"><span>Speed</span><select value={speed} onChange={e=>setSpeed(Number(e.target.value))}>{speeds.map(v=><option value={v} key={v}>{v}×</option>)}</select></label></div>
-     <div className="tv-replay-chart-controls"><label aria-label="Chart timeframe"> <select aria-label="Chart timeframe" value={timeframe} onChange={e=>setTimeframe(Number(e.target.value) as 1|5|15|60)}><option value={1}>M1</option><option value={5}>M5</option><option value={15}>M15</option><option value={60}>H1</option></select></label><button type="button" className={emaVisible?'is-selected':''} onClick={()=>setEmaVisible(v=>!v)} title="Toggle EMA 20 and 50">EMA</button><button type="button" onClick={()=>{setPlaying(false);sessionRef.current=null;setSession(null);}} title="Choose a different historical session"><CalendarDays size={15}/><span className="replay-control-text">Date</span></button><button type="button" onClick={captureChart} title="Save a clean chart image for your trading journal or content"><Download size={15}/><span className="replay-control-text">Save</span></button><button type="button" onClick={()=>setShowHelp(v=>!v)} title="Keyboard shortcuts" aria-label="Keyboard shortcuts">?</button><button type="button" onClick={()=>{noEarlierRef.current=false;void loadEarlier()}} disabled={loadingEarlier} title="Load earlier candles">{loadingEarlier?'Loading…':'Earlier'}</button><button type="button" className={showTicket?'is-selected':''} aria-expanded={showTicket} onClick={()=>{setShowTicket(v=>!v);setShowReview(false)}}><TrendingUp size={15}/> Trade</button><button type="button" className={showReview?'is-selected':''} aria-expanded={showReview} onClick={()=>{setShowReview(v=>!v);setShowTicket(false)}}><BookOpen size={15}/> Review</button></div></div>
-    {showHelp&&<div className="tv-replay-shortcuts">Space: Play/pause · →: Next candle · B: Buy · S: Sell · X: Close trade · ?: Help</div>}
-    <div className="tv-replay-grid"><div className="tv-replay-chart-panel"><div className="tv-replay-chart-heading"><span><Activity size={15}/> GOLD · {timeframe===60?'H1':'M'+timeframe} · COMPLETED CANDLES</span><strong>{loadingEarlier?'Loading earlier candles…':Math.max(0,bars.length-1-session.index)+' M1 candles remaining'}</strong></div><div className="tv-replay-chart" ref={chartDiv} aria-label="Historical candlestick chart with only revealed candles"/>
+     <div className="tv-replay-chart-controls"><label aria-label="Chart timeframe"> <select aria-label="Chart timeframe" value={timeframe} onChange={e=>setTimeframe(Number(e.target.value) as 1|5|15|60|240|1440)}><option value={1}>1m</option><option value={5}>5m</option><option value={15}>15m</option><option value={60}>1H</option><option value={240}>4H</option><option value={1440}>1D</option></select></label><button type="button" className={emaVisible?'is-selected':''} onClick={()=>setEmaVisible(v=>!v)} title="Toggle EMA 20 and 50">EMA</button><button type="button" onClick={()=>{setPlaying(false);setDateDraft(day);setShowDate(true);}} title="Choose a different historical session"><CalendarDays size={15}/><span className="replay-control-text">Date</span></button><button type="button" onClick={captureChart} title="Save a clean chart image for your trading journal or content"><Camera size={15}/><span className="replay-control-text">Save Chart</span></button><button type="button" className={showTicket?'is-selected':''} aria-expanded={showTicket} onClick={()=>{setShowTicket(v=>!v);setShowReview(false)}}><TrendingUp size={15}/> Trade</button><button type="button" className={showReview?'is-selected':''} aria-expanded={showReview} onClick={()=>{setShowReview(v=>!v);setShowTicket(false)}}><BookOpen size={15}/> Review</button></div></div>
+    <div className="tv-replay-grid"><div className="tv-replay-chart-panel"><div className="tv-replay-chart-heading"><span><Activity size={15}/> GOLD · {timeframe===1440?'1D':timeframe===240?'4H':timeframe===60?'1H':timeframe+'m'} · COMPLETED CANDLES</span><strong>{loadingEarlier?'Loading earlier candles…':Math.max(0,bars.length-1-session.index)+' M1 candles remaining'}</strong></div><div className="tv-replay-chart" ref={chartDiv} tabIndex={0} aria-label="Historical candlestick chart with only revealed candles"/>
      <div className="tv-replay-chart-footer"><span><i className="tv-replay-up"/> Bull candle</span><span><i className="tv-replay-down"/> Bear candle</span><span>Scroll to zoom · Drag to inspect</span></div></div>
      <aside className="tv-replay-ticket" hidden={!showTicket} aria-label="Simulated trade panel"><button type="button" className="replay-panel-close" aria-label="Close trade panel" onClick={()=>setShowTicket(false)}><X size={16}/></button><span className="tv-replay-eyebrow">PAPER EXECUTION</span><h3>{showNewOrder?'Place a trade':session.pending&&(managePending||!selectedPosition)?'Pending order':selectedPosition?'Open positions':'Place a trade'}</h3>{(selectedPosition||session.pending)&&<button type="button" className="tv-replay-risk-sizing" onClick={()=>setShowNewOrder(v=>!v)}>{showNewOrder?'Manage positions':'Add a trade'}</button>}
       {!showNewOrder&&session.pending&&(managePending||!selectedPosition)?<div className="tv-replay-position"><p>{session.pending.side} {session.pending.type.toUpperCase()} · {price(session.pending.price)} · {session.pending.quantity} oz</p><p>Fills are simulated from future completed candles. Same-candle target fills are deferred because candle ordering is unknown.</p><button type="button" className="tv-replay-close-position" onClick={()=>{if(sessionRef.current)setCurrent(replayCancelPending(sessionRef.current));setNotice('Pending paper order cancelled.')}}>Cancel pending order</button>{selectedPosition&&<button type="button" className="tv-replay-risk-sizing" onClick={()=>setManagePending(false)}>Manage open positions</button>}</div>:!showNewOrder&&selectedPosition?<div className="tv-replay-position">{session.pending&&<button type="button" className="tv-replay-risk-sizing" onClick={()=>setManagePending(true)}>View pending order</button>}{positions.length>1&&<label>Manage position<select aria-label="Position to manage" value={selectedPosition.id} onChange={e=>{const p=positions.find(item=>item.id===e.target.value);if(p){setSelectedPositionId(p.id);setAdjustStop(String(p.stop));setAdjustTarget(String(p.target))}}}>{positions.map(p=><option key={p.id} value={p.id}>{p.side==='BUY'?'Long':'Short'} · {p.quantity} oz · {price(p.entry)}</option>)}</select></label>}<div><span className={selectedPosition.side==='BUY'?'is-profit':'is-loss'}>{selectedPosition.side==='BUY'?'LONG':'SHORT'}</span><strong className={selectedMark&&selectedMark.unrealized>=0?'is-profit':'is-loss'}>{selectedMark?(selectedMark.unrealized>=0?'+':'')+money(selectedMark.unrealized):'—'}</strong></div><dl><dt>Entry</dt><dd>{price(selectedPosition.entry)}</dd><dt>Stop loss</dt><dd>{price(selectedPosition.stop)}</dd><dt>Take profit</dt><dd>{price(selectedPosition.target)}</dd><dt>Size</dt><dd>{selectedPosition.quantity} oz</dd></dl>
        <div className="tv-replay-edit-position"><label>New stop price<input type="number" step="0.01" value={adjustStop} onChange={e=>setAdjustStop(e.target.value)}/></label><label>New target price<input type="number" step="0.01" value={adjustTarget} onChange={e=>setAdjustTarget(e.target.value)}/></label></div>
        <div className="tv-replay-position-actions"><button type="button" onClick={()=>modifyPosition(false)}>Update SL / TP</button><button type="button" onClick={()=>modifyPosition(true)}>Move stop to entry</button></div>
-       <button type="button" className="tv-replay-close-position" onClick={close}>Close position (X)</button></div>:
+       <button type="button" className="tv-replay-close-position" onClick={close}>Close position</button></div>:
       <><div className="tv-replay-ticket-inputs"><label>Order type<select aria-label="Paper order type" value={orderType} onChange={e=>setOrderType(e.target.value as typeof orderType)}><option value="market">Market</option><option value="limit">Limit</option><option value="stop">Stop</option></select></label>{orderType!=='market'&&<label>Order price<input aria-label="Pending order price" type="number" min="0.01" step="0.01" value={orderPrice} onChange={e=>setOrderPrice(e.target.value)}/></label>} {orderType!=='market'&&<button type="button" className="tv-replay-risk-sizing" onClick={()=>{pickingRef.current=!pickingRef.current;setPickingPrice(pickingRef.current)}}>{pickingPrice?'Click chart to set price…':'Set order price on chart'}</button>}<label>Quantity · oz<input type="number" min="0.01" step="0.1" value={quantity} onChange={e=>setQuantity(e.target.value)}/></label><label>Stop distance · $/oz<input type="number" min="0.01" step="0.5" value={stopDistance} onChange={e=>setStopDistance(e.target.value)}/></label><label>Target distance · $/oz<input type="number" min="0.01" step="0.5" value={targetDistance} onChange={e=>setTargetDistance(e.target.value)}/></label></div>
       <div className="tv-replay-risk"><div><span>Planned stop risk</span><strong>{money(estimatedRisk)}</strong></div>
        <div><span>Account risk</span><strong className={riskPercent>2?'is-loss':''}>{Number.isFinite(riskPercent)?riskPercent.toFixed(2)+'%':'—'}</strong></div>
@@ -324,7 +332,7 @@ export function MarketReplay({client,theme,onClose,initialWorkout,onHistoryChang
       <div className="tv-replay-orders"><button type="button" className="tv-replay-buy" onClick={()=>enter('BUY')} disabled={replayAtEnd||Boolean(session.pending&&orderType!=='market')}><TrendingUp size={16}/> BUY / LONG</button><button type="button" className="tv-replay-sell" onClick={()=>enter('SELL')} disabled={replayAtEnd||Boolean(session.pending&&orderType!=='market')}><TrendingDown size={16}/> SELL / SHORT</button></div></>}
       <details className="tv-replay-settings" open={showCosts} onToggle={e=>setShowCosts((e.currentTarget as HTMLDetailsElement).open)}><summary><Settings2 size={14}/> Execution assumptions</summary><div><label>Spread · $/oz<input type="number" min="0" max="30" step="0.05" value={costs.spread} onChange={e=>setCosts(v=>({...v,spread:Number(e.target.value)}))}/></label><label>Slippage · $/oz<input type="number" min="0" max="10" step="0.01" value={costs.slippage} onChange={e=>setCosts(v=>({...v,slippage:Number(e.target.value)}))}/></label><label>Fee · $/oz / side<input type="number" min="0" max="5" step="0.01" value={costs.feePerOunce} onChange={e=>setCosts(v=>({...v,feePerOunce:Number(e.target.value)}))}/></label><label>Leverage<input type="number" min="1" max="100" step="1" value={costs.leverage} onChange={e=>setCosts(v=>({...v,leverage:Number(e.target.value)}))}/></label></div><p>Practice assumptions only. Historical M1 bars do not resolve the exact order of intrabar stop/target touches; replay assumes the stop first when both are hit.</p></details>
      </aside></div>
-    <section className="tv-replay-review" hidden={!showReview} aria-label="Practice review"><button type="button" className="replay-panel-close" aria-label="Close review panel" onClick={()=>setShowReview(false)}><X size={16}/></button><div className="tv-replay-stats">{[['Win rate',metrics?metrics.winRate.toFixed(1)+'%':'0%'],['Profit factor',metrics?(Number.isFinite(metrics.profitFactor)?metrics.profitFactor.toFixed(2):'∞'):'—'],['Max drawdown',metrics?metrics.maxDrawdown.toFixed(2)+'%':'0%'],['Best win streak',metrics?String(metrics.bestStreak):'0']].map(([label,val])=><div key={label}><span>{label}</span><strong>{val}</strong></div>)}</div>
+    <section className="tv-replay-review" hidden={!showReview} aria-label="Practice review"><button type="button" className="replay-panel-close" aria-label="Close review panel" onClick={()=>setShowReview(false)}><X size={16}/></button><div className="tv-replay-stats">{[['Win rate',metrics&&metrics.trades?metrics.winRate.toFixed(1)+'%':'—'],['Profit factor',metrics&&metrics.trades?(Number.isFinite(metrics.profitFactor)?metrics.profitFactor.toFixed(2):'∞'):'—'],['Max drawdown',metrics?metrics.maxDrawdown.toFixed(2)+'%':'0%'],['Best win streak',metrics?String(metrics.bestStreak):'0']].map(([label,val])=><div key={label}><span>{label}</span><strong>{val}</strong></div>)}</div>
      <div className="tv-replay-milestones"><div><span className="tv-replay-eyebrow"><Trophy size={14}/> PRACTICE PROGRESS</span><strong>{milestones.filter(x=>x.done).length} / {milestones.length} completed</strong></div>
       <div>{milestones.map((goal,i)=><span key={goal.label} className={goal.done?'is-done':''}><CheckCircle2 size={15}/>{i+1}. {goal.label}</span>)}</div></div>
      {import.meta.env.VITE_TRAINING_PREVIEW==='true'&&<div className="tv-replay-finish"><div><strong>Finished this rep?</strong><p>Save your decision and notes, whether you traded or observed.</p></div><button type="button" disabled={finished||savingHistory} onClick={()=>void finishPractice()}>{finished?'Rep saved':savingHistory?'Saving…':'Finish rep'}</button>{finished&&practiceSweep&&momentOrdinal+1<workoutMoments.length&&<button type="button" onClick={nextRep}>Next rep <ArrowRight size={14}/></button>}</div>}<div className="tv-replay-journal-head"><div><span className="tv-replay-eyebrow"><Flag size={14}/> SESSION JOURNAL</span><h3>Every trade is a lesson.</h3></div><div><button type="button" disabled={!session.trades.length} onClick={()=>exportJournal(session,annotations,day)}><Download size={15}/> Export CSV</button><button type="button" onClick={reset}><RotateCcw size={15}/> Reset session</button></div></div>
@@ -333,6 +341,7 @@ export function MarketReplay({client,theme,onClose,initialWorkout,onHistoryChang
      {selected&&<div className="tv-replay-trade-notes"><strong>Note for {selected.side} at {utc(selected.entryTime)} UTC</strong><textarea value={annotations[selected.id]||''} placeholder="Why did you enter? What worked? What would you change?" maxLength={1200} onChange={e=>setAnnotations(v=>({...v,[selected.id]:e.target.value}))}/><button type="button" onClick={()=>setSelectedTrade(null)}>Close note</button></div>}
      <label className="tv-replay-general-notes"><span>Session notes · what did you learn?</span><textarea value={notes} onChange={e=>setNotes(e.target.value)} maxLength={3000} placeholder="Market context, your plan, mistakes, and what you'd do next time…"/></label>
     </section>
+    {showDate&&<div className="tv-replay-date-backdrop" onClick={()=>!loading&&setShowDate(false)}><section role="dialog" aria-modal="true" aria-labelledby="replay-date-title" className="tv-replay-date-dialog" onClick={e=>e.stopPropagation()}><div><h3 id="replay-date-title">Go to date</h3><button type="button" aria-label="Close date picker" disabled={loading} onClick={()=>setShowDate(false)}><X size={16}/></button></div><p>Choose a completed historical UTC day.</p><input aria-label="New replay date" type="date" max={yesterday()} value={dateDraft} disabled={loading} onChange={e=>setDateDraft(e.target.value)}/>{error&&<p role="alert">{error}</p>}<button type="button" disabled={loading||!dateDraft} onClick={()=>void start(dateDraft)}>{loading?'Loading historical candles…':'Go to Date'}</button></section></div>}
     {(notice||error)&&<div role={error?'alert':'status'} className={'tv-replay-feedback'+(error?' is-error':'')}>{error||notice}</div>}
    </div>}
   </section>

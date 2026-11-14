@@ -137,7 +137,7 @@ export function replayMetrics(state:ReplaySession,bars:ReplayBar[],costs:ReplayC
    profitFactor:lossGross>0?winGross/lossGross:winGross>0?Infinity:0,
    maxDrawdown,bestStreak,returnPercent:100*(mark.equity-state.initialBalance)/state.initialBalance};
 }
-export function aggregateReplayBars(visible:ReplayBar[],minutes:1|5|15|60):ReplayBar[]{
+export function aggregateReplayBars(visible:ReplayBar[],minutes:1|5|15|60|240|1440):ReplayBar[]{
  if(minutes===1)return visible;
  const seconds=minutes*60,groups=new Map<number,ReplayBar[]>();
  for(const b of visible){const time=Math.floor(b.time/seconds)*seconds;let arr=groups.get(time);if(!arr){arr=[];groups.set(time,arr)}arr.push(b)}

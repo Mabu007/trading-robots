@@ -156,6 +156,18 @@ describe('multiple positions and pending order interaction',()=>{
 });
 
 describe('extended replay history',()=>{
+ it('aggregates 4H and daily candles on UTC boundaries without including future prices',()=>{
+  const midnight=Date.parse('2026-11-06T00:00:00Z')/1000;
+  const candles=Array.from({length:1800},(_,i)=>({time:midnight+i*60,open:100,high:102,low:99,close:101}));
+  candles[1500]={...candles[1500],high:900,close:899};
+  const visible=replayVisibleBars(candles,beginReplay(candles,1450));
+  for(const interval of [240,1440] as const){
+   const aggregated=aggregateReplayBars(visible,interval);
+   expect(aggregated.every(c=>c.time%(interval*60)===0)).toBe(true);
+   expect(aggregated.at(-1)?.time).toBe(midnight+86400);
+   expect(Math.max(...aggregated.map(c=>c.high))).toBe(102);
+  }
+ });
  it('retains earlier candles across timeframes while keeping later candles hidden',()=>{
   const history=Array.from({length:4000},(_,i)=>({time:base+i*60,open:100,high:102,low:99,close:101}));
   history[3100]={...history[3100],high:900,close:899};
