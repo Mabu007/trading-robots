@@ -1,8 +1,36 @@
 import {describe,it,expect} from 'vitest';
-import {aggregateReplayBars,beginReplay,DEFAULT_REPLAY_COSTS,replayAdvance,replayClose,replayEMA,replayEnter,replayMetrics,replayModifyPosition,replayStep,replayVisibleBars,validateReplayBars,type ReplayBar} from './market-replay-engine';
+import {aggregateReplayBars,beginReplay,DEFAULT_REPLAY_COSTS,NEW_REPLAY_COSTS,replaySessionCosts,replayAdvance,replayClose,replayEMA,replayEnter,replayMetrics,replayModifyPosition,replayStep,replayVisibleBars,validateReplayBars,type ReplayBar} from './market-replay-engine';
 const base=Date.parse('2026-11-06T08:00:00Z')/1000;
 const bars:ReplayBar[]=Array.from({length:9},(_,i)=>({time:base+i*60,open:4000,high:4001,low:3999,close:4000}));
 const costs={...DEFAULT_REPLAY_COSTS,spread:0,slippage:0,feePerOunce:0,leverage:20};
+describe('ZAR account simulation',()=>{
+ it('keeps saved USD sessions in USD but starts an unsaved new date in ZAR',()=>{
+  const legacy={...DEFAULT_REPLAY_COSTS,leverage:20};
+  const restored=replaySessionCosts(NEW_REPLAY_COSTS,legacy);
+  expect(restored.currency).toBe('USD');
+  expect(restored.leverage).toBe(20);
+  expect(replaySessionCosts(restored)).toMatchObject({currency:'ZAR',usdZar:18,leverage:1});
+  const configured={...NEW_REPLAY_COSTS,usdZar:17.5};
+  expect(replaySessionCosts(configured)).toMatchObject({currency:'ZAR',usdZar:17.5,leverage:1});
+ });
+
+ const zar={...costs,currency:'ZAR' as const,usdZar:18,leverage:1};
+ it('converts USD notional, profit and fees into the persisted account currency',()=>{
+  const start=beginReplay(bars,0,10000);
+  const opened=replayEnter(start,bars,'BUY',0.1,5,10,zar);
+  expect(replayMetrics(opened,bars,zar).equity).toBeCloseTo(10000);
+  expect(()=>replayEnter(start,bars,'BUY',0.2,5,10,zar)).toThrow(/Insufficient/);
+  const moved=[...bars];moved[0]={...moved[0],close:4001};
+  const closed=replayClose(opened,moved,zar);
+  expect(closed.balance).toBeCloseTo(10001.8);
+ });
+ it('does not reinterpret legacy sessions when currency is absent',()=>{
+  const usd={...costs,leverage:1};
+  const opened=replayEnter(beginReplay(bars,0,10000),bars,'BUY',1,5,10,usd);
+  expect(opened.balance).toBe(10000);
+  expect(replayMetrics(opened,bars,usd).equity).toBe(10000);
+ });
+});
 describe('market replay has no lookahead or broker execution',()=>{
  it('never exposes future candles or fills using a hidden bar',()=>{
   const start=beginReplay(bars,1,10000);
@@ -156,6 +184,18 @@ describe('multiple positions and pending order interaction',()=>{
 });
 
 describe('extended replay history',()=>{
+ it('aggregates 4H and daily candles on UTC boundaries without including future prices',()=>{
+  const midnight=Date.parse('2026-11-06T00:00:00Z')/1000;
+  const candles=Array.from({length:1800},(_,i)=>({time:midnight+i*60,open:100,high:102,low:99,close:101}));
+  candles[1500]={...candles[1500],high:900,close:899};
+  const visible=replayVisibleBars(candles,beginReplay(candles,1450));
+  for(const interval of [240,1440] as const){
+   const aggregated=aggregateReplayBars(visible,interval);
+   expect(aggregated.every(c=>c.time%(interval*60)===0)).toBe(true);
+   expect(aggregated.at(-1)?.time).toBe(midnight+86400);
+   expect(Math.max(...aggregated.map(c=>c.high))).toBe(102);
+  }
+ });
  it('retains earlier candles across timeframes while keeping later candles hidden',()=>{
   const history=Array.from({length:4000},(_,i)=>({time:base+i*60,open:100,high:102,low:99,close:101}));
   history[3100]={...history[3100],high:900,close:899};
