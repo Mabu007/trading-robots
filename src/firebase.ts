@@ -109,8 +109,8 @@ export function connectFirebase(): Promise<CloudClient | null> {
     return {
       async listReplaySessions(){
         const uid=await currentUserId();
-        const snapshot=await storeSdk.getDocs(storeSdk.query(storeSdk.collection(db,'users',uid,'replaySessions'),storeSdk.orderBy('updatedAt','desc'),storeSdk.limit(400)));
-        return snapshot.docs.map((doc:any)=>summarizeReplayArchive({...doc.data(),id:doc.id} as ReplayArchive));
+        const snapshot=await storeSdk.getDocs(storeSdk.query(storeSdk.collection(db,'users',uid,'replaySessionIndex'),storeSdk.orderBy('updatedAt','desc'),storeSdk.limit(400)));
+        return snapshot.docs.map((doc:any)=>({...doc.data(),id:doc.id}) as ReplayArchiveSummary);
       },
       async loadReplaySession(id:string){
         if(!validArchiveId(id))throw Error('Invalid session identifier.');
@@ -127,12 +127,18 @@ export function connectFirebase(): Promise<CloudClient | null> {
         // rather than silently dropping a long-lived session.
         if(JSON.stringify(value).length>900000)throw Error('Session is too large for cloud sync. Its local copy is preserved.');
         const uid=await currentUserId();
-        await storeSdk.setDoc(storeSdk.doc(db,'users',uid,'replaySessions',value.id),value);
+        const batch=storeSdk.writeBatch(db);
+        batch.set(storeSdk.doc(db,'users',uid,'replaySessions',value.id),value);
+        batch.set(storeSdk.doc(db,'users',uid,'replaySessionIndex',value.id),summarizeReplayArchive(value));
+        await batch.commit();
       },
       async deleteReplaySession(id:string){
         if(!validArchiveId(id))throw Error('Invalid session identifier.');
         const uid=await currentUserId();
-        await storeSdk.deleteDoc(storeSdk.doc(db,'users',uid,'replaySessions',id));
+        const batch=storeSdk.writeBatch(db);
+        batch.delete(storeSdk.doc(db,'users',uid,'replaySessions',id));
+        batch.delete(storeSdk.doc(db,'users',uid,'replaySessionIndex',id));
+        await batch.commit();
       },
       async listPracticeRecords(){
         const uid=await currentUserId();
@@ -153,7 +159,7 @@ export function connectFirebase(): Promise<CloudClient | null> {
         const uid=await currentUserId();
         // Only records belonging to this signed-in account. Retired workouts are
         // cleared here only after explicit user confirmation in the UI.
-        for(const collectionName of ['replayRecords','replaySessions','practiceRecords']){
+        for(const collectionName of ['replayRecords','replaySessions','replaySessionIndex','practiceRecords']){
           while(true){
             const snapshot=await storeSdk.getDocs(storeSdk.query(storeSdk.collection(db,'users',uid,collectionName),storeSdk.limit(100)));
             if(snapshot.empty)break;
