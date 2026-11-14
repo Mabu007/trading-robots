@@ -88,7 +88,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  const [progressTime,setProgressTime]=useState(0);
  const sessionRef=useRef<ReplaySession|null>(null),chartDiv=useRef<HTMLDivElement|null>(null),modalRef=useRef<HTMLElement|null>(null);
  const drawingRef=useRef<ReturnType<typeof installChartTools>|null>(null);
- const chartRef=useRef<{chart:any;series:any;ema20:any;ema50:any;markers:any;lines:any[];lastBarTime?:number;lastBarCount?:number;firstBarTime?:number;lastTimeframe?:number;lastBarsRef?:ReplayBar[]} |null>(null);
+ const chartRef=useRef<{chart:any;series:any;ema20:any;ema50:any;markers:any;lines:any[];lastBarTime?:number;lastBarCount?:number;firstBarTime?:number;lastTimeframe?:number;lastBarsRef?:ReplayBar[];markerKey?:string} |null>(null);
  const uid=client.getProfile()?.uid||'local';
  const setCurrent=(next:ReplaySession)=>{sessionRef.current=next;setSession(next)};
  const recordDecision=(next:ReplaySession)=>{if(timelineRef.current)updateTimeline(recordReplayDecision(timelineRef.current,next));setCurrent(next)};
@@ -526,6 +526,16 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
   c.lastBarsRef=bars;c.lastBarCount=aggregates.length;c.lastBarTime=last?.time;c.firstBarTime=first?.time;c.lastTimeframe=timeframe;
   drawingRef.current?.updateCandles(aggregates as any);
 
+
+  const visibleNow=bars[session.index]?.time||0;
+  const markerSignature=[
+   timeframe,markerTradeRef.current.map(t=>t.id+':'+t.exitTime+':'+t.net).join('|'),
+   replayPositions(session).map(p=>p.id+':'+p.stop+':'+p.target).join('|'),
+   session.pending?.price||'',
+   reviewMode&&focusedTrade?Number(visibleNow>=focusedTrade.entryTime)+':'+Number(visibleNow>=focusedTrade.exitTime):''
+  ].join('~');
+  if(c.markerKey!==markerSignature){
+   c.markerKey=markerSignature;
   const marks:any[]=[];
   for(const t of markerTradeRef.current){
    marks.push({time:Math.floor(t.entryTime/(timeframe*60))*(timeframe*60) as any,position:t.side==='BUY'?'belowBar':'aboveBar',shape:'arrowUp',color:t.side==='BUY'?'#19a578':'#db6a6b',text:t.side==='BUY'?'L':'S'});
@@ -538,6 +548,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
   for(const p of replayPositions(session)){
    for(const [level,color,title] of [[p.entry,'#88a7ec','ENTRY'],[p.stop,'#db6a6b','STOP'],[p.target,'#19a578','TARGET']] as const)
     c.lines.push(c.series.createPriceLine({price:level,color,lineWidth:1,lineStyle:2,axisLabelVisible:true,title}));
+  }
   }
   const pending=pendingRangeRef.current;if(pending){pendingRangeRef.current=null;c.chart.timeScale().setVisibleLogicalRange({from:pending.from+pending.added,to:pending.to+pending.added});}else if(follow)c.chart.timeScale().scrollToRealTime();
  },[aggregates,session,timeframe]);
