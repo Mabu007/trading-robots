@@ -39,7 +39,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  const [ticketXY,setTicketXY]=useState<{x:number;y:number}|null>(null);
  const [isMobile,setIsMobile]=useState(false),[ticketMinimized,setTicketMinimized]=useState(false);
  useEffect(()=>{
-  const media=window.matchMedia('(max-width: 720px)');
+  const media=window.matchMedia('(max-width: 720px), (orientation: landscape) and (max-height: 540px) and (max-width: 980px)');
   const sync=()=>{setIsMobile(media.matches);setTicketXY(null);if(!media.matches)setTicketMinimized(false)};
   sync();
   media.addEventListener?.('change',sync);
