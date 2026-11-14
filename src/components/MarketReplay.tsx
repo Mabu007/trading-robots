@@ -12,7 +12,7 @@ import {aggregateReplayBars,beginReplay,NEW_REPLAY_COSTS,replayAdvance,replayClo
 import {ReplayIndicators} from './ReplayIndicators';
 import type {IndicatorSpec} from '../replay-indicators';
 import {ReplayPositionPreview,type PositionPreview} from './ReplayPositionPreview';
-import {visibleArchivedTrades} from '../replay-journal';
+import {hideArchivedTrade,hiddenReplayTradeIds,visibleArchivedTrades} from '../replay-journal';
 import {formatReplayDuration,importLegacyReplayArchives,listLocalReplayArchives,mergeReplaySummaries,readLocalReplayArchive,removeLocalReplayArchive,saveLocalReplayArchive,type ReplayArchive,type ReplayArchiveSummary} from '../replay-session-store';
 import type {ReplayTrade} from '../market-replay-engine';
 import './market-replay.css';
@@ -120,6 +120,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
    firstIndex:firstIndexRef.current,session:current,timeline:timelineRef.current,
    costs,notes,annotations,activeSeconds:activeSecondsRef.current,
    drawingState:(()=>{try{return localStorage.getItem(`trading-vibes:replay-drawings:${uid}:${attemptId}`)||undefined}catch{return undefined}})(),
+   hiddenTradeIds:hiddenReplayTradeIds(uid,attemptId),
    createdAt:sessionCreatedAt,updatedAt:now};
  };
  const syncArchive=async(value:ReplayArchive)=>{
@@ -243,6 +244,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
    setPlaying(false);setProgressTime(Date.now());setLoadingStatus('');
    if(priorResult.status==='rejected')setNotice('Earlier candles will load as you scroll left.');
    if(source&&!sourceTrade){
+    for(const tradeId of source.hiddenTradeIds||[])hideArchivedTrade(uid,id,tradeId);
     saveLocalReplayArchive(uid,source);
     if(source.drawingState)try{localStorage.setItem(`trading-vibes:replay-drawings:${uid}:${id}`,source.drawingState)}catch{}
 
