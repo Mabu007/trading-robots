@@ -307,7 +307,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
   }catch(e){setPlaying(false);setError(e instanceof Error?e.message:'Unable to rewind this saved session.')}
  };
  const enter=(side:ReplaySide)=>{
-  if(!sessionRef.current)return;
+  if(!sessionRef.current||reviewing)return;
   setPlaying(false);setError('');
   if(!preview||preview.side!==side)return;
   try{const previous=sessionRef.current;const sl=Math.abs(preview.entry-preview.stop),tp=Math.abs(preview.target-preview.entry);const next=orderType==='market'?replayEnter(sessionRef.current,bars,side,number(quantity),sl,tp,costs):replayPlacePending(sessionRef.current,bars,side,orderType,preview.entry,number(quantity),sl,tp,costs);
@@ -315,6 +315,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
   }catch(e){setError(e instanceof Error?e.message:'Order rejected')}
  };
  const previewOrder=(side:ReplaySide)=>{
+  if(reviewing){setNotice('This is the original trade replay. Start a new workspace to practise a new trade.');return}
   if(!currentBar)return;setPlaying(false);setError('');
   const entry=orderType==='market'?(side==='BUY'?currentBar.close+costs.spread+costs.slippage:currentBar.close-costs.slippage):(Number(orderPrice)>0?Number(orderPrice):orderType==='limit'?(side==='BUY'?currentBar.close-2:currentBar.close+2):(side==='BUY'?currentBar.close+2:currentBar.close-2));
   const dir=side==='BUY'?1:-1,stop=entry-dir*Number(stopDistance),target=entry+dir*Number(targetDistance);
