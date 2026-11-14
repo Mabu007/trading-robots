@@ -154,3 +154,17 @@ describe('multiple positions and pending order interaction',()=>{
   state=replayStep(state,input,costs);expect(replayPositions(state)).toHaveLength(0);expect(state.trades).toHaveLength(2);expect(state.trades.map(t=>t.reason)).toEqual(['SESSION_END','SESSION_END']);
  });
 });
+
+describe('extended replay history',()=>{
+ it('retains earlier candles across timeframes while keeping later candles hidden',()=>{
+  const history=Array.from({length:4000},(_,i)=>({time:base+i*60,open:100,high:102,low:99,close:101}));
+  history[3100]={...history[3100],high:900,close:899};
+  const state=beginReplay(history,3000);const seen=replayVisibleBars(history,state);
+  expect(seen).toHaveLength(3001);
+  for(const tf of [1,5,15,60] as const){
+   const aggregated=aggregateReplayBars(seen,tf);
+   expect(aggregated.length).toBeGreaterThan(40);
+   expect(Math.max(...aggregated.map(bar=>bar.high))).toBe(102);
+  }
+ });
+});

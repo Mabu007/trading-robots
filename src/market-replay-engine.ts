@@ -13,7 +13,7 @@ const finite=(value:number)=>Number.isFinite(value);
 export const DEFAULT_REPLAY_COSTS:ReplayCosts={spread:0.25,slippage:0.05,feePerOunce:0.03,leverage:20};
 export function validateReplayBars(bars:ReplayBar[]){
  let last=0;
- if(!Array.isArray(bars)||bars.length<2||bars.length>1500)throw Error('Choose a UTC day containing at least two valid M1 candles.');
+ if(!Array.isArray(bars)||bars.length<2||bars.length>12000)throw Error('Choose a historical range containing at least two valid M1 candles (maximum 12,000).');
  for(const bar of bars){
   if(!Number.isSafeInteger(bar.time)||bar.time<=last||bar.time%60!==0||
    ![bar.open,bar.high,bar.low,bar.close].every(v=>finite(v)&&v>0)||

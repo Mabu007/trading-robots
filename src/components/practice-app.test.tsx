@@ -13,7 +13,8 @@ describe('practice redesign',()=>{
  it('offers workouts and lab without the retired workspace entry',()=>{
   const html=renderToStaticMarkup(<PracticeApp client={{getProfile:()=>({uid:'test',displayName:'Gift'})} as any} theme="light" onThemeToggle={()=>{}} onSignOut={()=>{}}/>);
   expect(html).toContain('Liquidity Sweep Fundamentals');
-  expect(html).toContain('Market Lab');
+  expect(html).toContain('Market Replay');
+  expect(html).toContain('Challenges');
   expect(html).not.toContain('Existing workspace');
   expect(html).toContain('Gift');
  });
