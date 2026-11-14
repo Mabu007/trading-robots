@@ -20,7 +20,7 @@ export function replaySessionCosts(current:ReplayCosts,saved?:ReplayCosts):Repla
 }
 export function validateReplayBars(bars:ReplayBar[]){
  let last=0;
- if(!Array.isArray(bars)||bars.length<2||bars.length>50000)throw Error('Choose a historical range containing at least two valid M1 candles (maximum 50,000).');
+ if(!Array.isArray(bars)||bars.length<2)throw Error('Choose a historical range containing at least two completed M1 candles.');
  for(const bar of bars){
   if(!Number.isSafeInteger(bar.time)||bar.time<=last||bar.time%60!==0||
    ![bar.open,bar.high,bar.low,bar.close].every(v=>finite(v)&&v>0)||
