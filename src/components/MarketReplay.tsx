@@ -16,7 +16,7 @@ const price=(value:number)=>new Intl.NumberFormat('en-US',{minimumFractionDigits
 const utc=(timestamp:number)=>new Date(timestamp*1000).toLocaleString('en-GB',{timeZone:'UTC',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});
 const yesterday=()=>new Date(Date.now()-86400000).toISOString().slice(0,10);
 const number=(text:string)=>Number(text);
-type SavedSession={version:2;day:string;session:ReplaySession;firstIndex:number;notes:string;costs:ReplayCosts;annotations:Record<string,string>;attemptId?:string;finished?:boolean};
+type SavedSession={version:2;day:string;session:ReplaySession;firstIndex:number;notes:string;costs:ReplayCosts;annotations:Record<string,string>;attemptId?:string;finished?:boolean;momentOrdinal?:number};
 function exportJournal(session:ReplaySession,notes:Record<string,string>,day:string){
  const header=['Side','Entry (UTC)','Exit (UTC)','Quantity oz','Entry','Stop','Target','Exit','Reason','Gross USD','Total fees USD','Net USD','Balance USD','Notes'];
  const clean=(v:unknown)=>'"'+String(v??'').replaceAll('"','""')+'"';
@@ -30,6 +30,7 @@ const speeds=[0.5,1,2,4,8,16] as const;
 export function MarketReplay({client,theme,onClose,initialWorkout=false,onHistoryChange}:Props){
  const [day,setDay]=useState(yesterday),[startClock,setStartClock]=useState('08:00'),[startingBalance,setStartingBalance]=useState('10000');
  const [practiceSweep,setPracticeSweep]=useState(initialWorkout);
+ const [momentOrdinal,setMomentOrdinal]=useState(0);
  const [attemptId,setAttemptId]=useState<string>(()=>crypto.randomUUID()),[finished,setFinished]=useState(false),[savingHistory,setSavingHistory]=useState(false);
  const [bars,setBars]=useState<ReplayBar[]>([]),[session,setSession]=useState<ReplaySession|null>(null),[firstIndex,setFirstIndex]=useState(0);
  const [loading,setLoading]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
@@ -52,6 +53,7 @@ export function MarketReplay({client,theme,onClose,initialWorkout=false,onHistor
  const currentBar=session?bars[session.index]:null;
  const replayAtEnd=Boolean(session&&(finished||session.index>=bars.length-1));
  const metrics=useMemo(()=>session&&currentBar?replayMetrics(session,bars,costs):null,[session,bars,costs,currentBar]);
+ const workoutMoments=useMemo(()=>practiceSweep?findSweepMoments(bars):[],[practiceSweep,bars]);
  const visible=useMemo(()=>session?replayVisibleBars(bars,session):[],[bars,session]);
  const aggregates=useMemo(()=>aggregateReplayBars(visible,timeframe),[visible,timeframe]);
  const mark=useMemo(()=>session&&currentBar?replayMark(session,currentBar,costs):null,[session,currentBar,costs]);
@@ -71,7 +73,7 @@ export function MarketReplay({client,theme,onClose,initialWorkout=false,onHistor
  ];
  const start=async()=>{
   if(loading)return;
-  setLoading(true);setError('');setNotice('');setAttemptId(crypto.randomUUID());setFinished(false);
+  setLoading(true);setError('');setNotice('');setAttemptId(crypto.randomUUID());setFinished(false);setMomentOrdinal(0);
   try{
    if(!/^\d{4}-\d{2}-\d{2}$/.test(day)||day>yesterday())throw Error('Choose a completed historical UTC day.');
    validateReplayCosts(costs);
@@ -86,19 +88,19 @@ export function MarketReplay({client,theme,onClose,initialWorkout=false,onHistor
    const desired=practiceSweep?Math.max(0,moments[0]-5):candles.findIndex(c=>c.time*1000>=clock);
    if(desired<0||desired>=candles.length-1)throw Error('No candles after the chosen replay start time. Try another session or date.');
    const initial=Math.max(0,desired),startEquity=number(startingBalance);
-   let next=beginReplay(candles,initial,startEquity),resume=false;
+   let next=beginReplay(candles,initial,startEquity),resume=false,restoredFirst=initial;
    try{
     const saved=localStorage.getItem(sessionKey);
     if(saved){const parsed=JSON.parse(saved) as SavedSession;
      if(parsed.version===2&&parsed.day===day&&parsed.session&&parsed.session.index>=initial&&parsed.session.index<candles.length&&
       Number.isFinite(parsed.session.balance)&&parsed.session.initialBalance===startEquity&&
       (parsed.session.position===null||typeof parsed.session.position?.entry==='number')&&Array.isArray(parsed.session.trades)){
-      next=parsed.session;setAttemptId(parsed.attemptId||crypto.randomUUID());setFinished(parsed.finished===true);setNotes(typeof parsed.notes==='string'?parsed.notes:'');setAnnotations(parsed.annotations||{});resume=true;
+      next=parsed.session;if(Number.isInteger(parsed.firstIndex)&&parsed.firstIndex>=initial&&parsed.firstIndex<=parsed.session.index){restoredFirst=parsed.firstIndex;setMomentOrdinal(Math.max(0,Math.min(moments.length-1,parsed.momentOrdinal||0)))}setAttemptId(parsed.attemptId||crypto.randomUUID());setFinished(parsed.finished===true);setNotes(typeof parsed.notes==='string'?parsed.notes:'');setAnnotations(parsed.annotations||{});resume=true;
       if(parsed.costs)validateReplayCosts(parsed.costs),setCosts(parsed.costs);
      }
     }
    }catch{/* Invalid browser-only practice saves are ignored. */}
-   setBars(candles);setFirstIndex(initial);setCurrent(next);
+   setBars(candles);setFirstIndex(restoredFirst);setCurrent(next);
    const restored=replayPositions(next)[0];setSelectedPositionId(restored?.id||'');setAdjustStop(restored?String(restored.stop):'');setAdjustTarget(restored?String(restored.target):'');
    setPlaying(false);setProgressTime(Date.now());
    setNotice(resume?'Your last practice session is restored.':practiceSweep?`${moments.length} matching ${moments.length===1?'moment':'moments'} found. Replay begins before the first confirmation.`:'Market replay ready. Future candles are hidden. Good trading.');
@@ -108,20 +110,25 @@ export function MarketReplay({client,theme,onClose,initialWorkout=false,onHistor
  useEffect(()=>{
   if(!session||!bars.length)return;
   const timer=window.setTimeout(()=>{
-   try{localStorage.setItem(sessionKey,JSON.stringify({version:2,day,session,firstIndex,notes,costs,annotations,attemptId,finished} satisfies SavedSession))}catch{}
+   try{localStorage.setItem(sessionKey,JSON.stringify({version:2,day,session,firstIndex,notes,costs,annotations,attemptId,finished,momentOrdinal} satisfies SavedSession))}catch{}
   },350);return()=>window.clearTimeout(timer);
- },[session,bars,sessionKey,day,firstIndex,notes,costs,annotations,attemptId,finished]);
+ },[session,bars,sessionKey,day,firstIndex,notes,costs,annotations,attemptId,finished,momentOrdinal]);
  const finishPractice=async()=>{
   const current=sessionRef.current;if(!current||finished||savingHistory)return;
   if(current.index<=firstIndex){setError('Reveal at least one candle before finishing your practice.');return}
   if(replayPositions(current).length||current.pending){setError('Close simulated positions and cancel pending orders before finishing.');return}
   setPlaying(false);setError('');setSavingHistory(true);
   const record:PracticeRecord={id:attemptId,kind:practiceSweep?'sweep':'free',day,completedAt:new Date().toISOString(),candlesViewed:current.index-firstIndex,tradeCount:current.trades.length,net:current.trades.reduce((sum,t)=>sum+t.net,0),notes:notes.trim().slice(0,3000)};
-  try{saveLocalHistory(uid,record);setFinished(true);onHistoryChange?.();setNotice('Practice saved on this device. Syncing to your account…');
-   try{await client.savePracticeRecord(record);saveLocalHistory(uid,record,true);setNotice('Practice saved to your account.');onHistoryChange?.()}
-   catch{setNotice('Practice saved on this device. Account sync will retry when you open Progress.')}
-  }catch{setError('Could not save this practice on this device. Check browser storage and try again.')}
+  try{saveLocalHistory(uid,record);setFinished(true);setNotice('Rep saved on this device. Account sync will run in the background.');onHistoryChange?.();}
+  catch{setError('Could not save this practice on this device. Check browser storage and try again.')}
   finally{setSavingHistory(false)}
+ };
+ const nextRep=()=>{
+  if(!finished||!practiceSweep||momentOrdinal+1>=workoutMoments.length)return;
+  const nextOrdinal=momentOrdinal+1,initial=Math.max(0,workoutMoments[nextOrdinal]-5);
+  setPlaying(false);setError('');setNotes('');setAnnotations({});setSelectedTrade(null);setSelectedPositionId('');setShowNewOrder(false);
+  setAttemptId(crypto.randomUUID());setFinished(false);setMomentOrdinal(nextOrdinal);setFirstIndex(initial);
+  setCurrent(beginReplay(bars,initial,number(startingBalance)));setNotice('Next moment ready. The future remains hidden.');
  };
  const advance=useCallback((steps=1)=>{
   const current=sessionRef.current;
@@ -231,7 +238,7 @@ export function MarketReplay({client,theme,onClose,initialWorkout=false,onHistor
  const selected=session?.trades.find(t=>t.id===selectedTrade);
  return <div className={'tv-replay-backdrop'+(expanded?' is-expanded':'')} role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}>
   <section ref={modalRef} className={'tv-replay-modal'+(import.meta.env.VITE_TRAINING_PREVIEW==='true'?' tv-practice-redesign '+(theme==='light'?'tv-practice-light':'tv-practice-dark'):'')+(expanded?' is-expanded':'')} role="dialog" aria-modal="true" aria-label="Market Replay practice terminal">
-   <header className="tv-replay-top"><div className="tv-replay-brand"><span className="tv-replay-brand-icon"><BarChart3 size={21}/></span><div><span className="tv-replay-eyebrow">TRADING VIBES · PRACTICE LAB</span><h2>Market Replay <span>GOLD / XAUUSD</span></h2></div></div>
+   <header className="tv-replay-top"><div className="tv-replay-brand"><span className="tv-replay-brand-icon"><BarChart3 size={21}/></span><div><span className="tv-replay-eyebrow">TRADING VIBES · PRACTICE LAB</span><h2>{practiceSweep?'Liquidity Sweep Fundamentals':'Market Lab'} <span>GOLD / XAUUSD{practiceSweep&&workoutMoments.length?` · Rep ${momentOrdinal+1} of ${workoutMoments.length}`:''}</span></h2></div></div>
     <div className="tv-replay-top-actions">{session&&<button type="button" onClick={()=>void toggleFullscreen()} aria-label={expanded?'Exit full screen':'Full screen'}>{expanded?<Minimize2 size={16}/>:<Maximize2 size={16}/>}</button>}<button type="button" onClick={onClose} aria-label="Close replay"><X size={18}/></button></div>
    </header>
    {!session?<div className="tv-replay-setup"><div className="tv-replay-setup-main">
@@ -278,7 +285,7 @@ export function MarketReplay({client,theme,onClose,initialWorkout=false,onHistor
     <section className="tv-replay-review"><div className="tv-replay-stats">{[['Win rate',metrics?metrics.winRate.toFixed(1)+'%':'0%'],['Profit factor',metrics?(Number.isFinite(metrics.profitFactor)?metrics.profitFactor.toFixed(2):'∞'):'—'],['Max drawdown',metrics?metrics.maxDrawdown.toFixed(2)+'%':'0%'],['Best win streak',metrics?String(metrics.bestStreak):'0']].map(([label,val])=><div key={label}><span>{label}</span><strong>{val}</strong></div>)}</div>
      <div className="tv-replay-milestones"><div><span className="tv-replay-eyebrow"><Trophy size={14}/> PRACTICE PROGRESS</span><strong>{milestones.filter(x=>x.done).length} / {milestones.length} completed</strong></div>
       <div>{milestones.map((goal,i)=><span key={goal.label} className={goal.done?'is-done':''}><CheckCircle2 size={15}/>{i+1}. {goal.label}</span>)}</div></div>
-     {import.meta.env.VITE_TRAINING_PREVIEW==='true'&&<div className="tv-replay-finish"><div><strong>Finished practising?</strong><p>Save this session to your training history, whether you traded or observed.</p></div><button type="button" disabled={finished||savingHistory} onClick={()=>void finishPractice()}>{finished?'Session saved':savingHistory?'Saving…':'Finish practice'}</button></div>}<div className="tv-replay-journal-head"><div><span className="tv-replay-eyebrow"><Flag size={14}/> SESSION JOURNAL</span><h3>Every trade is a lesson.</h3></div><div><button type="button" disabled={!session.trades.length} onClick={()=>exportJournal(session,annotations,day)}><Download size={15}/> Export CSV</button><button type="button" onClick={reset}><RotateCcw size={15}/> Reset session</button></div></div>
+     {import.meta.env.VITE_TRAINING_PREVIEW==='true'&&<div className="tv-replay-finish"><div><strong>Finished this rep?</strong><p>Save your decision and notes, whether you traded or observed.</p></div><button type="button" disabled={finished||savingHistory} onClick={()=>void finishPractice()}>{finished?'Rep saved':savingHistory?'Saving…':'Finish rep'}</button>{finished&&practiceSweep&&momentOrdinal+1<workoutMoments.length&&<button type="button" onClick={nextRep}>Next rep <ArrowRight size={14}/></button>}</div>}<div className="tv-replay-journal-head"><div><span className="tv-replay-eyebrow"><Flag size={14}/> SESSION JOURNAL</span><h3>Every trade is a lesson.</h3></div><div><button type="button" disabled={!session.trades.length} onClick={()=>exportJournal(session,annotations,day)}><Download size={15}/> Export CSV</button><button type="button" onClick={reset}><RotateCcw size={15}/> Reset session</button></div></div>
      {session.trades.length?<div className="tv-replay-table-wrap"><table className="tv-replay-table"><thead><tr><th>Side</th><th>Entry · UTC</th><th>Exit · UTC</th><th>Entry</th><th>Exit</th><th>Reason</th><th>Net</th><th></th></tr></thead><tbody>{[...session.trades].reverse().map(t=><tr key={t.id}><td>{t.side==='BUY'?'LONG':'SHORT'}</td><td>{utc(t.entryTime)}</td><td>{utc(t.exitTime)}</td><td>{price(t.entry)}</td><td>{price(t.exit)}</td><td>{t.reason}</td><td className={t.net>=0?'is-profit':'is-loss'}>{t.net>=0?'+':''}{money(t.net)}</td><td><button type="button" onClick={()=>setSelectedTrade(t.id)}>Note <ChevronRight size={12}/></button></td></tr>)}</tbody></table></div>:
       <div className="tv-replay-no-trades"><Target size={22}/><span>Make your first trade when you see a setup. Record what you learned below.</span></div>}
      {selected&&<div className="tv-replay-trade-notes"><strong>Note for {selected.side} at {utc(selected.entryTime)} UTC</strong><textarea value={annotations[selected.id]||''} placeholder="Why did you enter? What worked? What would you change?" maxLength={1200} onChange={e=>setAnnotations(v=>({...v,[selected.id]:e.target.value}))}/><button type="button" onClick={()=>setSelectedTrade(null)}>Close note</button></div>}
