@@ -185,7 +185,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
    const source=archiveId?(readLocalReplayArchive(uid,archiveId)||await client.loadReplaySession(archiveId)):null;
    if(archiveId&&!source&&!initialTrade)throw Error('Saved session could not be found. It may have been deleted.');
    const chosenDay=source?.day||targetDay;
-   if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(chosenDay)||chosenDay>yesterday())throw Error('Choose a completed historical UTC day.');
+   if(!/^\d{4}-\d{2}-\d{2}$/.test(chosenDay)||chosenDay>yesterday())throw Error('Choose a completed historical UTC day.');
    const begin=Date.parse(chosenDay+'T00:00:00Z'),nextDay=begin+86400000;
    const end=source?Math.max(nextDay,Math.floor(source.lastTimestamp/86400)*86400000+86400000):nextDay;
    const historyStart=source?Math.floor(source.firstTimestamp/86400)*86400000:begin-86400000;
