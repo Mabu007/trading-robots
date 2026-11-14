@@ -147,7 +147,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
     if(at>=0){const index=Math.max(0,at-6);next=beginReplay(candles,index,stored?.session.initialBalance||startEquity);restoredFirst=index;restoredTimeline=null;resume=false;}
    }
    if(!resume)setCosts({...NEW_REPLAY_COSTS});
-   setSessionName(stored?.name||cloudRecord?.name||('Gold · '+day+' · '+startClock));
+   setSessionName(stored?.name||cloudRecord?.name||sessionName.trim()||('Gold · '+day+' · '+startClock));
    setElapsedSeconds(stored?.elapsedSeconds||cloudRecord?.spentSeconds||0);setStartedAt(stored?.startedAt||cloudRecord?.startedAt||new Date().toISOString());
    setReviewTrade(reviewingThis?cloudRecord!.trades!.find(t=>t.id===initialReviewTradeId)!:null);nextUnavailableRef.current=false;
    setDay(day);setShowDate(false);setShowTicket(false);setShowReview(false);setTicketMinimized(false);setPreview(null);setAttemptId(reviewingThis?selectedId:resume?restoredAttempt:selectedId);setFinished(false);setNotes(restoredNotes);setAnnotations(restoredAnnotations);
