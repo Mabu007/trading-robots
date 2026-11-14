@@ -365,3 +365,6 @@
  .tv-replay-page .tv-replay-review{max-height:87%!important}
 }
 @media (prefers-reduced-motion:reduce){.tv-replay-page .tv-replay-controls button,.tv-replay-page .replay-mobile-zoom button{transition:none!important}}
+
+/* A narrow phone stays readable with room for the market timestamp. */
+@media(max-width:365px){.tv-replay-page .tv-replay-top-actions button:first-child:not(:last-child){display:none!important}.tv-replay-page .tv-replay-mobile-stats>summary{padding:9px 7px}.tv-replay-page .tv-replay-quote>strong{font-size:14px!important}}
