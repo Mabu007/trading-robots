@@ -13,6 +13,11 @@ const finite=(value:number)=>Number.isFinite(value);
 /** USD-priced gold values are converted to the account's persisted currency. */
 export const replayFx=(costs:ReplayCosts)=>costs.currency==='ZAR'?(costs.usdZar??NaN):1;
 export const DEFAULT_REPLAY_COSTS:ReplayCosts={spread:0.25,slippage:0.05,feePerOunce:0.03,leverage:20};
+/** New dates default to an unlevered ZAR account; existing saved sessions keep their original currency. */
+export const NEW_REPLAY_COSTS:ReplayCosts={...DEFAULT_REPLAY_COSTS,leverage:1,currency:'ZAR',usdZar:18};
+export function replaySessionCosts(current:ReplayCosts,saved?:ReplayCosts):ReplayCosts{
+ return saved?{...saved,currency:saved.currency??'USD'}:current.currency==='ZAR'?{...current}:{...NEW_REPLAY_COSTS};
+}
 export function validateReplayBars(bars:ReplayBar[]){
  let last=0;
  if(!Array.isArray(bars)||bars.length<2||bars.length>50000)throw Error('Choose a historical range containing at least two valid M1 candles (maximum 50,000).');
