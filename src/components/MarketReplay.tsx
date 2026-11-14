@@ -65,6 +65,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  const timelineRef=useRef<ReplayTimeline|null>(null);
  const updateTimeline=(next:ReplayTimeline|null)=>{timelineRef.current=next;setTimeline(next)};
  const [loading,setLoading]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
+ const [loadingStatus,setLoadingStatus]=useState('');
  const [showDate,setShowDate]=useState(false),[dateDraft,setDateDraft]=useState('');
  const [loadingEarlier,setLoadingEarlier]=useState(false);
  const barsRef=useRef<ReplayBar[]>([]),firstIndexRef=useRef(0),earlierBusyRef=useRef(false),noEarlierRef=useRef(false),earlierRetryAtRef=useRef(0),loadEarlierRef=useRef<()=>void>(()=>{}),pendingRangeRef=useRef<{from:number;to:number;added:number}|null>(null);
@@ -106,62 +107,113 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  const estimatedRisk=Math.max(0,riskPerOunce*Number(quantity)||0);
  const riskPercent=mark&&mark.equity>0?estimatedRisk/mark.equity*100:0;
  const recommendedSize=mark&&riskPerOunce>0?Math.max(0.01,Math.floor(mark.equity*.01/riskPerOunce*100)/100):0;
- const start=async(targetDay=day)=>{
-  if(loading)return;
-  // Flush the current session before switching keys; a pending autosave may not have fired.
-  if(sessionRef.current&&bars.length&&targetDay!==day){
-   try{localStorage.setItem(sessionKey,JSON.stringify({version:4,day,asset,firstTimestamp:bars[0].time,lastTimestamp:bars[bars.length-1].time,session:sessionRef.current,firstIndex,notes,costs,annotations,attemptId,finished,timeline:timelineRef.current||undefined} satisfies SavedSession));}
-   catch{setError('Could not save the current session. Check browser storage before switching dates.');return;}
-  }
-  {const day=targetDay;
-  const sessionSuffix=uid+':'+asset+':'+day;
-  const sessionKey='trading-vibes:replay:zar:v4:'+sessionSuffix;
-  setLoading(true);setPlaying(false);setError('');setNotice('');noEarlierRef.current=false;earlierRetryAtRef.current=0;
+
+ const sessionSnapshot=():ReplayArchive|null=>{
+  const current=sessionRef.current,loaded=barsRef.current;
+  if(reviewMode||!current||!loaded.length)return null;
+  const now=new Date().toISOString();
+  return {version:5,id:attemptId,name:sessionName.trim().slice(0,85)||`Gold · ${day}`,
+   asset,day,startClock,startingBalance:current.initialBalance,
+   firstTimestamp:loaded[0].time,lastTimestamp:loaded.at(-1)!.time,
+   firstIndex:firstIndexRef.current,session:current,timeline:timelineRef.current,
+   costs,notes,annotations,activeSeconds:activeSecondsRef.current,
+   createdAt:sessionCreatedAt,updatedAt:now};
+ };
+ const syncArchive=async(value:ReplayArchive)=>{
+  if(archiveWriteBusy.current)return;
+  archiveWriteBusy.current=true;
+  try{await client.saveReplaySession(value);setArchiveNotice('')}
+  catch(error){setArchiveNotice((error instanceof Error?error.message:'Cloud sync unavailable')+' · Saved on this device')}
+  finally{archiveWriteBusy.current=false}
+ };
+ const saveArchive=(syncCloud=false)=>{
+  const snapshot=sessionSnapshot();if(!snapshot)return;
+  archiveRef.current=snapshot;
   try{
-   if(!/^\d{4}-\d{2}-\d{2}$/.test(day)||day>yesterday())throw Error('Choose a completed historical UTC day.');
-   validateReplayCosts(costs);
-   const begin=Date.parse(day+'T00:00:00Z');
-   let historyStart=begin-7*86400000;
-   try{const raw=localStorage.getItem(sessionKey);if(raw){const saved=JSON.parse(raw) as SavedSession;if(saved.version===4&&Number.isFinite(saved.firstTimestamp)&&saved.firstTimestamp*1000< historyStart&&saved.firstTimestamp*1000>=begin-100*86400000)historyStart=Math.floor(saved.firstTimestamp/86400)*86400000;}}catch{}
-   const [todayResult,historyResult]=await Promise.allSettled([
-    historicalData({venue:'research',asset,timeframe:'m1',from:new Date(begin).toISOString(),to:new Date(begin+86400000).toISOString()}),
-    historicalData({venue:'research',asset,timeframe:'m1',from:new Date(historyStart).toISOString(),to:new Date(begin).toISOString()})
+   saveLocalReplayArchive(uid,snapshot);
+   setSavedSessions(values=>mergeReplaySummaries([{
+    id:snapshot.id,name:snapshot.name,day:snapshot.day,asset:snapshot.asset,
+    updatedAt:snapshot.updatedAt,createdAt:snapshot.createdAt,activeSeconds:snapshot.activeSeconds,
+    startingBalance:snapshot.startingBalance,tradeCount:snapshot.session.trades.length,
+    lastTime:snapshot.session.index
+   }],values));
+  }catch{setArchiveNotice('Browser storage is full or disabled. Copy your notes before closing.')}
+  if(syncCloud)void syncArchive(snapshot);
+ };
+ const refreshSavedSessions=async()=>{
+  importLegacyReplayArchives(uid);
+  const local=listLocalReplayArchives(uid);
+  setSavedSessions(local);
+  try{const remote=await client.listReplaySessions();setSavedSessions(mergeReplaySummaries(local,remote))}
+  catch{/* Offline sessions remain accessible. */}
+ };
+ useEffect(()=>{void refreshSavedSessions()},[uid]);
+ const start=async(targetDay=day,archiveId?:string)=>{
+  if(loading)return;
+  if(sessionRef.current&&!reviewMode)saveArchive(true);
+  setLoading(true);setPlaying(false);setError('');setArchiveNotice('');setNotice('');
+  setNextExhausted(false);noEarlierRef.current=false;earlierRetryAtRef.current=0;
+  try{
+   const source=archiveId?(readLocalReplayArchive(uid,archiveId)||await client.loadReplaySession(archiveId)):null;
+   if(archiveId&&!source&&!initialTrade)throw Error('Saved session could not be found. It may have been deleted.');
+   const chosenDay=source?.day||targetDay;
+   if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(chosenDay)||chosenDay>yesterday())throw Error('Choose a completed historical UTC day.');
+   const begin=Date.parse(chosenDay+'T00:00:00Z'),nextDay=begin+86400000;
+   const end=source?Math.max(nextDay,Math.floor(source.lastTimestamp/86400)*86400000+86400000):nextDay;
+   const historyStart=source?Math.floor(source.firstTimestamp/86400)*86400000:begin-86400000;
+   const previous=historyStart<begin?
+    historicalData({venue:'research',asset,timeframe:'m1',from:new Date(historyStart).toISOString(),to:new Date(begin).toISOString()}):Promise.resolve({candles:[]});
+   const [mainResult,priorResult]=await Promise.allSettled([
+    historicalData({venue:'research',asset,timeframe:'m1',from:new Date(begin).toISOString(),to:new Date(end).toISOString()},
+     undefined,undefined,(done,total)=>setLoadingStatus(`Loading candles · ${done}/${total} days`)),
+    previous
    ]);
-   if(todayResult.status==='rejected')throw todayResult.reason;
-   const history=historyResult.status==='fulfilled'?historyResult.value.candles:[];
-   const candles=validateReplayBars([...history,...todayResult.value.candles].map(c=>({time:c.time,open:c.open,high:c.high,low:c.low,close:c.close})));
-   if(!todayResult.value.candles.length)throw Error('No historical candles on that date. Choose another trading day.');
-   const clock=Date.parse(day+'T'+startClock+':00Z');
+   if(mainResult.status==='rejected')throw mainResult.reason;
+   const current=mainResult.value.candles;
+   if(!current.length)throw Error('No historical candles available for this day. Choose another date.');
+   const history=priorResult.status==='fulfilled'?priorResult.value.candles:[];
+   const unique=new Map<number,ReplayBar>();
+   for(const c of [...history,...current])unique.set(c.time,{time:c.time,open:c.open,high:c.high,low:c.low,close:c.close});
+   const candles=validateReplayBars([...unique.values()].sort((a,b)=>a.time-b.time));
+   const clock=Date.parse(chosenDay+'T'+(source?.startClock||startClock)+':00Z');
    if(!Number.isFinite(clock))throw Error('Select a valid UTC start time.');
    const desired=candles.findIndex(c=>c.time*1000>=clock);
-   if(desired<0||desired>=candles.length-1)throw Error('No candles after the chosen replay start time. Try another session or date.');
-   const initial=Math.max(0,desired),startEquity=number(startingBalance);
-   let next=beginReplay(candles,initial,startEquity),resume=false,restoredFirst=initial;
-   let restoredAttempt:string=crypto.randomUUID(),restoredFinished=false,restoredNotes='',restoredAnnotations:Record<string,string>={},restoredTimeline:ReplayTimeline|null=null;
-   try{
-    const saved=localStorage.getItem(sessionKey);
-    if(saved){let parsed=JSON.parse(saved) as SavedSession;
-     if(parsed.version===4&&parsed.day===day&&parsed.asset===asset&&(parsed.firstTimestamp!==candles[0].time||parsed.lastTimestamp!==candles.at(-1)?.time||parsed.session?.initialBalance!==startEquity))throw Error('Saved replay cannot be restored with the available history or starting balance. The existing save has been preserved.');
-     if(parsed.version===4&&parsed.day===day&&parsed.asset===asset&&parsed.firstTimestamp===candles[0].time&&parsed.lastTimestamp===candles.at(-1)?.time&&parsed.session&&parsed.session.index>=initial&&parsed.session.index<candles.length&&
-      Number.isFinite(parsed.session.balance)&&parsed.session.initialBalance===startEquity&&
-      (parsed.session.position===null||typeof parsed.session.position?.entry==='number')&&Array.isArray(parsed.session.trades)){
-      next=parsed.session;if(Number.isInteger(parsed.firstIndex)&&parsed.firstIndex>=initial&&parsed.firstIndex<=parsed.session.index){restoredFirst=parsed.firstIndex}restoredAttempt=parsed.attemptId||crypto.randomUUID();restoredFinished=parsed.finished===true;restoredNotes=typeof parsed.notes==='string'?parsed.notes:'';restoredAnnotations=parsed.annotations||{};resume=true;
-      if(parsed.costs?.currency!=='ZAR'||parsed.costs.usdZar!==undefined)throw Error('This is not a native rand replay session.');
-      validateReplayCosts(parsed.costs);setCosts(parsed.costs);
-      if(parsed.timeline&&parsed.timeline.origin?.index<=next.index&&Array.isArray(parsed.timeline.decisions)&&parsed.timeline.decisions.every(x=>Number.isInteger(x.index)&&x.index>=parsed.timeline!.origin.index&&x.index<candles.length))restoredTimeline=parsed.timeline;
-     }
-    }
-   }catch(error){if(error instanceof Error&&error.message.startsWith('Saved replay cannot'))throw error;/* Invalid browser-only practice saves are ignored. */}
-   if(!resume)setCosts({...NEW_REPLAY_COSTS});
-   setDay(day);setShowDate(false);setShowTicket(false);setShowReview(false);setTicketMinimized(false);setPreview(null);setAttemptId(restoredAttempt);setFinished(restoredFinished);setNotes(restoredNotes);setAnnotations(restoredAnnotations);
-   barsRef.current=candles;firstIndexRef.current=restoredFirst;setBars(candles);setFirstIndex(restoredFirst);updateTimeline(restoredTimeline||newReplayTimeline(next));setCurrent(next);
-   const restored=replayPositions(next)[0];setSelectedPositionId(restored?.id||'');setAdjustStop(restored?String(restored.stop):'');setAdjustTarget(restored?String(restored.target):'');
-   setPlaying(false);setProgressTime(Date.now());
-   setNotice(''); // Never cover the chart's historical date and time on start.
-  }catch(e){setError(e instanceof Error?e.message:'Historical candles unavailable. Try another date.')}
-  finally{setLoading(false)}
-  }
+   const initial=source?source.firstIndex:Math.max(0,desired);
+   if(initial<0||initial>=candles.length)throw Error('No candles exist after this saved session start. Try another historical date.');
+   if(source&&source.firstTimestamp!==candles[0].time)throw Error('Saved session history differs from the latest downloaded candles; the original save has been preserved.');
+   if(source&&(!Number.isInteger(source.session.index)||source.session.index<0||source.session.index>=candles.length))throw Error('Saved session cursor is outside available historical history.');
+   const id=source?.id||crypto.randomUUID();
+   const name=source?.name||`Gold · ${chosenDay}`;
+   const sourceTrade=initialTrade||null;
+   const tradeIndex=sourceTrade?candles.findIndex(c=>c.time>=sourceTrade.entryTime):-1;
+   if(sourceTrade&&tradeIndex<0)throw Error('Could not locate the original trade candle in this historical session.');
+   const reviewStart=sourceTrade?Math.max(0,tradeIndex-6):initial;
+   const replay=sourceTrade?beginReplay(candles,reviewStart,source?.startingBalance||number(startingBalance)):
+    source?.session||beginReplay(candles,initial,number(startingBalance));
+   const timeline=sourceTrade?newReplayTimeline(replay):source?.timeline||newReplayTimeline(replay);
+   const first=sourceTrade?reviewStart:source?.firstIndex||initial;
+   setAttemptId(id);setSessionName(name);setSessionCreatedAt(source?.createdAt||new Date().toISOString());
+   setStartClock(source?.startClock||startClock);setStartingBalance(String(source?.startingBalance||number(startingBalance)));
+   setActiveSeconds(source?.activeSeconds||0);activeSecondsRef.current=source?.activeSeconds||0;
+   setReviewMode(Boolean(sourceTrade));setFocusedTrade(sourceTrade);
+   setDay(chosenDay);setShowDate(false);setShowTicket(false);setShowReview(false);setTicketMinimized(false);setPreview(null);setFinished(false);
+   setNotes(sourceTrade?'':source?.notes||'');setAnnotations(sourceTrade?{}:source?.annotations||{});
+   if(source?.costs&&!sourceTrade){validateReplayCosts(source.costs);setCosts(source.costs)}
+   else if(!source)setCosts({...NEW_REPLAY_COSTS});
+   barsRef.current=candles;firstIndexRef.current=first;setBars(candles);setFirstIndex(first);updateTimeline(timeline);setCurrent(replay);
+   const position=replayPositions(replay)[0];setSelectedPositionId(position?.id||'');
+   setAdjustStop(position?String(position.stop):'');setAdjustTarget(position?String(position.target):'');
+   setPlaying(false);setProgressTime(Date.now());setLoadingStatus('');
+   if(priorResult.status==='rejected')setNotice('Earlier candles will load as you scroll left.');
+   if(source&&!sourceTrade)saveLocalReplayArchive(uid,source);
+  }catch(e){setError(e instanceof Error?e.message:'Historical candles unavailable. Retry or choose another date.')}
+  finally{setLoadingStatus('');setLoading(false)}
  };
+ useEffect(()=>{
+  if(initialLaunch.current||(!initialSessionId&&!initialTrade))return;
+  initialLaunch.current=true;
+  void start(initialDay||day,initialSessionId);
+ },[]);
  useEffect(()=>{
   if(!session||!bars.length)return;
   const timer=window.setTimeout(()=>{
