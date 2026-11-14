@@ -237,12 +237,39 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
   finally{earlierBusyRef.current=false;setLoadingEarlier(false)}
  };
  loadEarlierRef.current=()=>void loadEarlier();
+ const loadNextDay=async()=>{
+  const current=barsRef.current,active=sessionRef.current;
+  if(!current.length||!active||nextBusyRef.current||nextUnavailableRef.current)return;
+  const from=(current.at(-1)!.time+60)*1000;
+  const todayStart=Math.floor(Date.now()/86400000)*86400000;
+  if(from>=todayStart){nextUnavailableRef.current=true;setPlaying(false);setNotice('You have reached the latest completed historical data. Your workspace is still saved.');return}
+  nextBusyRef.current=true;setLoadingEarlier(true);
+  try{
+   // Fetch four-day segments, so weekend gaps do not end a session.
+   const to=Math.min(todayStart,from+4*86400000);
+   const history=await historicalData({venue:'research',asset,timeframe:'m1',from:new Date(from).toISOString(),to:new Date(to).toISOString()});
+   const newer=history.candles.filter(c=>c.time>current.at(-1)!.time).map(c=>({time:c.time,open:c.open,high:c.high,low:c.low,close:c.close}));
+   if(!newer.length){nextUnavailableRef.current=true;setPlaying(false);setNotice('No more completed candles are available yet. Resume this workspace later.');return}
+   if(barsRef.current.at(-1)?.time!==current.at(-1)?.time)return;
+   const combined=validateReplayBars([...current,...newer]);
+   barsRef.current=combined;setBars(combined);
+   const latest=sessionRef.current;
+   if(latest&&latest.index===current.length-1){
+    const next=replayAdvance(latest,combined,costs,1);
+    if(next.index>latest.index)setCurrent(next);
+   }
+   setError('');
+  }catch(e){nextUnavailableRef.current=true;setPlaying(false);setError(e instanceof Error?'Later historical data is temporarily unavailable. Your workspace is safe; retry on next visit.':'Could not load later candles.')}
+  finally{nextBusyRef.current=false;setLoadingEarlier(false)}
+ };
+
  const advance=useCallback((steps=1)=>{
   const current=sessionRef.current;
   if(!current||!bars.length||preview)return;
+   if(current.index>=bars.length-1){void loadNextDay();return}
   try{const target=Math.min(bars.length-1,current.index+steps),t=timelineRef.current;
    const futureDecision=Boolean(t?.decisions.some(item=>item.index>current.index&&item.index<=target));
-   const next=t&&futureDecision?replayTo(t,target,bars,costs):replayAdvance(current,bars,costs,Math.max(1,steps));if(next===current||next.index===current.index){setPlaying(false);return}
+   const next=t&&futureDecision?replayTo(t,target,bars,costs):replayAdvance(current,bars,costs,Math.max(1,steps));if(next===current||next.index===current.index){void loadNextDay();return}
     setCurrent(next);const added=replayPositions(next).find(p=>!replayPositions(current).some(old=>old.id===p.id));if(added){setSelectedPositionId(added.id);setAdjustStop(String(added.stop));setAdjustTarget(String(added.target));setShowNewOrder(false);setNotice('Pending paper order filled.')}setProgressTime(Date.now());
     if(next.index>=bars.length-1)void loadNextDay();
     else if(next.trades.length>current.trades.length){const trade=next.trades.at(-1)!;
