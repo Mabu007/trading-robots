@@ -1,5 +1,6 @@
 import type {PracticeRecord} from './practice-history';
 import type {ReplayTrade} from './market-replay-engine';
+import {readLocalReplayArchive,saveLocalReplayArchive} from './replay-session-store';
 
 // Deleting a trade review must not rewrite the deterministic execution ledger.
 // A tombstone prevents a reopened local session from republishing deleted reviews.
@@ -20,6 +21,10 @@ export function hideArchivedTrade(uid:string,recordId:string,tradeId:string){
 // When a review is edited from My Progress, mirror the note into the local
 // replay snapshot so reopening that day cannot revert the Firebase edit.
 export function patchSavedReplayReview(uid:string,record:PracticeRecord,tradeId:string,note:string){
+ const archive=readLocalReplayArchive(uid,record.id);
+ if(archive)try{
+  saveLocalReplayArchive(uid,{...archive,annotations:{...archive.annotations,[tradeId]:note},updatedAt:new Date().toISOString()});
+ }catch{/* Cloud journal remains available. */}
  const key=`trading-vibes:replay:zar:v4:${uid}:${record.asset||'XAUUSD'}:${record.day}`;
  try{
   const saved=localStorage.getItem(key);if(!saved)return;

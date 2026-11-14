@@ -2,6 +2,7 @@ import {venueOf,type Venue} from '../shared/venues';
 import {cloudBotFromRecord} from './cloud-bot';
 import type {CodeAnalysis} from './code-analysis';
 import type {PracticeRecord} from './practice-history';
+import {validArchiveId,summarizeReplayArchive,type ReplayArchive,type ReplayArchiveSummary} from './replay-session-store';
 import {validateSkill,type UserSkill} from './skills';
 export type CloudBot = {
   id: string;
@@ -34,6 +35,10 @@ export type CloudClient = {
   loadPersonality: () => Promise<string>;
   savePersonality: (instructions:string) => Promise<void>;
   listPracticeRecords: () => Promise<PracticeRecord[]>;
+  listReplaySessions: () => Promise<ReplayArchiveSummary[]>;
+  loadReplaySession: (id:string) => Promise<ReplayArchive|null>;
+  saveReplaySession: (session:ReplayArchive) => Promise<void>;
+  deleteReplaySession: (id:string) => Promise<void>;
   savePracticeRecord: (record:PracticeRecord) => Promise<void>;
   deletePracticeRecord: (id:string) => Promise<void>;
   clearPracticeRecords: () => Promise<void>;
@@ -102,6 +107,40 @@ export function connectFirebase(): Promise<CloudClient | null> {
     const pendingConversationWrites = new Map<string,Promise<void>>();
 
     return {
+      async listReplaySessions(){
+        const uid=await currentUserId();
+        const snapshot=await storeSdk.getDocs(storeSdk.query(storeSdk.collection(db,'users',uid,'replaySessionIndex'),storeSdk.orderBy('updatedAt','desc'),storeSdk.limit(400)));
+        return snapshot.docs.map((doc:any)=>({...doc.data(),id:doc.id}) as ReplayArchiveSummary);
+      },
+      async loadReplaySession(id:string){
+        if(!validArchiveId(id))throw Error('Invalid session identifier.');
+        const uid=await currentUserId();
+        const snapshot=await storeSdk.getDoc(storeSdk.doc(db,'users',uid,'replaySessions',id));
+        if(!snapshot.exists())return null;
+        const value={...snapshot.data(),id:snapshot.id} as ReplayArchive;
+        if(value.version!==5||!value.session||!Array.isArray(value.session.trades))throw Error('Saved session is invalid.');
+        return value;
+      },
+      async saveReplaySession(value:ReplayArchive){
+        if(!validArchiveId(value.id))throw Error('Invalid session identifier.');
+        // Firebase documents have a 1 MiB limit. Report an actionable error
+        // rather than silently dropping a long-lived session.
+        if(JSON.stringify(value).length>900000)throw Error('Session is too large for cloud sync. Its local copy is preserved.');
+        const uid=await currentUserId();
+        const batch=storeSdk.writeBatch(db);
+        batch.set(storeSdk.doc(db,'users',uid,'replaySessions',value.id),value);
+        batch.set(storeSdk.doc(db,'users',uid,'replaySessionIndex',value.id),summarizeReplayArchive(value));
+        await batch.commit();
+      },
+      async deleteReplaySession(id:string){
+        if(!validArchiveId(id))throw Error('Invalid session identifier.');
+        const uid=await currentUserId();
+        const batch=storeSdk.writeBatch(db);
+        batch.delete(storeSdk.doc(db,'users',uid,'replaySessions',id));
+        batch.delete(storeSdk.doc(db,'users',uid,'replaySessionIndex',id));
+        batch.delete(storeSdk.doc(db,'users',uid,'replayRecords',id));
+        await batch.commit();
+      },
       async listPracticeRecords(){
         const uid=await currentUserId();
         const snapshot=await storeSdk.getDocs(storeSdk.query(storeSdk.collection(db,'users',uid,'replayRecords'),storeSdk.orderBy('completedAt','desc'),storeSdk.limit(500)));
@@ -121,7 +160,7 @@ export function connectFirebase(): Promise<CloudClient | null> {
         const uid=await currentUserId();
         // Only records belonging to this signed-in account. Retired workouts are
         // cleared here only after explicit user confirmation in the UI.
-        for(const collectionName of ['replayRecords','practiceRecords']){
+        for(const collectionName of ['replayRecords','replaySessions','replaySessionIndex','practiceRecords']){
           while(true){
             const snapshot=await storeSdk.getDocs(storeSdk.query(storeSdk.collection(db,'users',uid,collectionName),storeSdk.limit(100)));
             if(snapshot.empty)break;

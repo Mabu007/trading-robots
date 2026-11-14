@@ -17,6 +17,14 @@ describe('replay journal retention',()=>{
   hideArchivedTrade('user','record','a');
   expect(hiddenReplayTradeIds('user','record')).toEqual(['a']);
  });
+ it('keeps a note edit in its named v5 session snapshot',()=>{
+  const store=storage();vi.stubGlobal('localStorage',store);
+  const key='trading-vibes:replay-session:v5:user:attempt';
+  store.setItem(key,JSON.stringify({version:5,id:'attempt',day:'2026-11-13',session:{trades:[]},annotations:{a:'before'},updatedAt:'2026-11-13T18:00:00Z'}));
+  patchSavedReplayReview('user',{id:'attempt',day:'2026-11-13',asset:'XAUUSD'} as PracticeRecord,'a','revised in progress');
+  expect(JSON.parse(store.getItem(key)!).annotations.a).toBe('revised in progress');
+  expect(JSON.parse(store.getItem(key)!).updatedAt).not.toBe('2026-11-13T18:00:00Z');
+ });
  it('mirrors progress-note edits only into the matching local replay',()=>{
   const store=storage();vi.stubGlobal('localStorage',store);
   const record={id:'attempt',asset:'XAUUSD',day:'2026-11-13'} as PracticeRecord;

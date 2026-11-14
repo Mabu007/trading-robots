@@ -10,7 +10,9 @@ describe('Market Replay is the core Backtest workflow',()=>{
   expect(html).toContain('Historical date');
   expect(html).toContain('Start time');
   expect(html).toContain('Practice balance');
-  expect(html).toContain('Launch market replay');
+  expect(html).toContain('Start new replay session');
+  expect(html).toContain('YOUR SESSIONS');
+  expect(html).not.toContain('Finished your session?');
   expect(html).not.toContain('Trading venue');
   expect(html).not.toContain('PropDAO');
  });

@@ -108,3 +108,5 @@
 .practice-install-done{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:46px;background:#245b47;color:white;font-size:12px;font-weight:850;border:0;border-radius:12px}
 @media(max-width:850px){.practice-replay-first .practice-header-install{min-width:42px;justify-content:center;padding:10px}.practice-replay-first .practice-header-install span{display:none}}
 @media(max-width:600px){.practice-replay-first .practice-top{padding:0 14px}.practice-replay-first .practice-top strong{font-size:13px}.practice-replay-first .practice-mobile-nav{padding-bottom:calc(9px + env(safe-area-inset-bottom));background:var(--p-card,#fff);border-color:var(--p-border,#e6eae2)}.practice-replay-first.practice-shell{padding-bottom:calc(82px + env(safe-area-inset-bottom))}.practice-install-dialog{border-radius:20px;padding:24px 20px}.practice-install-overlay{padding:12px}}
+
+.practice-trade-day .practice-trade-session-name{display:block;margin-top:5px;font-size:10px;font-weight:500;color:var(--p-muted);max-width:165px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}

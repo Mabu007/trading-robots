@@ -6,6 +6,8 @@ import type {AppTheme} from '../theme';
 import {MarketReplay} from './MarketReplay';
 import {installPlatform,isAppStandalone,requestAppInstall,subscribeInstallPrompt} from '../pwa-install';
 import {hideArchivedTrade,patchSavedReplayReview} from '../replay-journal';
+import {readLocalReplayArchive,saveLocalReplayArchive} from '../replay-session-store';
+import type {ReplayTrade} from '../market-replay-engine';
 import './practice-app.css';
 
 type Page='home'|'replay'|'progress';
@@ -39,7 +41,7 @@ export function PracticeApp({client,theme,onSignOut,onThemeToggle}:Props){
   setInstallDialog(true);
  };
  const device=installPlatform(typeof navigator==='undefined'?'':navigator.userAgent);
- const [replayChoice,setReplayChoice]=useState<{day?:string;tradeId?:string}>({});
+ const [replayChoice,setReplayChoice]=useState<{day?:string;tradeId?:string;sessionId?:string;trade?:ReplayTrade}>({});
  const [edit,setEdit]=useState<{recordId:string;tradeId:string;note:string}|null>(null);
  const [saving,setSaving]=useState(false),[historyError,setHistoryError]=useState('');
  const [history,setHistory]=useState<PracticeRecord[]>([]);
@@ -51,10 +53,23 @@ export function PracticeApp({client,theme,onSignOut,onThemeToggle}:Props){
   void (async()=>{try{await syncPracticeHistory(uid,client);const remote=await client.listPracticeRecords();if(active){setHistory(mergePracticeHistory(readLocalHistory(uid),remote));setHistoryState('synced')}}catch{if(active){setHistory(mergePracticeHistory(readLocalHistory(uid),[]));setHistoryState('local')}}})();
   return()=>{active=false};
  },[client,profile?.uid,historyRevision]);
- const openReplay=(day?:string,tradeId?:string)=>{setReplayChoice({day,tradeId});setPage('replay')};
+ const openReplay=(day?:string,tradeId?:string,sessionId?:string,trade?:ReplayTrade)=>{setReplayChoice({day,tradeId,sessionId,trade});setPage('replay')};
  const tradeRows=history.flatMap(record=>(record.trades||[]).map(trade=>({record,trade}))).sort((a,b)=>b.trade.exitTime-a.trade.exitTime);
  const money=(value:number)=>(value<0?'−':value>0?'+':'')+'R'+Math.abs(value).toLocaleString('en-ZA',{minimumFractionDigits:2,maximumFractionDigits:2});
  const uid=profile?.uid||'';
+ const updateLinkedSessionReview=async(recordId:string,tradeId:string,note:string|null)=>{
+  const local=readLocalReplayArchive(uid,recordId);
+  let remote=await client.loadReplaySession(recordId).catch(()=>null);
+  const source=remote&&(!local||remote.updatedAt>local.updatedAt)?remote:local;
+  if(!source)return;
+  const annotations={...source.annotations};
+  const hidden=new Set(source.hiddenTradeIds||[]);
+  if(note===null){hidden.add(tradeId);delete annotations[tradeId]}
+  else annotations[tradeId]=note;
+  const next={...source,annotations,hiddenTradeIds:[...hidden],updatedAt:new Date().toISOString()};
+  saveLocalReplayArchive(uid,next);
+  await client.saveReplaySession(next);
+ };
  const saveRecord=async(record:PracticeRecord)=>{
   setSaving(true);setHistoryError('');saveLocalHistory(uid,record);
   setHistory(items=>items.map(item=>item.id===record.id?record:item));
@@ -71,6 +86,9 @@ export function PracticeApp({client,theme,onSignOut,onThemeToggle}:Props){
    if(!trades.length){await client.deletePracticeRecord(record.id);removeLocalPracticeRecord(uid,record.id);setHistory(items=>items.filter(item=>item.id!==record.id))}
    else await saveRecord({...record,trades,annotations,tradeCount:trades.length,net:trades.reduce((sum,t)=>sum+t.net,0)});
    hideArchivedTrade(uid,record.id,tradeId);setEdit(null);
+   try{await updateLinkedSessionReview(record.id,tradeId,null)}
+   catch{setHistoryError('Trade removed. Its saved-session annotation is still queued on this device.')}
+
   }catch{setHistoryError('Could not delete this archived trade. Please retry.')}
   finally{setSaving(false)}
  };
@@ -82,20 +100,21 @@ export function PracticeApp({client,theme,onSignOut,onThemeToggle}:Props){
    for(const key of Object.keys(localStorage)){
     if(key.startsWith('trading-vibes:replay:zar:v4:'+uid+':')||key.startsWith('trading-vibes:replay:v3:'+uid+':')||key.startsWith('trading-vibes:replay:v2:'+uid+':')||key.startsWith('trading-vibes:replay-drawings:'+uid+':')||key.startsWith('trading-vibes:replay-deleted-trades:v1:'+uid+':')||key==='trading-vibes:practice-history:v1:'+uid)localStorage.removeItem(key);
    }
+   for(let i=localStorage.length-1;i>=0;i--){const key=localStorage.key(i);if(key?.startsWith('trading-vibes:replay-session:v5:'+uid+':'))localStorage.removeItem(key)}
    clearLocalPracticeHistory(uid);setHistory([]);setEdit(null);
   }catch{setHistoryError('The reset was not completed. Please retry while signed in.')}
   finally{setSaving(false)}
  };
- if(page==='replay')return <MarketReplay client={client} theme={theme} initialDay={replayChoice.day} initialReviewTradeId={replayChoice.tradeId} onHistoryChange={()=>setHistoryRevision(v=>v+1)} onClose={()=>setPage('home')}/>;
+ if(page==='replay')return <MarketReplay client={client} theme={theme} initialDay={replayChoice.day} initialReviewTradeId={replayChoice.tradeId} initialSessionId={replayChoice.sessionId} initialTrade={replayChoice.trade} onHistoryChange={()=>setHistoryRevision(v=>v+1)} onClose={()=>setPage('home')}/>;
  return <div className="practice-shell practice-replay-first" data-practice-theme={theme}>
   <aside className="practice-sidebar">
    <div className="practice-brand"><img src="/logo.png" alt="Trading Vibes"/><span>trading<span>vibes</span><small>THE MARKET REPLAY APP</small></span></div>
    <div className="practice-nav-label">YOUR WORKSPACE</div>
    <nav aria-label="Main navigation">{menu.map(({id,label,icon:Icon})=><button key={id} type="button" aria-current={page===id?'page':undefined} onClick={()=>setPage(id)}><Icon size={19}/><span>{label}</span>{page===id&&<ChevronRight size={15}/>}</button>)}</nav>
-   <div className="practice-sidebar-bottom"><button className="practice-install-card" type="button" onClick={()=>void openInstall()} aria-label="Download App"><span className="practice-install-mark"><Download size={22}/></span><strong>{installed?'App installed':'Download App'}</strong><p>Keep Trading Vibes on your home screen. Open Market Replay in one tap.</p><span className="practice-install-action">{installed?'Ready to replay':hasInstallPrompt?'Install Trading Vibes':'See installation steps'} <ArrowRight size={14}/></span></button><button type="button" onClick={onSignOut}><LogOut size={18}/> Sign out</button></div>
+   <div className="practice-sidebar-bottom">{installed?<button className="practice-install-card is-installed" type="button" onClick={()=>openReplay()}><span className="practice-install-mark"><Play size={22}/></span><strong>Back to the charts</strong><p>Your Market Replay workspace is ready. Pick up where you left off.</p><span className="practice-install-action">Open Market Replay <ArrowRight size={14}/></span></button>:<button className="practice-install-card" type="button" onClick={()=>void openInstall()} aria-label="Download App"><span className="practice-install-mark"><Download size={22}/></span><strong>Download App</strong><p>Keep Trading Vibes on your home screen. Open Market Replay in one tap.</p><span className="practice-install-action">{hasInstallPrompt?'Install Trading Vibes':'See installation steps'} <ArrowRight size={14}/></span></button>}<button type="button" onClick={onSignOut}><LogOut size={18}/> Sign out</button></div>
   </aside>
   <main className="practice-main">
-   <header className="practice-top"><div><span className="practice-top-kicker">TRADING VIBES · MARKET REPLAY</span><strong>{menu.find(item=>item.id===page)?.label}</strong></div><div className="practice-account"><button type="button" className="practice-header-install" aria-label="Download App" title="Download App" onClick={()=>void openInstall()}><Download size={18}/><span>Download App</span></button><button type="button" aria-label={theme==='dark'?'Switch to light theme':'Switch to dark theme'} onClick={onThemeToggle}>{theme==='dark'?<Sun size={17}/>:<Moon size={17}/>}</button><button type="button" onClick={onSignOut}>Sign out</button><b title={name}>{name.charAt(0).toUpperCase()}</b></div></header>
+   <header className="practice-top"><div><span className="practice-top-kicker">TRADING VIBES · MARKET REPLAY</span><strong>{menu.find(item=>item.id===page)?.label}</strong></div><div className="practice-account">{!installed&&<button type="button" className="practice-header-install" aria-label="Download App" title="Download App" onClick={()=>void openInstall()}><Download size={18}/><span>Download App</span></button>}<button type="button" aria-label={theme==='dark'?'Switch to light theme':'Switch to dark theme'} onClick={onThemeToggle}>{theme==='dark'?<Sun size={17}/>:<Moon size={17}/>}</button><button type="button" onClick={onSignOut}>Sign out</button><b title={name}>{name.charAt(0).toUpperCase()}</b></div></header>
    <div className="practice-content">
     {page==='home'&&<>
      <section className="practice-greeting practice-replay-hero">
@@ -119,7 +138,7 @@ export function PracticeApp({client,theme,onSignOut,onThemeToggle}:Props){
      {tradeRows.length?<section className="practice-trades-list"><div className="practice-section-head"><div><span className="practice-overline">YOUR TRADING JOURNAL</span><h2>Trades you've practised.</h2><p>Select a trade to revisit that historical day or edit the saved review.</p></div></div>
       <div className="practice-trade-table-scroll"><table className="practice-trade-table"><thead><tr><th>Date</th><th>Asset</th><th>Side</th><th>Entry</th><th>Exit</th><th>Result</th><th>Review</th><th>Actions</th></tr></thead><tbody>
        {tradeRows.map(({record,trade})=><tr key={record.id+':'+trade.id}>
-        <td><button type="button" className="practice-trade-day" onClick={()=>openReplay(record.day,trade.id)} title="Open this historical day">{record.day}</button></td>
+        <td><button type="button" className="practice-trade-day" onClick={()=>openReplay(record.day,trade.id,record.id,trade)} title="Replay this exact historical trade">{record.day}{record.sessionName&&<small className="practice-trade-session-name">{record.sessionName}</small>}</button></td>
         <td>Gold</td><td><span className={trade.side==='BUY'?'is-profit':'is-loss'}>{trade.side==='BUY'?'BUY':'SELL'}</span></td><td>{trade.entry.toFixed(3)}</td><td>{trade.exit.toFixed(3)}</td>
         <td className={trade.net>0?'is-profit':trade.net<0?'is-loss':''}>{money(trade.net)}</td>
         <td className="practice-trade-review">{record.annotations?.[trade.id]||<span className="practice-muted">Add a review</span>}</td>
@@ -127,7 +146,7 @@ export function PracticeApp({client,theme,onSignOut,onThemeToggle}:Props){
        </tr>)}
       </tbody></table></div>
      </section>:<div className="practice-empty"><div className="practice-free-icon"><BarChart3 size={22}/></div><h2>No trades placed yet.</h2><p>Open Market Replay, place a simulated trade, and close it to see your trade journal here.</p><button type="button" className="practice-primary" onClick={()=>openReplay()}>Launch Market Replay <ArrowRight size={16}/></button></div>}
-     {edit&&<div className="practice-review-backdrop" onClick={()=>setEdit(null)}><form className="practice-review-dialog" role="dialog" aria-modal="true" aria-label="Edit trade review" onClick={e=>e.stopPropagation()} onSubmit={e=>{e.preventDefault();const record=history.find(item=>item.id===edit.recordId);if(record){const note=edit.note.trim().slice(0,1200);patchSavedReplayReview(uid,record,edit.tradeId,note);void saveRecord({...record,annotations:{...(record.annotations||{}),[edit.tradeId]:note}}).then(()=>setEdit(null))}}}><span className="practice-overline">MY PROGRESS</span><h3>Edit trade review</h3><p>What did you see? What would you do differently?</p><textarea aria-label="Trade review" rows={5} maxLength={1200} autoFocus value={edit.note} onChange={e=>setEdit(value=>value?{...value,note:e.target.value}:null)}/><div><button type="button" onClick={()=>setEdit(null)}>Cancel</button><button type="submit" disabled={saving}><Save size={15}/> Save review</button></div></form></div>}
+     {edit&&<div className="practice-review-backdrop" onClick={()=>setEdit(null)}><form className="practice-review-dialog" role="dialog" aria-modal="true" aria-label="Edit trade review" onClick={e=>e.stopPropagation()} onSubmit={e=>{e.preventDefault();const record=history.find(item=>item.id===edit.recordId);if(record){const note=edit.note.trim().slice(0,1200);patchSavedReplayReview(uid,record,edit.tradeId,note);void (async()=>{await saveRecord({...record,annotations:{...(record.annotations||{}),[edit.tradeId]:note}});try{await updateLinkedSessionReview(record.id,edit.tradeId,note)}catch{setHistoryError('Review saved on this device; session cloud sync could not complete.')}setEdit(null)})()}}}><span className="practice-overline">MY PROGRESS</span><h3>Edit trade review</h3><p>What did you see? What would you do differently?</p><textarea aria-label="Trade review" rows={5} maxLength={1200} autoFocus value={edit.note} onChange={e=>setEdit(value=>value?{...value,note:e.target.value}:null)}/><div><button type="button" onClick={()=>setEdit(null)}>Cancel</button><button type="submit" disabled={saving}><Save size={15}/> Save review</button></div></form></div>}
      <div className="practice-danger-zone"><p>Want to start fresh? Remove saved replay sessions, drawings and trade reviews for this account.</p><button type="button" disabled={saving} onClick={()=>void resetProgress()}><Trash2 size={15}/> Reset replay data</button></div>
 
     </>}
