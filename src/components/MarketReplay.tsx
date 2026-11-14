@@ -22,7 +22,6 @@ const price=(value:number)=>new Intl.NumberFormat('en-US',{minimumFractionDigits
 const utc=(timestamp:number)=>new Date(timestamp*1000).toLocaleString('en-GB',{timeZone:'UTC',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});
 const yesterday=()=>new Date(Date.now()-86400000).toISOString().slice(0,10);
 const number=(text:string)=>Number(text);
-type SavedSession={version:4;day:string;asset:'XAUUSD';firstTimestamp:number;lastTimestamp:number;session:ReplaySession;firstIndex:number;notes:string;costs:ReplayCosts;annotations:Record<string,string>;attemptId?:string;finished?:boolean;timeline?:ReplayTimeline};
 function exportJournal(session:ReplaySession,notes:Record<string,string>,day:string,costs:ReplayCosts){
  const currency=costs.currency||'USD';
  const header=['Side','Entry (UTC)','Exit (UTC)','Quantity oz','Entry','Stop','Target','Exit','Reason','Gross '+currency,'Total fees '+currency,'Net '+currency,'Balance '+currency,'Notes'];
@@ -48,7 +47,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
   return()=>media.removeEventListener?.('change',sync);
  },[]);
  const ticketDrag=useRef<{x:number;y:number;left:number;top:number;width:number;height:number}|null>(null);
- const [attemptId,setAttemptId]=useState<string>(()=>initialSessionId||crypto.randomUUID()),[finished,setFinished]=useState(false),[savingHistory,setSavingHistory]=useState(false);
+ const [attemptId,setAttemptId]=useState<string>(()=>initialSessionId||crypto.randomUUID()),[finished,setFinished]=useState(false);
  const [sessionName,setSessionName]=useState(''),[sessionCreatedAt,setSessionCreatedAt]=useState(()=>new Date().toISOString());
  const [savedSessions,setSavedSessions]=useState<ReplayArchiveSummary[]>([]);
  const [activeSeconds,setActiveSeconds]=useState(0),activeSecondsRef=useRef(0);
@@ -88,8 +87,6 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  const drawingRef=useRef<ReturnType<typeof installChartTools>|null>(null);
  const chartRef=useRef<{chart:any;series:any;ema20:any;ema50:any;markers:any;lines:any[];lastBarTime?:number;lastBarCount?:number;firstBarTime?:number;lastTimeframe?:number;lastBarsRef?:ReplayBar[]} |null>(null);
  const uid=client.getProfile()?.uid||'local';
- const sessionSuffix=uid+':'+asset+':'+day;
- const sessionKey='trading-vibes:replay:zar:v4:'+sessionSuffix;
  const setCurrent=(next:ReplaySession)=>{sessionRef.current=next;setSession(next)};
  const recordDecision=(next:ReplaySession)=>{if(timelineRef.current)updateTimeline(recordReplayDecision(timelineRef.current,next));setCurrent(next)};
  const currentBar=session?bars[session.index]:null;
@@ -214,14 +211,36 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
   initialLaunch.current=true;
   void start(initialDay||day,initialSessionId);
  },[]);
+
+ // Keep the latest state available synchronously for lifecycle/autosave,
+ // even when candles advance faster than React's debounce.
+ if(session&&bars.length&&!reviewMode)archiveRef.current=sessionSnapshot();
  useEffect(()=>{
-  if(!session||!bars.length)return;
-  const timer=window.setTimeout(()=>{
-   try{localStorage.setItem(sessionKey,JSON.stringify({version:4,day,asset,firstTimestamp:bars[0].time,lastTimestamp:bars[bars.length-1].time,session,firstIndex,notes,costs,annotations,attemptId,finished,timeline:timelineRef.current||undefined} satisfies SavedSession))}catch{}
-  },350);return()=>window.clearTimeout(timer);
- },[session,bars,sessionKey,day,firstIndex,notes,costs,annotations,attemptId,finished,timeline]);
+  if(!session||reviewMode)return;
+  const timer=window.setTimeout(()=>saveArchive(false),800);
+  return()=>window.clearTimeout(timer);
+ },[session,bars,notes,annotations,sessionName,attemptId,costs,firstIndex,reviewMode]);
  useEffect(()=>{
-  if(!session?.trades.length||finished)return;
+  if(!sessionOpen||reviewMode)return;
+  const timer=window.setInterval(()=>{
+   if(document.visibilityState==='visible'){
+    activeSecondsRef.current+=1;
+    setActiveSeconds(activeSecondsRef.current);
+   }
+  },1000);
+  return()=>window.clearInterval(timer);
+ },[sessionOpen,reviewMode]);
+ useEffect(()=>{
+  if(!sessionOpen||reviewMode)return;
+  const timer=window.setInterval(()=>saveArchive(true),30000);
+  const hidden=()=>{if(document.visibilityState==='hidden')saveArchive(true)};
+  const exiting=()=>{const snapshot=archiveRef.current;if(snapshot)try{saveLocalReplayArchive(uid,snapshot)}catch{}};
+  document.addEventListener('visibilitychange',hidden);
+  window.addEventListener('pagehide',exiting);
+  return()=>{window.clearInterval(timer);document.removeEventListener('visibilitychange',hidden);window.removeEventListener('pagehide',exiting)};
+ },[sessionOpen,reviewMode,uid,attemptId,notes,annotations,sessionName,day,costs]);
+ useEffect(()=>{
+  if(!session?.trades.length||reviewMode)return;
   const archived=visibleArchivedTrades(uid,attemptId,session.trades);
   const record:PracticeRecord={id:attemptId,kind:'free',asset,day,completedAt:new Date().toISOString(),candlesViewed:session.index-firstIndex,tradeCount:archived.length,net:archived.reduce((sum,t)=>sum+t.net,0),currency:'ZAR',notes:notes.trim().slice(0,3000),trades:archived,annotations};
   const timer=window.setTimeout(()=>{
@@ -229,28 +248,17 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
    void client.savePracticeRecord(record).then(()=>{saveLocalHistory(uid,record,true);onHistoryChange?.()}).catch(()=>{/* Retry from locally saved history in My Progress. */});
   },1150);
   return()=>window.clearTimeout(timer);
- },[session?.trades,annotations,notes,attemptId,asset,day,firstIndex,uid,client,finished]);
+ },[session?.trades,annotations,notes,attemptId,asset,day,firstIndex,uid,client,reviewMode]);
  useEffect(()=>{if(!notice)return;const timer=window.setTimeout(()=>setNotice(''),2800);return()=>window.clearTimeout(timer)},[notice]);
  useEffect(()=>{if(!session?.trades.some(t=>t.id===initialReviewTradeId))return;setSelectedTrade(initialReviewTradeId||null);setShowReview(true)},[session?.trades,initialReviewTradeId]);
  useEffect(()=>{const reset=()=>setTicketXY(null);window.addEventListener('resize',reset);return()=>window.removeEventListener('resize',reset)},[]);
 
  const persistLatestTrades=()=>{
-  const current=sessionRef.current;if(!current?.trades.length)return;
+  const current=sessionRef.current;if(reviewMode||!current?.trades.length)return;
   const archived=visibleArchivedTrades(uid,attemptId,current.trades);
   const record:PracticeRecord={id:attemptId,kind:'free',asset,day,completedAt:new Date().toISOString(),candlesViewed:current.index-firstIndex,tradeCount:archived.length,net:archived.reduce((sum,t)=>sum+t.net,0),currency:'ZAR',notes:notes.trim().slice(0,3000),trades:archived,annotations};
   try{saveLocalHistory(uid,record)}catch{return}
   void client.savePracticeRecord(record).then(()=>saveLocalHistory(uid,record,true)).catch(()=>{/* Retained in locally queued history. */});
- };
- const finishPractice=async()=>{
-  const current=sessionRef.current;if(!current||finished||savingHistory)return;
-  if(current.index<=firstIndex){setError('Reveal at least one candle before finishing your practice.');return}
-  if(replayPositions(current).length||current.pending){setError('Close simulated positions and cancel pending orders before finishing.');return}
-  setPlaying(false);setError('');setSavingHistory(true);
-  const archived=visibleArchivedTrades(uid,attemptId,current.trades);
-  const record:PracticeRecord={id:attemptId,kind:'free',asset,day,completedAt:new Date().toISOString(),candlesViewed:current.index-firstIndex,tradeCount:archived.length,net:archived.reduce((sum,t)=>sum+t.net,0),currency:'ZAR',notes:notes.trim().slice(0,3000),trades:archived,annotations};
-  try{saveLocalHistory(uid,record);await client.savePracticeRecord(record);saveLocalHistory(uid,record,true);setFinished(true);setNotice('Session and trade reviews saved to your account.');onHistoryChange?.();}
-  catch{setError('Could not save this practice on this device. Check browser storage and try again.')}
-  finally{setSavingHistory(false)}
  };
  const loadEarlier=async()=>{
   const currentBars=barsRef.current;if(earlierBusyRef.current||noEarlierRef.current||Date.now()<earlierRetryAtRef.current||!currentBars.length||!sessionRef.current)return;
@@ -451,7 +459,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
    <header className="tv-replay-top"><div className="tv-replay-brand"><span className="tv-replay-brand-icon"><BarChart3 size={21}/></span><div><span className="tv-replay-eyebrow">TRADING VIBES · MARKET REPLAY</span><h2>Market Replay</h2></div></div>
     {session&&<div className="tv-replay-header-market"><div className="tv-replay-quote"><span>GOLD · XAUUSD <i/></span><strong>{currentBar?price(currentBar.close):'—'}</strong><small>{currentBar?utc(currentBar.time+60)+' UTC':'—'} · Historical</small></div>
      <div className="tv-replay-desktop-stats">{accountStats}</div><details className="tv-replay-mobile-stats"><summary>Account</summary>{accountStats}</details></div>}
-    <div className="tv-replay-top-actions">{session&&<button type="button" onClick={()=>void toggleFullscreen()} aria-label={expanded?'Exit full screen':'Full screen'}>{expanded?<Minimize2 size={16}/>:<Maximize2 size={16}/>}</button>}<button type="button" onClick={()=>{persistLatestTrades();onClose()}} aria-label="Exit replay" title="Exit replay"><ArrowLeft size={18}/></button></div>
+    <div className="tv-replay-top-actions">{session&&<button type="button" onClick={()=>void toggleFullscreen()} aria-label={expanded?'Exit full screen':'Full screen'}>{expanded?<Minimize2 size={16}/>:<Maximize2 size={16}/>}</button>}<button type="button" onClick={()=>{saveArchive(true);persistLatestTrades();onClose()}} aria-label="Exit replay" title="Exit replay"><ArrowLeft size={18}/></button></div>
    </header>
    {!session?<div className="tv-replay-setup"><div className="tv-replay-setup-main">
      <span className="tv-replay-eyebrow"><CalendarDays size={14}/> BUILD YOUR PRACTICE SESSION</span>
