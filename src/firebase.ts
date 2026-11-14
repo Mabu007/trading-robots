@@ -138,6 +138,7 @@ export function connectFirebase(): Promise<CloudClient | null> {
         const batch=storeSdk.writeBatch(db);
         batch.delete(storeSdk.doc(db,'users',uid,'replaySessions',id));
         batch.delete(storeSdk.doc(db,'users',uid,'replaySessionIndex',id));
+        batch.delete(storeSdk.doc(db,'users',uid,'replayRecords',id));
         await batch.commit();
       },
       async listPracticeRecords(){
