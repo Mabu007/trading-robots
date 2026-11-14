@@ -8,7 +8,7 @@ const icons:Record<string,string>={pan:'<path d="M8 13V5a2 2 0 0 1 4 0v5-7a2 2 0
 const icon=(name:string)=>`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name]}</svg>`;
 
 /** Drawings are stored in time/price coordinates; the overlay only intercepts hits on shapes. */
-export function installChartTools(el:HTMLElement, chart:any, series:any, candles:Candle[], storageKey:string) {
+export function installChartTools(el:HTMLElement, chart:any, series:any, candles:Candle[], storageKey:string, directTools=false) {
  let drawings:Shape[]=[]; let pipSize=0;
  try { const saved=JSON.parse(localStorage.getItem(storageKey)||'{}'); if(Array.isArray(saved.drawings))drawings=saved.drawings.filter((s:Shape)=>s?.a&&s?.b&&Number.isFinite(s.a.time)&&Number.isFinite(s.a.price)&&Number.isFinite(s.b.time)&&Number.isFinite(s.b.price)); if(Number.isFinite(saved.pipSize)&&saved.pipSize>0)pipSize=saved.pipSize; } catch { /* ignore malformed local data */ }
  let tool:Tool='pan', selected:string|null=null, first:Point|null=null, preview:Shape|null=null, measure:{a:Point;b:Point}|null=null, undo:Shape[][]=[];
@@ -26,8 +26,10 @@ export function installChartTools(el:HTMLElement, chart:any, series:any, candles
  button('undo','Undo drawing',()=>{if(undo.length){drawings=undo.pop()!;selected=null;persist();render()}});
  button('clear','Clear drawings',()=>{if(drawings.length&&window.confirm('Clear all drawings for this chart?')){checkpoint();drawings=[];selected=null;persist();render()}});
  const pipButton=button('Pip','Set pip size for measurement',()=>{const value=window.prompt('Pip size in price units (leave empty to show pips as unavailable):',pipSize?String(pipSize):'');if(value===null)return;const parsed=Number(value);pipSize=Number.isFinite(parsed)&&parsed>0?parsed:0;persist();render()});pipButton.className='drawing-pip';
+ const directButtons=new Map<Tool,HTMLButtonElement>();
+ if(directTools){dropdown.style.display='none';for(const [kind,symbol,title] of [['trend','╱','Trendline'],['horizontal','━','Horizontal line'],['vertical','│','Vertical line'],['rectangle','□','Rectangle'],['fibonacci','F','Fibonacci retracement'],['text','T','Text label']] as const){const b=button(symbol,title,()=>setTool(kind));directButtons.set(kind,b)}}
  const remove=button('×','Delete selected drawing',()=>deleteSelected());remove.style.display='none';
- function setTool(next:Tool){tool=next;first=null;preview=null;measure=null;selected=null;label.style.display='none';panButton.classList.toggle('active',next==='pan');measureButton.classList.toggle('active',next==='measure');summary.classList.toggle('active',!['pan','measure'].includes(next));el.classList.toggle('drawing-mode',next!=='pan');render()}
+ function setTool(next:Tool){tool=next;first=null;preview=null;measure=null;selected=null;label.style.display='none';panButton.classList.toggle('active',next==='pan');measureButton.classList.toggle('active',next==='measure');summary.classList.toggle('active',!['pan','measure'].includes(next));for(const [key,item] of directButtons)item.classList.toggle('active',key===next);el.classList.toggle('drawing-mode',next!=='pan');render()}
  function checkpoint(){undo.push(structuredClone(drawings));if(undo.length>50)undo.shift()}
  function persist(){try{localStorage.setItem(storageKey,JSON.stringify({drawings,pipSize}))}catch{/* local storage may be unavailable */}}
  function deleteSelected(){if(!selected)return;checkpoint();drawings=drawings.filter(s=>s.id!==selected);selected=null;persist();render()}
