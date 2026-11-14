@@ -281,7 +281,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  useEffect(()=>{
   if(!session?.trades.length||reviewMode)return;
   const archived=visibleArchivedTrades(uid,attemptId,session.trades);
-  const record:PracticeRecord={id:attemptId,kind:'free',asset,day,completedAt:new Date().toISOString(),candlesViewed:session.index-firstIndex,tradeCount:archived.length,net:archived.reduce((sum,t)=>sum+t.net,0),currency:'ZAR',notes:notes.trim().slice(0,3000),trades:archived,annotations};
+  const record:PracticeRecord={id:attemptId,kind:'free',asset,day,completedAt:new Date().toISOString(),candlesViewed:session.index-firstIndex,tradeCount:archived.length,net:archived.reduce((sum,t)=>sum+t.net,0),currency:'ZAR',notes:notes.trim().slice(0,3000),trades:archived,annotations,sessionName,activeSeconds:activeSecondsRef.current};
   const timer=window.setTimeout(()=>{
    try{saveLocalHistory(uid,record)}catch{return}
    void client.savePracticeRecord(record).then(()=>{saveLocalHistory(uid,record,true);onHistoryChange?.()}).catch(()=>{/* Retry from locally saved history in My Progress. */});
@@ -295,7 +295,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  const persistLatestTrades=()=>{
   const current=sessionRef.current;if(reviewMode||!current?.trades.length)return;
   const archived=visibleArchivedTrades(uid,attemptId,current.trades);
-  const record:PracticeRecord={id:attemptId,kind:'free',asset,day,completedAt:new Date().toISOString(),candlesViewed:current.index-firstIndex,tradeCount:archived.length,net:archived.reduce((sum,t)=>sum+t.net,0),currency:'ZAR',notes:notes.trim().slice(0,3000),trades:archived,annotations};
+  const record:PracticeRecord={id:attemptId,kind:'free',asset,day,completedAt:new Date().toISOString(),candlesViewed:current.index-firstIndex,tradeCount:archived.length,net:archived.reduce((sum,t)=>sum+t.net,0),currency:'ZAR',notes:notes.trim().slice(0,3000),trades:archived,annotations,sessionName,activeSeconds:activeSecondsRef.current};
   try{saveLocalHistory(uid,record)}catch{return}
   void client.savePracticeRecord(record).then(()=>saveLocalHistory(uid,record,true)).catch(()=>{/* Retained in locally queued history. */});
  };
