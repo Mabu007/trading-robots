@@ -119,6 +119,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
    firstTimestamp:loaded[0].time,lastTimestamp:loaded.at(-1)!.time,
    firstIndex:firstIndexRef.current,session:current,timeline:timelineRef.current,
    costs,notes,annotations,activeSeconds:activeSecondsRef.current,
+   drawingState:(()=>{try{return localStorage.getItem(`trading-vibes:replay-drawings:${uid}:${attemptId}`)||undefined}catch{return undefined}})(),
    createdAt:sessionCreatedAt,updatedAt:now};
  };
  const syncArchive=async(value:ReplayArchive)=>{
@@ -243,6 +244,8 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
    if(priorResult.status==='rejected')setNotice('Earlier candles will load as you scroll left.');
    if(source&&!sourceTrade){
     saveLocalReplayArchive(uid,source);
+    if(source.drawingState)try{localStorage.setItem(`trading-vibes:replay-drawings:${uid}:${id}`,source.drawingState)}catch{}
+
     try{
      const oldKey=`trading-vibes:replay-drawings:${uid}:${chosenDay}`;
      const newKey=`trading-vibes:replay-drawings:${uid}:${id}`;
