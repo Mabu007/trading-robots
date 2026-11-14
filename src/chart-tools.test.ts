@@ -2,9 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { installChartTools } from './chart-tools';
 
 class FakeElement extends EventTarget {
-  children:FakeElement[]=[]; style:Record<string,string>={}; attributes:Record<string,string>={}; textContent=''; innerHTML=''; className=''; open=false; clientWidth=400; clientHeight=200;
+  children:FakeElement[]=[]; style:Record<string,string>={}; attributes:Record<string,string>={}; textContent=''; innerHTML=''; className=''; open=false;value=''; clientWidth=400; clientHeight=200;
   classList={add:()=>{},remove:()=>{},toggle:()=>{}};
   appendChild<T extends FakeElement>(child:T):T{this.children.push(child);return child}
+  append(...items:FakeElement[]){this.children.push(...items)}focus(){}
   setAttribute(key:string,value:string){this.attributes[key]=value}
   contains(target:unknown):boolean{return this===target||this.children.some(c=>c.contains(target))}
   replaceChildren(...children:FakeElement[]){this.children=children}
@@ -32,6 +33,7 @@ describe('chart drawing controls',()=>{
   const handle=find(el,n=>n instanceof FakeSvg&&n.attributes.r==='5')!;handle.dispatchEvent(pointer('pointerdown',20,80));el.dispatchEvent(pointer('pointermove',30,90));el.dispatchEvent(pointer('pointerup',30,90));expect(JSON.parse(data.get('test')!).drawings[0].a).toEqual({time:1180,price:110});
   const del=find(el,n=>n.attributes['aria-label']==='Delete selected drawing')!;del.dispatchEvent(new Event('click'));expect(JSON.parse(data.get('test')!).drawings).toHaveLength(0);
   const undo=find(el,n=>n.attributes['aria-label']==='Undo drawing')!;undo.dispatchEvent(new Event('click'));expect(JSON.parse(data.get('test')!).drawings).toHaveLength(1);
+  const redo=find(el,n=>n.attributes['aria-label']==='Redo drawing')!;redo.dispatchEvent(new Event('click'));expect(JSON.parse(data.get('test')!).drawings).toHaveLength(0);undo.dispatchEvent(new Event('click'));
   const again=new FakeElement();const slower=candles.map((c,i)=>({...c,time:1000+i*120}));const cleanupAgain=installChartTools(again as unknown as HTMLElement,chart,series,slower,'test');const restored=find(again,n=>n instanceof FakeSvg&&n.attributes['stroke-opacity']==='0.01');expect(restored?.attributes.x).toBe('15');expect(restored?.attributes.width).toBe('10');cleanupAgain();
   cleanup();expect(range.unsubscribeVisibleLogicalRangeChange).toHaveBeenCalledTimes(2);expect(chart.unsubscribeCrosshairMove).toHaveBeenCalledTimes(2);
  });
@@ -60,6 +62,8 @@ describe('extra chart annotations',()=>{
   find(el,n=>n.textContent==='Fibonacci retracement')!.dispatchEvent(new Event('click'));
   el.dispatchEvent(pointer('pointerdown',20,80));el.dispatchEvent(pointer('pointerdown',50,100));
   find(el,n=>n.textContent==='Text label')!.dispatchEvent(new Event('click'));el.dispatchEvent(pointer('pointerdown',40,90));
+  const field=find(el,n=>n.attributes['aria-label']==='Text label')!;field.value='Break of structure';
+  const dialog=find(el,n=>n.attributes['role']==='dialog')!;expect(dialog).toBeDefined();dialog.dispatchEvent(new Event('submit',{cancelable:true}));
   const saved=JSON.parse(data.get('annotation-test')!).drawings;expect(saved.map((d:any)=>d.kind)).toEqual(['fibonacci','text']);expect(saved[1].text).toBe('Break of structure');expect(find(el,n=>n.textContent==='0.618')).toBeDefined();cleanup();
  });
 });
