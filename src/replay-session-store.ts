@@ -65,3 +65,31 @@ export function mergeReplaySummaries(local:ReplayArchiveSummary[],remote:ReplayA
  for(const item of local){const existing=items.get(item.id);if(!existing||item.updatedAt>existing.updatedAt)items.set(item.id,item)}
  return [...items.values()].sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));
 }
+
+/** Bring existing date-keyed v4 sessions into the named session index once,
+ * without mutating or deleting their original browser saves. */
+export function importLegacyReplayArchives(uid:string):number{
+ let count=0;
+ const legacyPrefix=`trading-vibes:replay:zar:v4:${uid}:`;
+ try{
+  for(let i=0;i<localStorage.length;i++){
+   const key=localStorage.key(i);if(!key?.startsWith(legacyPrefix))continue;
+   const raw=localStorage.getItem(key);if(!raw)continue;
+   const value=JSON.parse(raw);
+   if(value?.version!==4||!value.session||!Array.isArray(value.session.trades)||!value.day||!Number.isFinite(value.firstTimestamp))continue;
+   const id=validArchiveId(value.attemptId)?value.attemptId:crypto.randomUUID();
+   if(readLocalReplayArchive(uid,id))continue;
+   const now=new Date().toISOString();
+   const archive:ReplayArchive={
+    version:5,id,name:`Gold · ${value.day}`,asset:'XAUUSD',
+    day:value.day,startClock:'08:00',startingBalance:value.session.initialBalance,
+    firstTimestamp:value.firstTimestamp,lastTimestamp:value.lastTimestamp,
+    firstIndex:value.firstIndex||0,session:value.session,timeline:value.timeline||null,
+    costs:value.costs,notes:value.notes||'',annotations:value.annotations||{},
+    activeSeconds:0,createdAt:now,updatedAt:now
+   };
+   saveLocalReplayArchive(uid,archive);count++;
+  }
+ }catch{/* Retain malformed legacy saves untouched. */}
+ return count;
+}
