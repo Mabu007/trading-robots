@@ -1,6 +1,6 @@
 import type {WorkoutId} from './practice-workouts';
 import type {ReplayTrade} from './market-replay-engine';
-export type PracticeRecord={id:string;kind:WorkoutId|'free';day:string;completedAt:string;candlesViewed:number;tradeCount:number;net:number;currency?:'USD'|'ZAR';asset?:'XAUUSD';notes:string;trades?:ReplayTrade[];annotations?:Record<string,string>};
+export type PracticeRecord={id:string;kind:WorkoutId|'free';day:string;completedAt:string;candlesViewed:number;tradeCount:number;net:number;currency?:'USD'|'ZAR';asset?:'XAUUSD';notes:string;trades?:ReplayTrade[];annotations?:Record<string,string>;name?:string;spentSeconds?:number;startedAt?:string;lastActiveAt?:string;snapshot?:import('./replay-sessions').StoredReplayWorkspace};
 // A clean Market Replay journal, separate from retired workout history.
 const key=(uid:string)=>`trading-vibes:replay-trade-history:v2:${uid}`;
 type Entry={record:PracticeRecord;synced:boolean};
