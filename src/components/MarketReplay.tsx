@@ -1,5 +1,5 @@
 import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
-import {Activity,ArrowLeft,ArrowRight,BarChart3,BookOpen,CalendarDays,Camera,CheckCircle2,ChevronRight,Clock3,Download,FastForward,Flag,Maximize2,Minimize2,Pause,Play,RotateCcw,Settings2,SkipBack,SkipForward,GripHorizontal,Undo2,Redo2,ZoomIn,ZoomOut,LocateFixed,ChevronDown,ChevronUp,Target,TrendingDown,TrendingUp,Trophy,X} from 'lucide-react';
+import {Activity,ArrowLeft,ArrowRight,BarChart3,BookOpen,CalendarDays,Camera,CheckCircle2,ChevronRight,Clock3,Download,FastForward,Flag,Maximize2,Minimize2,Pause,Play,RotateCcw,Settings2,Plus,Minus,Pencil,FolderOpen,Clock,Save,Trash2,SkipBack,SkipForward,GripHorizontal,Undo2,Redo2,ZoomIn,ZoomOut,LocateFixed,ChevronDown,ChevronUp,Target,TrendingDown,TrendingUp,Trophy,X} from 'lucide-react';
 import {createChart,CandlestickSeries,LineSeries,createSeriesMarkers,ColorType} from 'lightweight-charts';
 import {historicalData} from '../history-cache';
 import {installChartTools} from '../chart-tools';
@@ -13,9 +13,11 @@ import {ReplayIndicators} from './ReplayIndicators';
 import type {IndicatorSpec} from '../replay-indicators';
 import {ReplayPositionPreview,type PositionPreview} from './ReplayPositionPreview';
 import {visibleArchivedTrades} from '../replay-journal';
+import {formatReplayDuration,importLegacyReplayArchives,listLocalReplayArchives,mergeReplaySummaries,readLocalReplayArchive,removeLocalReplayArchive,saveLocalReplayArchive,type ReplayArchive,type ReplayArchiveSummary} from '../replay-session-store';
+import type {ReplayTrade} from '../market-replay-engine';
 import './market-replay.css';
 
-type Props={client:CloudClient;theme:AppTheme;onClose:()=>void;onHistoryChange?:()=>void;initialDay?:string;initialReviewTradeId?:string};
+type Props={client:CloudClient;theme:AppTheme;onClose:()=>void;onHistoryChange?:()=>void;initialDay?:string;initialReviewTradeId?:string;initialSessionId?:string;initialTrade?:ReplayTrade};
 const price=(value:number)=>new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:3}).format(value);
 const utc=(timestamp:number)=>new Date(timestamp*1000).toLocaleString('en-GB',{timeZone:'UTC',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});
 const yesterday=()=>new Date(Date.now()-86400000).toISOString().slice(0,10);
@@ -32,7 +34,7 @@ function exportJournal(session:ReplaySession,notes:Record<string,string>,day:str
  window.setTimeout(()=>URL.revokeObjectURL(url),1500);
 }
 const speeds=[0.5,1,2,4,8,16] as const;
-export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,initialReviewTradeId}:Props){
+export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,initialReviewTradeId,initialSessionId,initialTrade}:Props){
  const [day,setDay]=useState(()=>initialDay||yesterday()),[startClock,setStartClock]=useState('08:00'),[startingBalance,setStartingBalance]=useState('10000');
  const [asset,setAsset]=useState<'XAUUSD'>('XAUUSD');
  const [showTicket,setShowTicket]=useState(false),[showReview,setShowReview]=useState(false);
@@ -46,7 +48,18 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
   return()=>media.removeEventListener?.('change',sync);
  },[]);
  const ticketDrag=useRef<{x:number;y:number;left:number;top:number;width:number;height:number}|null>(null);
- const [attemptId,setAttemptId]=useState<string>(()=>crypto.randomUUID()),[finished,setFinished]=useState(false),[savingHistory,setSavingHistory]=useState(false);
+ const [attemptId,setAttemptId]=useState<string>(()=>initialSessionId||crypto.randomUUID()),[finished,setFinished]=useState(false),[savingHistory,setSavingHistory]=useState(false);
+ const [sessionName,setSessionName]=useState(''),[sessionCreatedAt,setSessionCreatedAt]=useState(()=>new Date().toISOString());
+ const [savedSessions,setSavedSessions]=useState<ReplayArchiveSummary[]>([]);
+ const [activeSeconds,setActiveSeconds]=useState(0),activeSecondsRef=useRef(0);
+ const [archiveNotice,setArchiveNotice]=useState('');
+ const [archiveBusy,setArchiveBusy]=useState(false);
+ const archiveWriteBusy=useRef(false),archiveRef=useRef<ReplayArchive|null>(null);
+ const [reviewMode,setReviewMode]=useState(Boolean(initialTrade)),[focusedTrade,setFocusedTrade]=useState<ReplayTrade|null>(initialTrade||null);
+ const [markerHover,setMarkerHover]=useState<ReplayTrade|null>(null);
+ const [loadingNext,setLoadingNext]=useState(false),[nextExhausted,setNextExhausted]=useState(false);
+ const nextBusyRef=useRef(false),loadNextRef=useRef<()=>void>(()=>{});
+ const initialLaunch=useRef(false);
  const [bars,setBars]=useState<ReplayBar[]>([]),[session,setSession]=useState<ReplaySession|null>(null),[firstIndex,setFirstIndex]=useState(0);
  const [timeline,setTimeline]=useState<ReplayTimeline|null>(null);
  const timelineRef=useRef<ReplayTimeline|null>(null);
@@ -79,7 +92,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  const setCurrent=(next:ReplaySession)=>{sessionRef.current=next;setSession(next)};
  const recordDecision=(next:ReplaySession)=>{if(timelineRef.current)updateTimeline(recordReplayDecision(timelineRef.current,next));setCurrent(next)};
  const currentBar=session?bars[session.index]:null;
- const replayAtEnd=Boolean(session&&(finished||session.index>=bars.length-1));
+ const replayAtEnd=Boolean(session&&nextExhausted&&session.index>=bars.length-1);
  const metrics=useMemo(()=>session&&currentBar?replayMetrics(session,bars,costs):null,[session,bars,costs,currentBar]);
  const visible=useMemo(()=>session?replayVisibleBars(bars,session):[],[bars,session]);
  const aggregates=useMemo(()=>aggregateReplayBars(visible,timeframe),[visible,timeframe]);
