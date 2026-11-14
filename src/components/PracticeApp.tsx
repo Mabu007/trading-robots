@@ -1,43 +1,38 @@
-import {useEffect,useRef,useState} from 'react';
+import {useEffect,useState} from 'react';
 import {Activity,ArrowRight,BarChart3,CalendarDays,CheckCircle2,ChevronRight,Home,LogOut,Moon,Play,RotateCcw,Sun,Trash2,Pencil,Save,Download,Smartphone,X,Share2,Check} from 'lucide-react';
 import {mergePracticeHistory,readLocalHistory,syncPracticeHistory,saveLocalHistory,removeLocalPracticeRecord,clearLocalPracticeHistory,type PracticeRecord} from '../practice-history';
 import type {CloudClient} from '../firebase';
 import type {AppTheme} from '../theme';
 import {MarketReplay} from './MarketReplay';
+import {installPlatform,isAppStandalone,requestAppInstall,subscribeInstallPrompt} from '../pwa-install';
 import {hideArchivedTrade,patchSavedReplayReview} from '../replay-journal';
 import './practice-app.css';
 
 type Page='home'|'replay'|'progress';
-type InstallPromptEvent=Event&{prompt:()=>Promise<void>;userChoice:Promise<{outcome:'accepted'|'dismissed'}>};
-const isStandalone=()=>typeof window!=='undefined'&&(window.matchMedia('(display-mode: standalone)').matches||(navigator as Navigator&{standalone?:boolean}).standalone===true);
-const installationDevice=()=>typeof navigator!=='undefined'&&/iPad|iPhone|iPod/.test(navigator.userAgent)?'ios':typeof navigator!=='undefined'&&/Android/.test(navigator.userAgent)?'android':'desktop';
 type Props={client:CloudClient;theme:AppTheme;onSignOut:()=>void;onThemeToggle:()=>void};
 const menu=[{id:'home',label:'Home',icon:Home},{id:'replay',label:'Market Replay',icon:Activity},{id:'progress',label:'My Progress',icon:BarChart3}] as const;
 const heroImage='https://pub-60ec726f38cd437c94063e4c72071321.r2.dev/Confident%20Trader%20in%20a%20Modern%20Workspace.png';
 export function PracticeApp({client,theme,onSignOut,onThemeToggle}:Props){
  const [page,setPage]=useState<Page>('home');
- const installEvent=useRef<InstallPromptEvent|null>(null);
  const [installDialog,setInstallDialog]=useState(false),[installed,setInstalled]=useState(false),[hasInstallPrompt,setHasInstallPrompt]=useState(false);
  useEffect(()=>{
-  setInstalled(isStandalone());
-  const before=(event:Event)=>{event.preventDefault();installEvent.current=event as InstallPromptEvent;setHasInstallPrompt(true)};
-  const completed=()=>{setInstalled(true);installEvent.current=null;setHasInstallPrompt(false);setInstallDialog(false)};
-  const onModeChange=()=>setInstalled(isStandalone());
-  window.addEventListener('beforeinstallprompt',before);
+  setInstalled(isAppStandalone());
+  const unsub=subscribeInstallPrompt(setHasInstallPrompt);
+  const completed=()=>{setInstalled(true);setInstallDialog(false)};
+  const onModeChange=()=>setInstalled(isAppStandalone());
   window.addEventListener('appinstalled',completed);
   const display=window.matchMedia('(display-mode: standalone)');
   display.addEventListener?.('change',onModeChange);
-  return()=>{window.removeEventListener('beforeinstallprompt',before);window.removeEventListener('appinstalled',completed);display.removeEventListener?.('change',onModeChange)};
+  return()=>{unsub();window.removeEventListener('appinstalled',completed);display.removeEventListener?.('change',onModeChange)};
  },[]);
  const openInstall=async()=>{
-  const event=installEvent.current;
-  if(event&&!installed){
-   installEvent.current=null;setHasInstallPrompt(false);
-   try{await event.prompt();const result=await event.userChoice;if(result.outcome==='accepted')return}catch{/* Browser prompt unavailable; show instructions instead. */}
+  if(!installed&&hasInstallPrompt){
+   const result=await requestAppInstall();
+   if(result==='accepted')return;
   }
   setInstallDialog(true);
  };
- const device=installationDevice();
+ const device=installPlatform(typeof navigator==='undefined'?'':navigator.userAgent);
  const [replayChoice,setReplayChoice]=useState<{day?:string;tradeId?:string}>({});
  const [edit,setEdit]=useState<{recordId:string;tradeId:string;note:string}|null>(null);
  const [saving,setSaving]=useState(false),[historyError,setHistoryError]=useState('');
