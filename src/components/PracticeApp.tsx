@@ -122,7 +122,7 @@ export function PracticeApp({client,theme,onSignOut,onThemeToggle}:Props){
      {tradeRows.length?<section className="practice-trades-list"><div className="practice-section-head"><div><span className="practice-overline">YOUR TRADING JOURNAL</span><h2>Trades you've practised.</h2><p>Select a trade to revisit that historical day or edit the saved review.</p></div></div>
       <div className="practice-trade-table-scroll"><table className="practice-trade-table"><thead><tr><th>Date</th><th>Asset</th><th>Side</th><th>Entry</th><th>Exit</th><th>Result</th><th>Review</th><th>Actions</th></tr></thead><tbody>
        {tradeRows.map(({record,trade})=><tr key={record.id+':'+trade.id}>
-        <td><button type="button" className="practice-trade-day" onClick={()=>openReplay(record.day,trade.id,record.id,trade)} title="Replay this exact historical trade">{record.day}</button></td>
+        <td><button type="button" className="practice-trade-day" onClick={()=>openReplay(record.day,trade.id,record.id,trade)} title="Replay this exact historical trade">{record.day}{record.sessionName&&<small className="practice-trade-session-name">{record.sessionName}</small>}</button></td>
         <td>Gold</td><td><span className={trade.side==='BUY'?'is-profit':'is-loss'}>{trade.side==='BUY'?'BUY':'SELL'}</span></td><td>{trade.entry.toFixed(3)}</td><td>{trade.exit.toFixed(3)}</td>
         <td className={trade.net>0?'is-profit':trade.net<0?'is-loss':''}>{money(trade.net)}</td>
         <td className="practice-trade-review">{record.annotations?.[trade.id]||<span className="practice-muted">Add a review</span>}</td>
