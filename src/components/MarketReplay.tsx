@@ -13,7 +13,7 @@ import {ReplayIndicators} from './ReplayIndicators';
 import type {IndicatorSpec} from '../replay-indicators';
 import {ReplayPositionPreview,type PositionPreview} from './ReplayPositionPreview';
 import {visibleArchivedTrades} from '../replay-journal';
-import {getLocalWorkspace,saveLocalWorkspace,formatPracticeDuration,type StoredReplayWorkspace,renameLocalWorkspace} from '../replay-sessions';
+import {getLocalWorkspace,saveLocalWorkspace,formatPracticeDuration,type StoredReplayWorkspace,renameLocalWorkspace,listLocalWorkspaces,migrateLegacyReplaySaves} from '../replay-sessions';
 import './market-replay.css';
 
 type Props={client:CloudClient;theme:AppTheme;onClose:()=>void;onHistoryChange?:()=>void;initialDay?:string;initialReviewTradeId?:string;initialRecord?:PracticeRecord};
@@ -168,7 +168,19 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  },[sessionOpen,reviewing]);
  useEffect(()=>{
   if(sessionOpen)return;let active=true;
-  const local=readLocalHistory(uid).map(entry=>entry.record).filter(record=>record.snapshot?.version===5);
+  migrateLegacyReplaySaves(uid);
+  const localRecords=readLocalHistory(uid).map(entry=>entry.record).filter(record=>record.snapshot?.version===5);
+  const localIndex=listLocalWorkspaces(uid).map(item=>{
+   const snapshot=getLocalWorkspace(uid,item.id);
+   return snapshot?{id:item.id,kind:'free' as const,day:item.day,asset:'XAUUSD' as const,
+    completedAt:item.updatedAt,candlesViewed:Math.max(0,snapshot.session.index-snapshot.firstIndex),tradeCount:snapshot.session.trades.length,
+    net:snapshot.session.trades.reduce((n,t)=>n+t.net,0),currency:'ZAR' as const,notes:snapshot.notes,
+    name:item.name,spentSeconds:item.elapsedSeconds,startedAt:snapshot.startedAt,
+    annotations:snapshot.annotations,trades:snapshot.session.trades,snapshot}:null;
+  }).filter((item):item is NonNullable<typeof item>=>item!==null);
+  const byId=new Map(localIndex.map(item=>[item.id,item as PracticeRecord]));
+  for(const record of localRecords)byId.set(record.id,record);
+  const local=[...byId.values()];
   setSavedSessions(local);
   void client.listPracticeRecords().then(records=>{if(active){const all=new Map(local.map(record=>[record.id,record]));for(const record of records.filter(i=>i.snapshot?.version===5)){if(!all.has(record.id))all.set(record.id,record)}setSavedSessions([...all.values()].sort((a,b)=>b.completedAt.localeCompare(a.completedAt)))}}).catch(()=>{});
   return()=>{active=false};
