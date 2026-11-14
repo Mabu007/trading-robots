@@ -39,7 +39,7 @@ export function readLocalReplayArchive(uid:string,id:string):ReplayArchive|null{
  if(!validArchiveId(id))return null;
  try{
   const value=JSON.parse(localStorage.getItem(archiveKey(uid,id))||'null') as ReplayArchive|null;
-  if(value?.version!==5||value.id!==id||!value.session||!Array.isArray(value.session.trades)||!/^\\d{4}-\\d{2}-\\d{2}$/.test(value.day))return null;
+  if(value?.version!==5||value.id!==id||!value.session||!Array.isArray(value.session.trades)||!/^\d{4}-\d{2}-\d{2}$/.test(value.day))return null;
   return value;
  }catch{return null}
 }
