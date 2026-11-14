@@ -33,3 +33,9 @@
 @media(max-width:1040px){.practice-replay-hero .practice-replay-hero-copy{width:min(570px,70%)}}
 @media(max-width:800px){.practice-replay-first .practice-info-grid.practice-replay-steps{grid-template-columns:1fr}.practice-replay-first .practice-replay-steps article{padding:19px}.practice-replay-hero .practice-replay-hero-copy{width:min(530px,78%)}}
 @media(max-width:600px){.practice-replay-first .practice-replay-hero{min-height:460px;padding:26px 22px;align-items:flex-end}.practice-replay-hero .practice-hero-photo{object-position:61% center}.practice-replay-hero .practice-hero-shade{background:linear-gradient(0deg,rgba(8,27,23,.98) 0%,rgba(8,27,23,.84) 45%,rgba(8,27,23,.14) 100%)}.practice-replay-hero .practice-replay-hero-copy{width:100%}.practice-replay-hero h1{font-size:clamp(38px,9vw,48px);margin:13px 0!important}.practice-replay-hero p{font-size:12px!important;line-height:1.7!important}.practice-replay-first .practice-home-action{align-items:stretch;flex-direction:column;padding:20px}.practice-replay-first .practice-home-action .practice-primary{justify-content:center}}
+
+
+/* Respect the app's theme for the new replay-only cards. */
+.practice-replay-first[data-practice-theme=dark]{--p-card:#19251e;--p-border:#304234;--p-green:#b4dfb8;--p-lime:#273c2b}
+.practice-replay-first[data-practice-theme=dark] .practice-replay-steps article,.practice-replay-first[data-practice-theme=dark] .practice-home-action{box-shadow:0 10px 24px #0002}
+.practice-replay-first[data-practice-theme=light]{--p-card:#fff;--p-border:#e5e9e1}
