@@ -3,7 +3,7 @@ import {Activity,ArrowLeft,ArrowRight,BarChart3,BookOpen,CalendarDays,Camera,Che
 import {createChart,CandlestickSeries,LineSeries,createSeriesMarkers,ColorType} from 'lightweight-charts';
 import {historicalData} from '../history-cache';
 import {installChartTools} from '../chart-tools';
-import {saveLocalHistory,type PracticeRecord} from '../practice-history';
+import {removeLocalPracticeRecord,saveLocalHistory,type PracticeRecord} from '../practice-history';
 import {rebaseDaySession} from '../replay-history-migration';
 import {newReplayTimeline,recordReplayDecision,replayTo,type ReplayTimeline} from '../replay-timeline';
 import type {CloudClient} from '../firebase';
@@ -54,7 +54,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  const [activeSeconds,setActiveSeconds]=useState(0),activeSecondsRef=useRef(0);
  const [archiveNotice,setArchiveNotice]=useState('');
  const [archiveBusy,setArchiveBusy]=useState(false);
- const archiveWriteBusy=useRef(false),archiveRef=useRef<ReplayArchive|null>(null);
+ const archiveWriteBusy=useRef(false),archiveRef=useRef<ReplayArchive|null>(null),pendingArchiveRef=useRef<ReplayArchive|null>(null);
  const [reviewMode,setReviewMode]=useState(Boolean(initialTrade)),[focusedTrade,setFocusedTrade]=useState<ReplayTrade|null>(initialTrade||null);
  const [markerHover,setMarkerHover]=useState<ReplayTrade|null>(null);
  const markerTradeRef=useRef<ReplayTrade[]>([]);
@@ -122,11 +122,15 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
    createdAt:sessionCreatedAt,updatedAt:now};
  };
  const syncArchive=async(value:ReplayArchive)=>{
-  if(archiveWriteBusy.current)return;
+  if(archiveWriteBusy.current){pendingArchiveRef.current=value;return}
   archiveWriteBusy.current=true;
   try{await client.saveReplaySession(value);setArchiveNotice('')}
   catch(error){setArchiveNotice((error instanceof Error?error.message:'Cloud sync unavailable')+' · Saved on this device')}
-  finally{archiveWriteBusy.current=false}
+  finally{
+   archiveWriteBusy.current=false;
+   const pending=pendingArchiveRef.current;pendingArchiveRef.current=null;
+   if(pending)void syncArchive(pending);
+  }
  };
  const saveArchive=(syncCloud=false)=>{
   const snapshot=sessionSnapshot();if(!snapshot)return;
@@ -170,8 +174,10 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
   setArchiveBusy(true);
   try{
    await client.deleteReplaySession(id);
-   await client.deletePracticeRecord(id).catch(()=>{});
+   await client.deletePracticeRecord(id);
+   removeLocalPracticeRecord(uid,id);
    removeLocalReplayArchive(uid,id);
+   try{localStorage.removeItem(`trading-vibes:replay-drawings:${uid}:${id}`)}catch{}
    setSavedSessions(items=>items.filter(item=>item.id!==id));
   }catch(error){setArchiveNotice(error instanceof Error?error.message:'Could not delete the session.')}
   finally{setArchiveBusy(false)}
