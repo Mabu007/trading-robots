@@ -54,7 +54,7 @@ export function migrateLegacyReplaySaves(uid:string):number{
   try{
    const saved=JSON.parse(localStorage.getItem(key)||'null');
    if(saved?.version!==4||saved.asset!=='XAUUSD'||!saved.session||!Array.isArray(saved.session.trades))continue;
-   const id=typeof saved.attemptId==='string'&&/^[a-zA-Z0-9-]{1,80}$/.test(saved.attemptId)?saved.attemptId:crypto.randomUUID();
+   const id=typeof saved.attemptId==='string'&&/^[a-zA-Z0-9-]{1,80}$/.test(saved.attemptId)?saved.attemptId:'legacy-'+String(saved.day||'unknown').replace(/[^0-9]/g,'');
    if(getLocalWorkspace(uid,id))continue;
    const when=new Date().toISOString();
    saveLocalWorkspace(uid,{version:5,id,day:saved.day,asset:'XAUUSD',name:'Gold · '+saved.day+' · Earlier replay',
