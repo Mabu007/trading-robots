@@ -95,7 +95,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  const currentBar=session?bars[session.index]:null;
  const replayAtEnd=Boolean(session&&nextExhausted&&session.index>=bars.length-1);
  const metrics=useMemo(()=>session&&currentBar?replayMetrics(session,bars,costs):null,[session,bars,costs,currentBar]);
- markerTradeRef.current=reviewMode&&focusedTrade?[focusedTrade]:session?.trades||[];
+ markerTradeRef.current=reviewMode&&initialTrade?[initialTrade]:session?.trades||[];
  timeframeRef.current=timeframe;
  const visible=useMemo(()=>session?replayVisibleBars(bars,session):[],[bars,session]);
  const aggregates=useMemo(()=>aggregateReplayBars(visible,timeframe),[visible,timeframe]);
@@ -537,8 +537,8 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
    c.markerKey=markerSignature;
   const marks:any[]=[];
   for(const t of markerTradeRef.current){
-   marks.push({time:Math.floor(t.entryTime/(timeframe*60))*(timeframe*60) as any,position:t.side==='BUY'?'belowBar':'aboveBar',shape:'arrowUp',color:t.side==='BUY'?'#19a578':'#db6a6b',text:t.side==='BUY'?'L':'S'});
-   marks.push({time:Math.floor(t.exitTime/(timeframe*60))*(timeframe*60) as any,position:t.net>=0?'aboveBar':'belowBar',shape:'circle',color:t.net>=0?'#19a578':'#db6a6b',text:(t.net>=0?'+':'')+t.net.toFixed(1)});
+   if(t.entryTime<=visibleNow)marks.push({time:Math.floor(t.entryTime/(timeframe*60))*(timeframe*60) as any,position:t.side='BUY'?'belowBar':'aboveBar',shape:'arrowUp',color:t.side==='BUY'?'#19a578':'#db6a6b',text:t.side==='BUY'?'L':'S'});
+   if(t.exitTime<=visibleNow)marks.push({time:Math.floor(t.exitTime/(timeframe*60))*(timeframe*60) as any,position:t.net>=0?'aboveBar':'belowBar',shape:'circle',color:t.net>=0?'#19a578':'#db6a6b',text:(t.net>=0?'+':'')+t.net.toFixed(1)});
   }
   for(const p of replayPositions(session))marks.push({time:Math.floor(p.entryTime/(timeframe*60))*(timeframe*60) as any,position:p.side==='BUY'?'belowBar':'aboveBar',shape:'arrowUp',color:'#e9b45d',text:'OPEN'});
   c.markers.setMarkers(marks.sort((a,b)=>Number(a.time)-Number(b.time)));
