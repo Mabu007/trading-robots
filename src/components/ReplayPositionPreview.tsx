@@ -24,6 +24,6 @@ export function ReplayPositionPreview({chart,series,preview,onChange}:Props){
  return <div className="replay-position-preview" aria-label="Editable order preview">
   <div className="replay-position-zone risk" style={{top:Math.min(e,s),height:Math.abs(e-s)}}/>
   <div className="replay-position-zone reward" style={{top:Math.min(e,t),height:Math.abs(e-t)}}/>
-  {([['target',t,'TARGET',preview.target],['entry',e,'ENTRY',preview.entry],['stop',s,'STOP',preview.stop]] as const).map(([key,y,label,value])=><button key={key} type="button" className={'replay-position-line '+key+(key==='entry'&&!preview.movableEntry?' is-fixed':'')} style={{top:y}} onPointerDown={key==='entry'&&!preview.movableEntry?undefined:drag(key)} aria-label={`${key} ${value.toFixed(3)}${key==='entry'&&!preview.movableEntry?'':' draggable'}`}><span><b>↕</b> {label} · {value.toFixed(3)} <small>{key==='entry'&&!preview.movableEntry?'LIVE PRICE':'DRAG'}</small></span></button>)}
+  {([['target',t,'TARGET',preview.target],['entry',e,'ENTRY',preview.entry],['stop',s,'STOP',preview.stop]] as const).map(([key,y,label,value])=><button key={key} type="button" className={'replay-position-line '+key+(key==='entry'&&!preview.movableEntry?' is-fixed':'')} style={{top:y-13}} onPointerDown={key==='entry'&&!preview.movableEntry?undefined:drag(key)} aria-label={`${key} ${value.toFixed(3)}${key==='entry'&&!preview.movableEntry?'':' draggable'}`}><span><b>↕</b> {label} · {value.toFixed(3)} <small>{key==='entry'&&!preview.movableEntry?'LIVE PRICE':'DRAG'}</small></span></button>)}
  </div>;
 }
