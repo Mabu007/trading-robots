@@ -262,16 +262,14 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
  };
  const loadEarlier=async()=>{
   const currentBars=barsRef.current;if(earlierBusyRef.current||noEarlierRef.current||Date.now()<earlierRetryAtRef.current||!currentBars.length||!sessionRef.current)return;
-  if(currentBars.length>=50000){noEarlierRef.current=true;setNotice('This device has reached the 50,000-candle chart limit.');return}
   const boundary=Math.floor(currentBars[0].time/86400)*86400000;
   earlierBusyRef.current=true;setLoadingEarlier(true);
   try{
-   const history=await historicalData({venue:'research',asset,timeframe:'m1',from:new Date(boundary-7*86400000).toISOString(),to:new Date(boundary).toISOString()});
+   const history=await historicalData({venue:'research',asset,timeframe:'m1',from:new Date(boundary-2*86400000).toISOString(),to:new Date(boundary).toISOString()});
    const older=history.candles.filter(c=>c.time<currentBars[0].time).map(c=>({time:c.time,open:c.open,high:c.high,low:c.low,close:c.close}));
    const latest=barsRef.current,current=sessionRef.current;
    if(!current||!latest.length||latest[0].time!==currentBars[0].time)return;
    if(!older.length){noEarlierRef.current=true;setNotice('No earlier candles were returned for this range.');return}
-   if(latest.length+older.length>50000){noEarlierRef.current=true;setNotice('This device has reached the 50,000-candle chart limit.');return}
    const combined=validateReplayBars([...older,...latest]),rebased=rebaseDaySession(current,latest,older.length);
    if(!rebased)throw Error('Earlier candles could not be safely attached to this replay.');
    if(timelineRef.current){const origin=rebaseDaySession(timelineRef.current.origin,latest,older.length),decisions=timelineRef.current.decisions.map(item=>rebaseDaySession(item,latest,older.length));if(!origin||decisions.some(item=>!item))throw Error('Replay decisions could not be safely rebased.');updateTimeline({origin,decisions:decisions as ReplaySession[]});}
@@ -282,19 +280,51 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
   finally{earlierBusyRef.current=false;setLoadingEarlier(false)}
  };
  loadEarlierRef.current=()=>void loadEarlier();
+ const loadNext=async()=>{
+  if(nextBusyRef.current||!barsRef.current.length||!sessionRef.current)return;
+  const currentBars=barsRef.current,ending=currentBars.at(-1)!.time;
+  const boundary=Math.floor(ending/86400)*86400000+86400000;
+  const maxDay=Date.parse(yesterday()+'T00:00:00Z');
+  if(boundary>maxDay){setNextExhausted(true);setPlaying(false);setNotice('Reached the newest historical data. Your saved session remains open.');return}
+  nextBusyRef.current=true;setLoadingNext(true);
+  try{
+   for(let d=0;d<9;d++){
+    const begin=boundary+d*86400000;if(begin>maxDay)break;
+    try{
+     const result=await historicalData({venue:'research',asset,timeframe:'m1',from:new Date(begin).toISOString(),to:new Date(begin+86400000).toISOString()});
+     const newer=result.candles.filter(c=>c.time>ending).map(c=>({time:c.time,open:c.open,high:c.high,low:c.low,close:c.close}));
+     if(!newer.length)continue;
+     if(barsRef.current!==currentBars)return;
+     const combined=validateReplayBars([...currentBars,...newer]);
+     barsRef.current=combined;setBars(combined);setNextExhausted(false);
+     setNotice('More market candles loaded. Keep practising.');return;
+    }catch(error){
+     const message=error instanceof Error?error.message:'';
+     if(/No completed|No historical|No candles|No data/i.test(message))continue;
+     throw error;
+    }
+   }
+   setNextExhausted(true);setPlaying(false);
+   setNotice('No newer completed candles are available yet. Resume this session when more history arrives.');
+  }catch(error){setPlaying(false);setError(error instanceof Error?error.message:'Unable to fetch the next market candles. Retry.')}
+  finally{nextBusyRef.current=false;setLoadingNext(false)}
+ };
+ loadNextRef.current=()=>void loadNext();
+
  const advance=useCallback((steps=1)=>{
   const current=sessionRef.current;
-  if(!current||!bars.length||finished||preview)return;
+  if(!current||!bars.length||preview)return;
+  if(current.index>=bars.length-1){loadNextRef.current();return}
   try{const target=Math.min(bars.length-1,current.index+steps),t=timelineRef.current;
    const futureDecision=Boolean(t?.decisions.some(item=>item.index>current.index&&item.index<=target));
-   const next=t&&futureDecision?replayTo(t,target,bars,costs):replayAdvance(current,bars,costs,Math.max(1,steps));if(next===current||next.index===current.index){setPlaying(false);return}
+   const next=t&&futureDecision?replayTo(t,target,bars,costs):replayAdvance(current,bars,costs,Math.max(1,steps));if(next===current||next.index===current.index){loadNextRef.current();return}
     setCurrent(next);const added=replayPositions(next).find(p=>!replayPositions(current).some(old=>old.id===p.id));if(added){setSelectedPositionId(added.id);setAdjustStop(String(added.stop));setAdjustTarget(String(added.target));setShowNewOrder(false);setNotice('Pending paper order filled.')}setProgressTime(Date.now());
-    if(next.index>=bars.length-1){setPlaying(false);setNotice('Session complete. Review your trade journal and stats.');}
+    if(next.index>=bars.length-1){loadNextRef.current();}
     else if(next.trades.length>current.trades.length){const trade=next.trades.at(-1)!;
      setNotice((trade.net>=0?'Target reached · ':'Trade closed · ')+(trade.net>=0?'+':'')+money(trade.net)+' net');
     }
   }catch(e){setPlaying(false);setError(e instanceof Error?e.message:'Cannot advance this replay.')}
- },[bars,costs,finished,preview]);
+ },[bars,costs,preview]);
  useEffect(()=>{if(!playing||!session||replayAtEnd)return;const timer=window.setInterval(()=>advance(1),Math.max(45,Math.round(1000/speed)));return()=>window.clearInterval(timer)},[playing,speed,advance,replayAtEnd,sessionOpen]);
  const rewind=(steps=1)=>{
   const current=sessionRef.current,t=timelineRef.current;if(!current||!t||preview)return;
@@ -310,7 +340,7 @@ export function MarketReplay({client,theme,onClose,onHistoryChange,initialDay,in
   }catch(e){setPlaying(false);setError(e instanceof Error?e.message:'Unable to rewind this saved session.')}
  };
  const enter=(side:ReplaySide)=>{
-  if(!sessionRef.current||finished)return;
+  if(!sessionRef.current)return;
   setPlaying(false);setError('');
   if(!preview||preview.side!==side)return;
   try{const previous=sessionRef.current;const sl=Math.abs(preview.entry-preview.stop),tp=Math.abs(preview.target-preview.entry);const next=orderType==='market'?replayEnter(sessionRef.current,bars,side,number(quantity),sl,tp,costs):replayPlacePending(sessionRef.current,bars,side,orderType,preview.entry,number(quantity),sl,tp,costs);
