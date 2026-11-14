@@ -69,7 +69,8 @@ describe('extra chart annotations',()=>{
   el.dispatchEvent(pointer('pointerdown',20,80));el.dispatchEvent(pointer('pointerdown',50,100));
   find(el,n=>n.textContent==='Text label')!.dispatchEvent(new Event('click'));el.dispatchEvent(pointer('pointerdown',40,90));
   const field=find(el,n=>n.attributes['aria-label']==='Text label')!;field.value='Break of structure';
-  const dialog=find(el,n=>n.attributes['role']==='dialog')!;expect(dialog).toBeDefined();dialog.dispatchEvent(new Event('submit',{cancelable:true}));
+  const inline=find(el,n=>n.attributes['aria-label']==='Edit chart text')!;expect(inline).toBeDefined();
+  find(el,n=>n.attributes['aria-label']==='Save text')!.dispatchEvent(new Event('click'));
   const saved=JSON.parse(data.get('annotation-test')!).drawings;expect(saved.map((d:any)=>d.kind)).toEqual(['fibonacci','text']);expect(saved[1].text).toBe('Break of structure');expect(find(el,n=>n.textContent==='0.618')).toBeDefined();cleanup();
  });
  it('draws rectangles past the last revealed candle and highlights the selected shape',()=>{
@@ -91,7 +92,14 @@ describe('extra chart annotations',()=>{
   expect(saved[0].b.time).toBeGreaterThan(candles.at(-1)!.time);
   const shape=find(el,n=>n instanceof FakeSvg&&n.attributes['stroke-opacity']==='0.01')!;
   shape.dispatchEvent(pointer('pointerdown',45,55));el.dispatchEvent(pointer('pointerup',45,55));
-  expect(find(el,n=>n instanceof FakeSvg&&n.attributes.stroke==='#51ecc0')).toBeDefined();
+  expect(find(el,n=>n instanceof FakeSvg&&n.attributes.filter?.includes('drop-shadow'))).toBeDefined();
+  find(el,n=>n.attributes['aria-label']==='Drawing properties')!.dispatchEvent(new Event('click'));
+  const picker=find(el,n=>n.attributes['aria-label']==='Drawing colour')!;
+  picker.value='#ef801f';picker.dispatchEvent(new Event('input'));
+  expect(JSON.parse(store.get('future-rectangle')!).drawings[0].color).toBe('#ef801f');
+  const event=new Event('keydown',{cancelable:true});Object.assign(event,{key:'Backspace'});
+  win.dispatchEvent(event);
+  expect(JSON.parse(store.get('future-rectangle')!).drawings).toHaveLength(0);
   cleanup();
  });
 
