@@ -39,3 +39,40 @@
 .practice-replay-first[data-practice-theme=dark]{--p-card:#19251e;--p-border:#304234;--p-green:#b4dfb8;--p-lime:#273c2b}
 .practice-replay-first[data-practice-theme=dark] .practice-replay-steps article,.practice-replay-first[data-practice-theme=dark] .practice-home-action{box-shadow:0 10px 24px #0002}
 .practice-replay-first[data-practice-theme=light]{--p-card:#fff;--p-border:#e5e9e1}
+
+
+/* Firebase-backed trade journal: full-width table, modal editing and explicit clean slate. */
+.practice-replay-first .practice-history-stats{margin-top:24px}
+.practice-replay-first .practice-history-stats>div{border-radius:16px;padding:24px}
+.practice-replay-first .practice-history-stats strong{font-size:clamp(28px,3vw,38px);letter-spacing:-1px}
+.practice-replay-first .is-profit{color:#25986e!important;font-weight:800}
+.practice-replay-first .is-loss{color:#ce666c!important;font-weight:800}
+.practice-trades-list{margin:38px 0 22px;min-width:0}
+.practice-trades-list .practice-section-head{margin:0 0 19px}
+.practice-trade-table-scroll{max-width:100%;overflow-x:auto;border:1px solid var(--p-border,#e5e9e1);background:var(--p-card,#fff);border-radius:18px;box-shadow:0 7px 27px #0b361512}
+.practice-trade-table{width:100%;min-width:850px;border-collapse:collapse;text-align:left}
+.practice-trade-table thead{background:color-mix(in srgb,var(--p-bg) 84%,transparent)}
+.practice-trade-table th{padding:16px 14px;text-transform:uppercase;font-size:10px;letter-spacing:1.15px;font-weight:850;color:var(--p-muted);white-space:nowrap;border-bottom:1px solid var(--p-border,#e5e9e1)}
+.practice-trade-table td{padding:18px 14px;font-size:12px;font-weight:650;color:var(--p-ink);border-bottom:1px solid var(--p-border,#e5e9e1)}
+.practice-trade-table tr:last-child td{border-bottom:0}
+.practice-trade-table tbody tr:hover{background:color-mix(in srgb,var(--p-lime) 25%,transparent)}
+.practice-trade-day{font-weight:800;color:var(--p-green)!important;border:0;background:transparent;padding:0;white-space:nowrap;text-decoration:underline;text-underline-offset:4px}
+.practice-trade-review{max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:450!important}
+.practice-muted{color:var(--p-muted);font-weight:400}
+.practice-trade-actions{display:flex;gap:6px}
+.practice-trade-actions button{display:grid;place-items:center;border:1px solid var(--p-border,#e5e9e1);background:var(--p-card,#fff);color:var(--p-muted);border-radius:9px;width:31px;height:31px}
+.practice-trade-actions button:hover{color:var(--p-green);border-color:var(--p-green)}
+.practice-history-error{margin:16px 0;color:#c3565f;font-size:12px}
+.practice-danger-zone{margin:50px 0 16px;padding:22px;border:1px dashed #c765654c;border-radius:15px;background:color-mix(in srgb,var(--p-card,#fff) 88%,#f9e4e4)}
+.practice-danger-zone p{font-size:12px;color:var(--p-muted);line-height:1.7;margin:0 0 15px}
+.practice-danger-zone button{display:inline-flex;align-items:center;gap:8px;border:1px solid #c7656570;border-radius:10px;color:#bd5358;background:transparent;padding:10px 13px;font-size:11px;font-weight:800}
+.practice-danger-zone button:hover{background:#d15d5c14}
+.practice-review-backdrop{position:fixed;z-index:400;inset:0;background:#091910c8;backdrop-filter:blur(8px);display:grid;place-items:center;padding:16px}
+.practice-review-dialog{display:grid;gap:11px;box-sizing:border-box;width:min(480px,100%);padding:30px;background:var(--p-card,#fff);color:var(--p-ink);border:1px solid var(--p-border,#e5e9e1);box-shadow:0 28px 80px #0005;border-radius:22px}
+.practice-review-dialog h3{font:400 30px Georgia,serif;letter-spacing:-1px;margin:5px 0 0}
+.practice-review-dialog p{font-size:12px;color:var(--p-muted);line-height:1.7;margin:0}
+.practice-review-dialog textarea{min-height:145px;width:100%;box-sizing:border-box;border:1px solid var(--p-border,#e5e9e1);border-radius:12px;padding:13px;font:13px Inter,system-ui,sans-serif;resize:vertical;color:var(--p-ink);background:var(--p-bg)}
+.practice-review-dialog>div{display:flex;justify-content:flex-end;gap:10px;margin-top:9px}
+.practice-review-dialog>div button{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--p-border,#e5e9e1);background:var(--p-bg);color:var(--p-ink);padding:11px 16px;border-radius:10px;font-size:12px;font-weight:800}
+.practice-review-dialog>div button[type=submit]{background:#245b47;color:white;border-color:transparent}
+@media(max-width:700px){.practice-replay-first .practice-history-stats{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.practice-replay-first .practice-history-stats>div{padding:14px 10px;min-width:0}.practice-replay-first .practice-history-stats strong{font-size:25px}.practice-replay-first .practice-history-stats span{font-size:9px;letter-spacing:.4px}.practice-review-dialog{padding:22px}}
