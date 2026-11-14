@@ -368,3 +368,29 @@
 
 /* A narrow phone stays readable with room for the market timestamp. */
 @media(max-width:365px){.tv-replay-page .tv-replay-top-actions button:first-child:not(:last-child){display:none!important}.tv-replay-page .tv-replay-mobile-stats>summary{padding:9px 7px}.tv-replay-page .tv-replay-quote>strong{font-size:14px!important}}
+
+
+/* Non-modal on-chart text editor & properties popover. */
+.tv-replay-page .chart-text-inline{position:absolute;z-index:40;box-sizing:border-box;display:flex;align-items:flex-start;gap:5px;width:min(245px,calc(100% - 12px));min-height:56px;padding:6px;border:1px solid #6ee5a6;border-radius:10px;background:color-mix(in srgb,var(--tv-shell-panel) 94%,transparent);box-shadow:0 9px 36px #0005;backdrop-filter:blur(10px);pointer-events:auto}
+.tv-replay-page .chart-text-inline textarea{flex:1;min-width:0;width:100%;resize:both;min-height:48px;max-height:200px;border:1px dashed #65b993aa;border-radius:5px;padding:7px 8px;background:transparent;color:var(--tv-shell-ink);font:500 16px/1.35 Inter,system-ui,sans-serif;outline:none}
+.tv-replay-page .chart-text-inline textarea:focus{border-color:#72db9c;background:color-mix(in srgb,var(--tv-shell-panel) 78%,transparent)}
+.tv-replay-page .chart-text-inline-actions{display:grid;gap:3px}
+.tv-replay-page .chart-text-inline-actions button{display:grid;place-items:center;min-width:27px;width:27px;height:27px;border-radius:7px;border:1px solid var(--tv-shell-line);background:var(--tv-shell-panel-muted);color:var(--tv-shell-ink);font-size:16px;font-weight:800}
+.tv-replay-page .chart-text-inline-actions button:last-child{background:#216b4a;color:white;border-color:#216b4a}
+.tv-replay-page .chart-drawing-properties{position:absolute;z-index:42;box-sizing:border-box;width:min(230px,calc(100% - 12px));padding:14px;border-radius:15px;background:var(--tv-shell-panel);border:1px solid var(--tv-shell-line);box-shadow:0 18px 50px #0006;display:grid;gap:13px;pointer-events:auto;backdrop-filter:blur(14px)}
+.tv-replay-page .chart-drawing-properties-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.tv-replay-page .chart-drawing-properties-top strong{font-size:12px;font-weight:800;color:var(--tv-shell-ink)}
+.tv-replay-page .chart-drawing-properties-top button{width:26px;height:26px;display:grid;place-items:center;background:var(--tv-shell-panel-muted);color:var(--tv-shell-muted);border:1px solid var(--tv-shell-line);border-radius:7px;font-size:17px}
+.tv-replay-page .chart-drawing-properties>label{display:flex;align-items:center;justify-content:space-between;gap:9px;font-size:11px;font-weight:750;color:var(--tv-shell-ink)}
+.tv-replay-page .chart-drawing-properties input[type=color]{width:42px;min-height:35px;border:1px solid var(--tv-shell-line);padding:2px;border-radius:8px;background:var(--tv-shell-panel);cursor:pointer}
+.tv-replay-page .chart-drawing-properties input[type=range]{width:112px;accent-color:#38a973}
+.tv-replay-page .chart-drawing-properties>button{min-height:35px;border:1px solid var(--tv-shell-line);border-radius:8px;background:var(--tv-shell-panel-muted);color:var(--tv-shell-ink);font-size:11px;font-weight:750}
+.tv-replay-page .chart-drawing-properties .chart-drawing-delete{color:#ca5659;border-color:#ca56594b}
+.tv-replay-page .drawing-toolbar .drawing-selected-color{flex:none;min-width:30px;width:30px;min-height:30px;height:30px;padding:2px;border:1px solid #9dd5a995;border-radius:8px;background:#162b21;cursor:pointer}
+.tv-replay-page .drawing-toolbar .drawing-selected-color[style*="none"]{display:none!important}
+.tv-replay-page .tv-replay-chart-wrapper .drawing-toolbar{z-index:25}
+@media(max-width:720px),(orientation:landscape) and (max-height:540px) and (max-width:980px){
+ .tv-replay-page .drawing-toolbar[data-mobile-open="true"] > input.drawing-selected-color:not([style*="none"]){display:block!important;min-width:42px;width:42px;height:42px}
+ .tv-replay-page .chart-text-inline{min-width:200px;max-width:calc(100% - 12px);padding:6px}
+ .tv-replay-page .chart-drawing-properties{width:min(238px,calc(100% - 12px))}
+}
