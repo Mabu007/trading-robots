@@ -5,7 +5,7 @@ import {parseStrategyConfig} from '../src/strategy';
 import {propDAOLiveHistoryBars,propDAOLiveHistoryStats} from './propdao-live-history';
 import {TF_SECONDS} from '../shared/trading';
 import {evaluateAutonomousEquity,type EvaluationEnvelope} from '../shared/propdao-autonomous-guard';
-import {parseUpstreamJson,TemporaryReadError,retryableReadError} from './propdao-upstream-response';
+import {parseUpstreamJson,TemporaryReadError,retryableReadError,requireKnownExposure} from './propdao-upstream-response';
 import {MAX_EXECUTION_EVENTS,type ExecutionEvent,type ExecutionStage} from '../shared/propdao-execution-journal';
 import {PropDAOSqlJournal,reconciliationAlarm,type SqlHandle} from './propdao-sql-journal';
 type Grant={autoPolicy?:EvaluationEnvelope;id:string;uid:string;botId:string;agentId?:string;accountId:string;symbol:string;coin:string;code:string;codeHash:string;riskUsd:number;riskReward?:number;leverage:number;issuedAt:number;expiresAt:number};
@@ -316,8 +316,12 @@ export class PropDAOLiveBot extends DurableObject<any>{
    const config=parseStrategyConfig(grant.code),period=TF_SECONDS[config.executionTimeframe],close=Math.floor((Date.now()/1000-5)/period)*period,marker=`evaluation:${grant.id}`;
    if((await this.ctx.storage.get<number>(marker)||0)>=close)return;
    if(await this.ctx.storage.get('pendingIntent'))throw Error('Unresolved order intent. Reconcile the PropDAO account before resuming.');
-   const account=await this.provider(grant,'snapshot');
-   await this.ctx.storage.put('lastAccount',{time:Date.now(),equity:account.risk?.equity,roomUsd:account.risk?.roomUsd,positions:account.positions?.length??0,orders:account.orders?.length??0,accountStatus:account.account?.status});
+   let account:any;
+   try{account=await this.provider(grant,'snapshot');requireKnownExposure(account)}catch(error){
+    await this.ctx.storage.put('lastAccount',{time:Date.now(),positions:null,orders:null,exposure:'unknown'});
+    throw error;
+   }
+   await this.ctx.storage.put('lastAccount',{time:Date.now(),equity:account.risk?.equity,roomUsd:account.risk?.roomUsd,positions:account.positions.length,orders:account.orders.length,accountStatus:account.account?.status});
    if(account.risk?.breached||!['active','funded'].includes(account.account?.status)){await this.ctx.storage.put('running',false);await this.ctx.storage.put('paused',false);await this.record('Account ineligible or risk breached. Trading stopped.');return}
    if(grant.autoPolicy){
     const day=new Date().toISOString().slice(0,10);
@@ -441,6 +445,11 @@ export class PropDAOLiveBot extends DurableObject<any>{
    // decision and broker execution, never in front of the M1 fill path.
    try{await this.syncBroker(grant)}catch(error){
     await this.ctx.storage.put('sqlTelemetryError',error instanceof Error?error.message:'Broker history unavailable');
+   }
+   // Transfer one bounded batch even while running. The SQL journal remains
+   // authoritative until the archive explicitly acknowledges every row.
+   try{await this.archiveSql(grant)}catch(error){
+    await this.ctx.storage.put('sqlTelemetryError',error instanceof Error?error.message:'Firebase archive unavailable');
    }
    await this.schedule();
   }
